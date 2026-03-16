@@ -112,11 +112,61 @@ const resetPassword = async (req, res) => {
 
 };
 
+const me = async (req, res) => {
+  try {
+    const user = await authService.getMe(req.user.id);
+
+    res.json({
+      message: "Get profile success",
+      user
+    });
+  } catch (err) {
+    res.status(400).json({
+      error: err.message
+    });
+  }
+};
+
+const changePassword = async (req, res) => {
+  try {
+    const { old_password, new_password } = req.body;
+
+    await authService.changePassword(
+      req.user.id,
+      old_password,
+      new_password
+    );
+
+    res.json({
+      message: "Password changed successfully"
+    });
+  } catch (err) {
+    res.status(400).json({
+      error: err.message
+    });
+  }
+};
+
+const logout = async (req, res) => {
+  try {
+    res.json({
+      message: "Logout successful"
+    });
+  } catch (err) {
+    res.status(400).json({
+      error: err.message
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
   verifyRegisterOTP,
   forgotPassword,
   verifyResetOTP,
-  resetPassword
+  resetPassword,
+  me,
+  changePassword,
+  logout
 };

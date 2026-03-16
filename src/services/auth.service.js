@@ -196,6 +196,50 @@ const resetPassword = async (email, newPassword) => {
 
   return true;
 };
+const getMe = async (userId) => {
+  const result = await pool.query(
+    `SELECT id, full_name, email, phone, role, status, email_verified, phone_verified, created_at
+     FROM users
+     WHERE id = $1`,
+    [userId]
+  );
+
+  if (result.rows.length === 0) {
+    throw new Error("User not found");
+  }
+
+  return result.rows[0];
+};
+
+const changePassword = async (userId, oldPassword, newPassword) => {
+  const result = await pool.query(
+    "SELECT * FROM users WHERE id = $1",
+    [userId]
+  );
+
+  if (result.rows.length === 0) {
+    throw new Error("User not found");
+  }
+
+  const user = result.rows[0];
+
+  const isMatch = await comparePassword(oldPassword, user.password_hash);
+
+  if (!isMatch) {
+    throw new Error("Old password is incorrect");
+  }
+
+  const newPasswordHash = await hashPassword(newPassword);
+
+  await pool.query(
+    `UPDATE users
+     SET password_hash = $1, updated_at = NOW()
+     WHERE id = $2`,
+    [newPasswordHash, userId]
+  );
+
+  return true;
+};
 
 module.exports = {
   registerUser,
@@ -203,5 +247,7 @@ module.exports = {
   verifyRegisterOTP,
   forgotPassword,
   verifyResetOTP,
-  resetPassword
+  resetPassword,
+  getMe,
+  changePassword
 };
