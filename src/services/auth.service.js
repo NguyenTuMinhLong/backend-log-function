@@ -90,15 +90,45 @@ const loginUser = async (data) => {
     throw new Error("Email not verified");
   }
 
+  if (user.locked_until && new Date(user.locked_until) > new Date()) {
+    throw new Error("Account is temporarily locked. Please try again later");
+  }
+
   const match = await comparePassword(password, user.password_hash);
 
   if (!match) {
-    throw new Error("Invalid credentials");
+    const newFailedAttempts = user.failed_login_attempts + 1;
+
+    if (newFailedAttempts >= 5) {
+      await pool.query(
+        `UPDATE users
+         SET failed_login_attempts = $1,
+             locked_until = NOW() + INTERVAL '15 minutes',
+             updated_at = NOW()
+         WHERE id = $2`,
+        [newFailedAttempts, user.id]
+      );
+
+      throw new Error("Too many failed login attempts. Account locked for 15 minutes");
+    } else {
+      await pool.query(
+        `UPDATE users
+         SET failed_login_attempts = $1,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [newFailedAttempts, user.id]
+      );
+
+      throw new Error(`Invalid credentials. ${5 - newFailedAttempts} attempt(s) remaining`);
+    }
   }
 
   await pool.query(
     `UPDATE users
-     SET last_login_at = NOW()
+     SET failed_login_attempts = 0,
+         locked_until = NULL,
+         last_login_at = NOW(),
+         updated_at = NOW()
      WHERE id = $1`,
     [user.id]
   );
