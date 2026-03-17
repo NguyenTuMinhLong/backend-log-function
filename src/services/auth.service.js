@@ -217,7 +217,19 @@ const verifyResetOTP = async (email, otp) => {
 
   return true;
 };
-const resetPassword = async (email, newPassword) => {
+const resetPassword = async (email, otp, newPassword, confirmPassword) => {
+
+  if (!email || !otp || !newPassword || !confirmPassword) {
+    throw new Error("All fields are required");
+  }
+
+  if (newPassword.length < 8) {
+    throw new Error("Password must be at least 8 characters");
+  }
+
+  if (newPassword !== confirmPassword) {
+    throw new Error("Password and confirm password do not match");
+  }
 
   const userResult = await pool.query(
     "SELECT * FROM users WHERE LOWER(email)=LOWER($1)",
@@ -230,10 +242,37 @@ const resetPassword = async (email, newPassword) => {
 
   const user = userResult.rows[0];
 
+  const otpResult = await pool.query(
+    `SELECT * FROM user_otps
+     WHERE user_id=$1
+     AND otp_code=$2
+     AND otp_type='reset_password'
+     AND is_used=false
+     AND expires_at > NOW()
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [user.id, otp]
+  );
+
+  if (otpResult.rows.length === 0) {
+    throw new Error("Invalid or expired OTP");
+  }
+
+  const otpRow = otpResult.rows[0];
+
+  await pool.query(
+    `UPDATE user_otps
+     SET is_used=true, used_at=NOW()
+     WHERE id=$1`,
+    [otpRow.id]
+  );
+
   const passwordHash = await hashPassword(newPassword);
 
   await pool.query(
-    `UPDATE users SET password_hash=$1 WHERE id=$2`,
+    `UPDATE users
+     SET password_hash=$1, updated_at=NOW()
+     WHERE id=$2`,
     [passwordHash, user.id]
   );
 
@@ -254,7 +293,20 @@ const getMe = async (userId) => {
   return result.rows[0];
 };
 
-const changePassword = async (userId, oldPassword, newPassword) => {
+const changePassword = async (userId, oldPassword, newPassword, confirmPassword) => {
+
+  if (!oldPassword || !newPassword || !confirmPassword) {
+    throw new Error("All fields are required");
+  }
+
+  if (newPassword.length < 8) {
+    throw new Error("New password must be at least 8 characters");
+  }
+
+  if (newPassword !== confirmPassword) {
+    throw new Error("Password and confirm password do not match");
+  }
+
   const result = await pool.query(
     "SELECT * FROM users WHERE id = $1",
     [userId]
@@ -272,6 +324,10 @@ const changePassword = async (userId, oldPassword, newPassword) => {
     throw new Error("Old password is incorrect");
   }
 
+  if (oldPassword === newPassword) {
+    throw new Error("New password must be different from old password");
+  }
+
   const newPasswordHash = await hashPassword(newPassword);
 
   await pool.query(
@@ -284,6 +340,63 @@ const changePassword = async (userId, oldPassword, newPassword) => {
   return true;
 };
 
+const resendRegisterOTP = async (email) => {
+  if (!email) {
+    throw new Error("Email is required");
+  }
+
+  const userResult = await pool.query(
+    "SELECT * FROM users WHERE LOWER(email) = LOWER($1)",
+    [email]
+  );
+
+  if (userResult.rows.length === 0) {
+    throw new Error("User not found");
+  }
+
+  const user = userResult.rows[0];
+
+  if (user.email_verified) {
+    throw new Error("Email is already verified");
+  }
+
+  const latestOtpResult = await pool.query(
+    `SELECT *
+     FROM user_otps
+     WHERE user_id = $1
+       AND otp_type = 'register_verify'
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [user.id]
+  );
+
+  if (latestOtpResult.rows.length > 0) {
+    const latestOtp = latestOtpResult.rows[0];
+    const createdAt = new Date(latestOtp.created_at).getTime();
+    const now = Date.now();
+    const diffSeconds = Math.floor((now - createdAt) / 1000);
+
+    if (diffSeconds < 60) {
+      throw new Error(`Please wait ${60 - diffSeconds} seconds before requesting a new OTP`);
+    }
+  }
+
+  const otp = generateOTP();
+
+  await pool.query(
+    `INSERT INTO user_otps (user_id, otp_code, otp_type, channel, expires_at)
+     VALUES ($1, $2, 'register_verify', 'email', NOW() + INTERVAL '5 minutes')`,
+    [user.id, otp]
+  );
+
+  await sendOTPEmail(user.email, otp);
+
+  return {
+    email: user.email,
+    otp
+  };
+};
+
 module.exports = {
   registerUser,
   loginUser,
@@ -292,5 +405,6 @@ module.exports = {
   verifyResetOTP,
   resetPassword,
   getMe,
-  changePassword
+  changePassword,
+  resendRegisterOTP
 };

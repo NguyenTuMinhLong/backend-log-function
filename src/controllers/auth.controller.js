@@ -99,25 +99,26 @@ const verifyResetOTP = async (req, res) => {
 
 };
 const resetPassword = async (req, res) => {
-
   try {
 
-    const { email, new_password } = req.body;
+    const { email, otp, new_password, confirm_password } = req.body;
 
-    await authService.resetPassword(email, new_password);
+    await authService.resetPassword(
+      email,
+      otp,
+      new_password,
+      confirm_password
+    );
 
     res.json({
       message: "Password reset successful"
     });
 
   } catch (err) {
-
     res.status(400).json({
       error: err.message
     });
-
   }
-
 };
 
 const me = async (req, res) => {
@@ -137,17 +138,20 @@ const me = async (req, res) => {
 
 const changePassword = async (req, res) => {
   try {
-    const { old_password, new_password } = req.body;
+
+    const { old_password, new_password, confirm_password } = req.body;
 
     await authService.changePassword(
       req.user.id,
       old_password,
-      new_password
+      new_password,
+      confirm_password
     );
 
     res.json({
       message: "Password changed successfully"
     });
+
   } catch (err) {
     res.status(400).json({
       error: err.message
@@ -166,6 +170,23 @@ const logout = async (req, res) => {
     });
   }
 };
+const resendOTP = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const result = await authService.resendRegisterOTP(email);
+
+    res.json({
+      message: "OTP resent successfully",
+      email: result.email,
+      otp_test: result.otp
+    });
+  } catch (err) {
+    res.status(400).json({
+      error: err.message
+    });
+  }
+};
 
 module.exports = {
   register,
@@ -176,5 +197,6 @@ module.exports = {
   resetPassword,
   me,
   changePassword,
-  logout
+  logout,
+  resendOTP
 };
