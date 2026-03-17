@@ -5,8 +5,8 @@ const register = async (req, res) => {
   try {
     const result = await authService.registerUser(req.body);
 
-    res.json({
-      message: "Register success. Verify OTP.",
+    res.status(201).json({
+      message: "Register successful. Please verify your email with OTP.",
       user: result.user,
       otp_test: result.otp
     });
@@ -20,16 +20,24 @@ const register = async (req, res) => {
 const login = async (req, res) => {
   try {
     const user = await authService.loginUser(req.body);
-
     const token = generateToken(user);
 
     res.json({
       message: "Login success",
       token,
+      user: {
+        id: user.id,
+        full_name: user.full_name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        status: user.status,
+        email_verified: user.email_verified
+      }
     });
   } catch (err) {
     res.status(400).json({
-      error: err.message,
+      error: err.message
     });
   }
 };

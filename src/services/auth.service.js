@@ -4,15 +4,38 @@ const pool = require("../config/db");
 const { hashPassword, comparePassword } = require("../utils/password");
 
 const registerUser = async (data) => {
-  const { full_name, email, phone, password } = data;
+  const { full_name, email, phone, password, confirm_password } = data;
 
-  const existing = await pool.query(
+  if (!full_name || !email || !password || !confirm_password) {
+    throw new Error("Full name, email, password and confirm password are required");
+  }
+
+  if (password.length < 8) {
+    throw new Error("Password must be at least 8 characters");
+  }
+
+  if (password !== confirm_password) {
+    throw new Error("Password and confirm password do not match");
+  }
+
+  const existingEmail = await pool.query(
     "SELECT id FROM users WHERE LOWER(email)=LOWER($1)",
     [email]
   );
 
-  if (existing.rows.length > 0) {
+  if (existingEmail.rows.length > 0) {
     throw new Error("Email already exists");
+  }
+
+  if (phone) {
+    const existingPhone = await pool.query(
+      "SELECT id FROM users WHERE phone = $1",
+      [phone]
+    );
+
+    if (existingPhone.rows.length > 0) {
+      throw new Error("Phone already exists");
+    }
   }
 
   const passwordHash = await hashPassword(password);
@@ -20,8 +43,8 @@ const registerUser = async (data) => {
   const userResult = await pool.query(
     `INSERT INTO users (full_name, email, phone, password_hash)
      VALUES ($1, $2, $3, $4)
-     RETURNING id, email`,
-    [full_name, email, phone, passwordHash]
+     RETURNING id, full_name, email, phone, email_verified`,
+    [full_name, email, phone || null, passwordHash]
   );
 
   const user = userResult.rows[0];
@@ -44,6 +67,10 @@ const registerUser = async (data) => {
 const loginUser = async (data) => {
   const { email, password } = data;
 
+  if (!email || !password) {
+    throw new Error("Email and password are required");
+  }
+
   const result = await pool.query(
     "SELECT * FROM users WHERE LOWER(email)=LOWER($1)",
     [email]
@@ -54,11 +81,27 @@ const loginUser = async (data) => {
   }
 
   const user = result.rows[0];
+
+  if (user.status !== "active") {
+    throw new Error("Account is inactive or blocked");
+  }
+
+  if (!user.email_verified) {
+    throw new Error("Email not verified");
+  }
+
   const match = await comparePassword(password, user.password_hash);
 
   if (!match) {
     throw new Error("Invalid credentials");
   }
+
+  await pool.query(
+    `UPDATE users
+     SET last_login_at = NOW()
+     WHERE id = $1`,
+    [user.id]
+  );
 
   return user;
 };
