@@ -41,3 +41,63 @@ booking.controller.js
 # Booking Routes
 booking.routes.js
 # Test Postman
+**Đặt vé (một chiều, guest):**
+POST http://localhost:5000/api/bookings
+Content-Type: application/json
+
+{
+  "outbound_flight_id": 1,
+  "outbound_seat_class": "economy",
+  "trip_type": "one_way",
+  "adults": 1,
+  "children": 0,
+  "infants": 0,
+  "contact_name": "Nguyễn Văn A",
+  "contact_email": "test@gmail.com",
+  "contact_phone": "0901234567",
+  "passengers": [
+    {
+      "flight_type": "outbound",
+      "passenger_type": "adult",
+      "full_name": "Nguyễn Văn A",
+      "gender": "male",
+      "date_of_birth": "1995-05-15"
+    }
+  ]
+}
+
+
+**Đặt vé (hai chiều, guest):**
+POST http://localhost:5000/api/bookings
+Content-Type: application/json
+{
+  "outbound_flight_id": 1,
+  "outbound_seat_class": "economy",
+  "return_flight_id": 5,
+  "return_seat_class": "economy",
+  "trip_type": "round_trip",
+  "adults": 1,
+  "children": 0,
+  "infants": 0,
+  "contact_name": "Nguyễn Văn A",
+  "contact_email": "test@gmail.com",
+  "contact_phone": "0901234567",
+  "passengers": [
+    {
+      "flight_type": "outbound",
+      "passenger_type": "adult",
+      "full_name": "Nguyễn Văn A",
+      "gender": "male",
+      "date_of_birth": "1995-05-15"
+    },
+    {
+      "flight_type": "return",
+      "passenger_type": "adult",
+      "full_name": "Nguyễn Văn A",
+      "gender": "male",
+      "date_of_birth": "1995-05-15"
+    }
+  ]
+}
+
+SELECT id, flight_number, departure_time FROM flights;
