@@ -1,8 +1,9 @@
 const flightService = require("../services/flight.service");
 
 /**
+ * NOTE:
  * GET /api/flights/search
- * Query params:
+ * Query:
  *   departure_code, arrival_code, departure_date, passengers, seat_class  (bắt buộc)
  *   return_date   (optional - khứ hồi)
  *   sort_by       (optional - price_asc | price_desc | duration_asc | departure_asc)
