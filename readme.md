@@ -3,8 +3,6 @@ WARNING: **USER**
 # Migration SQL (user + user_otps + refresh_tokens)
 001_create_user_tables.sql
 
-
-
 WARNING: **Search Flight & View Flight Detail**
 
 # Migration SQL (tạo bảng cho flight + seed vài data mẫu)
