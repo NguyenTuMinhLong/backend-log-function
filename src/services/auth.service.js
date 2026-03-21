@@ -58,7 +58,7 @@ const registerUser = async (data) => {
 
   // 🔥 FIX: không cho mail làm crash API
   try {
-    await sendOTPEmail(user.email, otp);
+    sendOTPEmail(user.email, otp);
   } catch (err) {
     console.log("❌ MAIL FAILED BUT CONTINUE:", err.message);
   }
@@ -208,7 +208,7 @@ const forgotPassword = async (email) => {
   );
 
   try {
-    await sendOTPEmail(user.email, otp);
+    sendOTPEmail(user.email, otp);
   } catch (err) {
     console.log("❌ MAIL FAILED:", err.message);
   }
@@ -405,7 +405,7 @@ const resendRegisterOTP = async (email) => {
   );
 
   try {
-    await sendOTPEmail(user.email, otp);
+    sendOTPEmail(user.email, otp);
   } catch (err) {
     console.log("❌ MAIL FAILED:", err.message);
   }
