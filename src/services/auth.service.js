@@ -3,67 +3,6 @@ const { generateOTP } = require("../utils/otp");
 const pool = require("../config/db");
 const { hashPassword, comparePassword } = require("../utils/password");
 
-// const registerUser = async (data) => {
-//   const { full_name, email, phone, password, confirm_password } = data;
-
-//   if (!full_name || !email || !password || !confirm_password) {
-//     throw new Error("Full name, email, password and confirm password are required");
-//   }
-
-//   if (password.length < 8) {
-//     throw new Error("Password must be at least 8 characters");
-//   }
-
-//   if (password !== confirm_password) {
-//     throw new Error("Password and confirm password do not match");
-//   }
-
-//   const existingEmail = await pool.query(
-//     "SELECT id FROM users WHERE LOWER(email)=LOWER($1)",
-//     [email]
-//   );
-
-//   if (existingEmail.rows.length > 0) {
-//     throw new Error("Email already exists");
-//   }
-
-//   if (phone) {
-//     const existingPhone = await pool.query(
-//       "SELECT id FROM users WHERE phone = $1",
-//       [phone]
-//     );
-
-//     if (existingPhone.rows.length > 0) {
-//       throw new Error("Phone already exists");
-//     }
-//   }
-
-//   const passwordHash = await hashPassword(password);
-
-//   const userResult = await pool.query(
-//     `INSERT INTO users (full_name, email, phone, password_hash)
-//      VALUES ($1, $2, $3, $4)
-//      RETURNING id, full_name, email, phone, email_verified`,
-//     [full_name, email, phone || null, passwordHash]
-//   );
-
-//   const user = userResult.rows[0];
-//   const otp = generateOTP();
-
-//   await pool.query(
-//     `INSERT INTO user_otps (user_id, otp_code, otp_type, channel, expires_at)
-//      VALUES ($1, $2, 'register_verify', 'email', NOW() + INTERVAL '5 minutes')`,
-//     [user.id, otp]
-//   );
-
-//   await sendOTPEmail(user.email, otp);
-
-//   return {
-//     user,
-//     otp
-//   };
-// };
-
 const registerUser = async (data) => {
   const { full_name, email, phone, password, confirm_password } = data;
 
@@ -117,12 +56,16 @@ const registerUser = async (data) => {
     [user.id, otp]
   );
 
-  // 🔥 GỬI MAIL (đã an toàn vì mailer có try-catch)
-  await sendOTPEmail(user.email, otp);
+  // 🔥 FIX: không cho mail làm crash API
+  try {
+    await sendOTPEmail(user.email, otp);
+  } catch (err) {
+    console.log("❌ MAIL FAILED BUT CONTINUE:", err.message);
+  }
 
   return {
     user,
-    otp // dùng cho dev test
+    otp,
   };
 };
 
@@ -167,7 +110,7 @@ const loginUser = async (data) => {
          SET failed_login_attempts = $1,
              locked_until = NOW() + INTERVAL '15 minutes',
              updated_at = NOW()
-         WHERE id = $2`,
+WHERE id = $2`,
         [newFailedAttempts, user.id]
       );
 
@@ -246,7 +189,6 @@ const verifyRegisterOTP = async (email, otp) => {
 };
 
 const forgotPassword = async (email) => {
-
   const userResult = await pool.query(
     "SELECT * FROM users WHERE LOWER(email)=LOWER($1)",
     [email]
@@ -257,7 +199,6 @@ const forgotPassword = async (email) => {
   }
 
   const user = userResult.rows[0];
-
   const otp = generateOTP();
 
   await pool.query(
@@ -266,13 +207,16 @@ const forgotPassword = async (email) => {
     [user.id, otp]
   );
 
-  await sendOTPEmail(user.email, otp);
+  try {
+    await sendOTPEmail(user.email, otp);
+  } catch (err) {
+    console.log("❌ MAIL FAILED:", err.message);
+  }
 
   return { otp };
 };
 
 const verifyResetOTP = async (email, otp) => {
-
   const userResult = await pool.query(
     "SELECT * FROM users WHERE LOWER(email)=LOWER($1)",
     [email]
@@ -303,14 +247,14 @@ const verifyResetOTP = async (email, otp) => {
   const otpRow = otpResult.rows[0];
 
   await pool.query(
-    `UPDATE user_otps SET is_used=true, used_at=NOW() WHERE id=$1`,
+`UPDATE user_otps SET is_used=true, used_at=NOW() WHERE id=$1`,
     [otpRow.id]
   );
 
   return true;
 };
-const resetPassword = async (email, otp, newPassword, confirmPassword) => {
 
+const resetPassword = async (email, otp, newPassword, confirmPassword) => {
   if (!email || !otp || !newPassword || !confirmPassword) {
     throw new Error("All fields are required");
   }
@@ -370,6 +314,7 @@ const resetPassword = async (email, otp, newPassword, confirmPassword) => {
 
   return true;
 };
+
 const getMe = async (userId) => {
   const result = await pool.query(
     `SELECT id, full_name, email, phone, role, status, email_verified, phone_verified, created_at
@@ -386,7 +331,6 @@ const getMe = async (userId) => {
 };
 
 const changePassword = async (userId, oldPassword, newPassword, confirmPassword) => {
-
   if (!oldPassword || !newPassword || !confirmPassword) {
     throw new Error("All fields are required");
   }
@@ -435,7 +379,7 @@ const changePassword = async (userId, oldPassword, newPassword, confirmPassword)
 const resendRegisterOTP = async (email) => {
   if (!email) {
     throw new Error("Email is required");
-  }
+}
 
   const userResult = await pool.query(
     "SELECT * FROM users WHERE LOWER(email) = LOWER($1)",
@@ -452,27 +396,6 @@ const resendRegisterOTP = async (email) => {
     throw new Error("Email is already verified");
   }
 
-  const latestOtpResult = await pool.query(
-    `SELECT *
-     FROM user_otps
-     WHERE user_id = $1
-       AND otp_type = 'register_verify'
-     ORDER BY created_at DESC
-     LIMIT 1`,
-    [user.id]
-  );
-
-  if (latestOtpResult.rows.length > 0) {
-    const latestOtp = latestOtpResult.rows[0];
-    const createdAt = new Date(latestOtp.created_at).getTime();
-    const now = Date.now();
-    const diffSeconds = Math.floor((now - createdAt) / 1000);
-
-    if (diffSeconds < 60) {
-      throw new Error(`Please wait ${60 - diffSeconds} seconds before requesting a new OTP`);
-    }
-  }
-
   const otp = generateOTP();
 
   await pool.query(
@@ -481,11 +404,15 @@ const resendRegisterOTP = async (email) => {
     [user.id, otp]
   );
 
-  await sendOTPEmail(user.email, otp);
+  try {
+    await sendOTPEmail(user.email, otp);
+  } catch (err) {
+    console.log("❌ MAIL FAILED:", err.message);
+  }
 
   return {
     email: user.email,
-    otp
+    otp,
   };
 };
 
@@ -498,5 +425,5 @@ module.exports = {
   resetPassword,
   getMe,
   changePassword,
-  resendRegisterOTP
+  resendRegisterOTP,
 };
