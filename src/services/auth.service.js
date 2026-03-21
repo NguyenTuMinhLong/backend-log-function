@@ -3,6 +3,67 @@ const { generateOTP } = require("../utils/otp");
 const pool = require("../config/db");
 const { hashPassword, comparePassword } = require("../utils/password");
 
+// const registerUser = async (data) => {
+//   const { full_name, email, phone, password, confirm_password } = data;
+
+//   if (!full_name || !email || !password || !confirm_password) {
+//     throw new Error("Full name, email, password and confirm password are required");
+//   }
+
+//   if (password.length < 8) {
+//     throw new Error("Password must be at least 8 characters");
+//   }
+
+//   if (password !== confirm_password) {
+//     throw new Error("Password and confirm password do not match");
+//   }
+
+//   const existingEmail = await pool.query(
+//     "SELECT id FROM users WHERE LOWER(email)=LOWER($1)",
+//     [email]
+//   );
+
+//   if (existingEmail.rows.length > 0) {
+//     throw new Error("Email already exists");
+//   }
+
+//   if (phone) {
+//     const existingPhone = await pool.query(
+//       "SELECT id FROM users WHERE phone = $1",
+//       [phone]
+//     );
+
+//     if (existingPhone.rows.length > 0) {
+//       throw new Error("Phone already exists");
+//     }
+//   }
+
+//   const passwordHash = await hashPassword(password);
+
+//   const userResult = await pool.query(
+//     `INSERT INTO users (full_name, email, phone, password_hash)
+//      VALUES ($1, $2, $3, $4)
+//      RETURNING id, full_name, email, phone, email_verified`,
+//     [full_name, email, phone || null, passwordHash]
+//   );
+
+//   const user = userResult.rows[0];
+//   const otp = generateOTP();
+
+//   await pool.query(
+//     `INSERT INTO user_otps (user_id, otp_code, otp_type, channel, expires_at)
+//      VALUES ($1, $2, 'register_verify', 'email', NOW() + INTERVAL '5 minutes')`,
+//     [user.id, otp]
+//   );
+
+//   await sendOTPEmail(user.email, otp);
+
+//   return {
+//     user,
+//     otp
+//   };
+// };
+
 const registerUser = async (data) => {
   const { full_name, email, phone, password, confirm_password } = data;
 
@@ -56,11 +117,12 @@ const registerUser = async (data) => {
     [user.id, otp]
   );
 
+  // 🔥 GỬI MAIL (đã an toàn vì mailer có try-catch)
   await sendOTPEmail(user.email, otp);
 
   return {
     user,
-    otp
+    otp // dùng cho dev test
   };
 };
 
