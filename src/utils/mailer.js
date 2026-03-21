@@ -43,25 +43,27 @@ const { Resend } = require("resend");
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+// ===== SEND OTP EMAIL =====
 const sendOTPEmail = async (email, otp) => {
   try {
     const response = await resend.emails.send({
-      from: "nguyentuminhlong@gmail.com", // ⚠️ dùng tạm
+      from: "Flight Booking <onboarding@resend.dev>", // ⚠️ dùng domain mặc định của Resend
       to: email,
       subject: "Your OTP Code",
       html: `
-        <div style="text-align:center;font-family:sans-serif">
+        <div style="font-family: Arial; text-align: center;">
           <h2>✈️ Flight Booking</h2>
-          <p>Your OTP is:</p>
-          <h1>${otp}</h1>
-          <p>Expires in 5 minutes</p>
+          <p>Your verification code is:</p>
+          <h1 style="color: #007bff;">${otp}</h1>
+          <p>This code expires in 5 minutes.</p>
         </div>
       `,
     });
 
     console.log("✅ RESEND SUCCESS:", response);
   } catch (err) {
-    console.log("❌ RESEND ERROR:", err);
+    console.error("❌ RESEND ERROR:", err);
+    throw err; // 🔥 để controller bắt lỗi
   }
 };
 
