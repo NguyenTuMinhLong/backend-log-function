@@ -9,11 +9,7 @@ const sendOTPEmail = async (to, otp) => {
       to: to,
       subject: "Your OTP Code",
       html: `
-  <div style="
-    background:#f5f7fb;
-    padding:30px 0;
-    font-family:Arial, sans-serif;
-  ">
+  
     <div style="
       max-width:420px;
       margin:auto;
@@ -24,7 +20,7 @@ const sendOTPEmail = async (to, otp) => {
       box-shadow:0 4px 12px rgba(0,0,0,0.08);
       text-align:center;
     ">
-      <img src="https://i.postimg.cc/gJfMDp49/Logo-Nav.jpg" width="70" style="margin-bottom:10px;" />
+      <img src="https://i.postimg.cc/fTjNJqTT/Vivudee.png" width="100" style="margin-bottom:10px;" />
 
       
       <p style="
@@ -69,7 +65,7 @@ const sendOTPEmail = async (to, otp) => {
       </p>
 
     </div>
-  </div>
+ 
 `,
     });
 
