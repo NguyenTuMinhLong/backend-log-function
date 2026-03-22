@@ -9,8 +9,35 @@ const sendOTPEmail = async (to, otp) => {
       to: to,
       subject: "Your OTP Code",
       html: `
-        <h2>Vivudee OTP</h2>
-        <p>Your OTP is: <strong>${otp}</strong></p>
+        <div style="
+          max-width:400px;
+          margin:auto;
+          padding:20px;
+          font-family:sans-serif;
+          text-align:center;
+          border:1px solid #eee;
+          border-radius:12px;
+        ">
+          <h2 style="color:#1a73e8;">✈️ Vivudee</h2>
+          
+          <p style="color:#555;">
+            Your verification code is:
+          </p>
+
+          <div style="
+            font-size:32px;
+            font-weight:bold;
+            letter-spacing:4px;
+            color:#111;
+            margin:20px 0;
+          ">
+            ${otp}
+          </div>
+
+          <p style="color:#999; font-size:12px;">
+            This code will expire in 5 minutes.
+          </p>
+        </div>
       `,
     });
 
