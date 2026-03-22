@@ -2,10 +2,10 @@ const { Resend } = require("resend");
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-export const sendOTPEmail = async (to, otp) => {
+const sendOTPEmail = async (to, otp) => {
   try {
     const { data, error } = await resend.emails.send({
-      from: process.env.EMAIL_FROM, // 🔥 dùng env
+      from: process.env.EMAIL_FROM,
       to: to,
       subject: "Your OTP Code",
       html: `
@@ -26,3 +26,6 @@ export const sendOTPEmail = async (to, otp) => {
     return false;
   }
 };
+
+// 🔥 QUAN TRỌNG
+module.exports = { sendOTPEmail };
