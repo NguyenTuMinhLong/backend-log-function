@@ -1,27 +1,28 @@
-const { Resend } = require("resend");
+import { Resend } from "resend";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const sendOTPEmail = async (email, otp) => {
+export const sendOTPEmail = async (to, otp) => {
   try {
-    const response = await resend.emails.send({
-      from: "onboarding@resend.dev", // ⚠️ dùng tạm
-      to: email,
+    const { data, error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM, // 🔥 dùng env
+      to: to,
       subject: "Your OTP Code",
       html: `
-        <div style="text-align:center;font-family:sans-serif">
-          <h2>✈️ Flight Booking</h2>
-          <p>Your OTP is:</p>
-          <h1>${otp}</h1>
-          <p>Expires in 5 minutes</p>
-        </div>
+        <h2>Vivudee OTP</h2>
+        <p>Your OTP is: <strong>${otp}</strong></p>
       `,
     });
 
-    console.log("✅ RESEND SUCCESS:", response);
+    if (error) {
+      console.error("❌ Email error:", error);
+      return false;
+    }
+
+    console.log("✅ Email sent:", data);
+    return true;
   } catch (err) {
-    console.log("❌ RESEND ERROR:", err);
+    console.error("❌ Exception:", err);
+    return false;
   }
 };
-
-module.exports = { sendOTPEmail };
