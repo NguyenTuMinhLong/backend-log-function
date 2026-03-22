@@ -86,7 +86,7 @@ INSERT INTO airports (code, name, city) VALUES
   ('BMV', 'Sân bay Buôn Ma Thuột',         'Buôn Ma Thuột')
 ON CONFLICT (code) DO NOTHING;
 
--- Chuyến bay mẫu (ngày mai)
+-- Test chuyến bay mẫu (ngày mai)
 DO $$
 DECLARE
   v_vn   INT; v_vj INT; v_qh INT;
