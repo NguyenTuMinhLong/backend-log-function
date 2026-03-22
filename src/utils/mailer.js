@@ -20,7 +20,7 @@ const sendOTPEmail = async (to, otp) => {
       box-shadow:0 4px 12px rgba(0,0,0,0.08);
       text-align:center;
     ">
-      <img src="https://i.postimg.cc/fTjNJqTT/Vivudee.png" width="100" style="margin-bottom:10px;" />
+      <img src="https://iili.io/qvDF3Kl.png" width="100" style="margin-bottom:10px;" />
 
       
       <p style="
