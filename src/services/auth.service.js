@@ -56,11 +56,16 @@ const registerUser = async (data) => {
     [user.id, otp]
   );
 
-  await sendOTPEmail(user.email, otp);
+  // 🔥 FIX: không cho mail làm crash API
+  try {
+    sendOTPEmail(user.email, otp);
+  } catch (err) {
+    console.log("❌ MAIL FAILED BUT CONTINUE:", err.message);
+  }
 
   return {
     user,
-    otp
+    otp,
   };
 };
 
@@ -105,7 +110,7 @@ const loginUser = async (data) => {
          SET failed_login_attempts = $1,
              locked_until = NOW() + INTERVAL '15 minutes',
              updated_at = NOW()
-         WHERE id = $2`,
+WHERE id = $2`,
         [newFailedAttempts, user.id]
       );
 
@@ -184,7 +189,6 @@ const verifyRegisterOTP = async (email, otp) => {
 };
 
 const forgotPassword = async (email) => {
-
   const userResult = await pool.query(
     "SELECT * FROM users WHERE LOWER(email)=LOWER($1)",
     [email]
@@ -195,7 +199,6 @@ const forgotPassword = async (email) => {
   }
 
   const user = userResult.rows[0];
-
   const otp = generateOTP();
 
   await pool.query(
@@ -204,13 +207,16 @@ const forgotPassword = async (email) => {
     [user.id, otp]
   );
 
-  await sendOTPEmail(user.email, otp);
+  try {
+    sendOTPEmail(user.email, otp);
+  } catch (err) {
+    console.log("❌ MAIL FAILED:", err.message);
+  }
 
   return { otp };
 };
 
 const verifyResetOTP = async (email, otp) => {
-
   const userResult = await pool.query(
     "SELECT * FROM users WHERE LOWER(email)=LOWER($1)",
     [email]
@@ -241,14 +247,14 @@ const verifyResetOTP = async (email, otp) => {
   const otpRow = otpResult.rows[0];
 
   await pool.query(
-    `UPDATE user_otps SET is_used=true, used_at=NOW() WHERE id=$1`,
+`UPDATE user_otps SET is_used=true, used_at=NOW() WHERE id=$1`,
     [otpRow.id]
   );
 
   return true;
 };
-const resetPassword = async (email, otp, newPassword, confirmPassword) => {
 
+const resetPassword = async (email, otp, newPassword, confirmPassword) => {
   if (!email || !otp || !newPassword || !confirmPassword) {
     throw new Error("All fields are required");
   }
@@ -308,6 +314,7 @@ const resetPassword = async (email, otp, newPassword, confirmPassword) => {
 
   return true;
 };
+
 const getMe = async (userId) => {
   const result = await pool.query(
     `SELECT id, full_name, email, phone, role, status, email_verified, phone_verified, created_at
@@ -324,7 +331,6 @@ const getMe = async (userId) => {
 };
 
 const changePassword = async (userId, oldPassword, newPassword, confirmPassword) => {
-
   if (!oldPassword || !newPassword || !confirmPassword) {
     throw new Error("All fields are required");
   }
@@ -373,7 +379,7 @@ const changePassword = async (userId, oldPassword, newPassword, confirmPassword)
 const resendRegisterOTP = async (email) => {
   if (!email) {
     throw new Error("Email is required");
-  }
+}
 
   const userResult = await pool.query(
     "SELECT * FROM users WHERE LOWER(email) = LOWER($1)",
@@ -390,27 +396,6 @@ const resendRegisterOTP = async (email) => {
     throw new Error("Email is already verified");
   }
 
-  const latestOtpResult = await pool.query(
-    `SELECT *
-     FROM user_otps
-     WHERE user_id = $1
-       AND otp_type = 'register_verify'
-     ORDER BY created_at DESC
-     LIMIT 1`,
-    [user.id]
-  );
-
-  if (latestOtpResult.rows.length > 0) {
-    const latestOtp = latestOtpResult.rows[0];
-    const createdAt = new Date(latestOtp.created_at).getTime();
-    const now = Date.now();
-    const diffSeconds = Math.floor((now - createdAt) / 1000);
-
-    if (diffSeconds < 60) {
-      throw new Error(`Please wait ${60 - diffSeconds} seconds before requesting a new OTP`);
-    }
-  }
-
   const otp = generateOTP();
 
   await pool.query(
@@ -419,11 +404,15 @@ const resendRegisterOTP = async (email) => {
     [user.id, otp]
   );
 
-  await sendOTPEmail(user.email, otp);
+  try {
+    sendOTPEmail(user.email, otp);
+  } catch (err) {
+    console.log("❌ MAIL FAILED:", err.message);
+  }
 
   return {
     email: user.email,
-    otp
+    otp,
   };
 };
 
@@ -436,5 +425,5 @@ module.exports = {
   resetPassword,
   getMe,
   changePassword,
-  resendRegisterOTP
+  resendRegisterOTP,
 };

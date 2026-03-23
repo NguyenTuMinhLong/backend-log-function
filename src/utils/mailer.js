@@ -1,28 +1,86 @@
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+const sendOTPEmail = async (to, otp) => {
+  try {
+    const { data, error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM,
+      to: to,
+      subject: "Your OTP Code",
+      html: `
+  
+    <div style="
+      max-width:420px;
+      margin:auto;
+      background:#ffffff;
+      padding:24px;
+      border-radius:12px;
+      border:1px solid #eaeaea;
+      box-shadow:0 4px 12px rgba(0,0,0,0.08);
+      text-align:center;
+    ">
+      <img src="https://iili.io/qvDF3Kl.png" width="100" style="margin-bottom:10px;" />
+
+      
+      <p style="
+        color:#555;
+        font-size:14px;
+      ">
+        Your verification code is:
+      </p>
+
+      
+      <div style="
+        font-size:34px;
+        font-weight:bold;
+        letter-spacing:8px;
+        margin:20px 0;
+        color:#111;
+      ">
+        ${otp}
+      </div>
+
+      
+      <p style="
+        color:#888;
+        font-size:13px;
+      ">
+        This code will expire in 5 minutes.
+      </p>
+
+      <!-- Divider -->
+      <div style="
+        height:1px;
+        background:#eee;
+        margin:20px 0;
+      "></div>
+
+      <!-- Footer -->
+      <p style="
+        font-size:12px;
+        color:#aaa;
+      ">
+        If you didn’t request this, please ignore this email.
+      </p>
+
+    </div>
+ 
+`,
+    });
+
+    if (error) {
+      console.error("❌ Email error:", error);
+      return false;
+    }
+
+    console.log("✅ Email sent:", data);
+    return true;
+  } catch (err) {
+    console.error("❌ Exception:", err);
+    return false;
   }
-});
-
-const sendOTPEmail = async (email, otp) => {
-
-  const mailOptions = {
-    from: `"Flight Booking" <${process.env.EMAIL_USER}>`,
-    to: email,
-    subject: "Your OTP Code",
-    html: `
-      <h2>Flight Booking OTP</h2>
-      <p>Your verification code is:</p>
-      <h1>${otp}</h1>
-      <p>This code expires in 5 minutes.</p>
-    `
-  };
-
-  await transporter.sendMail(mailOptions);
 };
 
+// 🔥 QUAN TRỌNG
 module.exports = { sendOTPEmail };
