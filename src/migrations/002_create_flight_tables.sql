@@ -1,6 +1,4 @@
--- =============================================
 -- MIGRATION 002: Create Flight Search Tables
--- =============================================
 
 -- 1. Bảng hãng hàng không
 CREATE TABLE IF NOT EXISTS airlines (
@@ -68,126 +66,212 @@ CREATE TABLE IF NOT EXISTS flight_seats (
 
 -- Hãng hàng không
 INSERT INTO airlines (code, name) VALUES
+  -- 🇻🇳 Việt Nam
   ('VN', 'Vietnam Airlines'),
   ('VJ', 'VietJet Air'),
   ('QH', 'Bamboo Airways'),
-  ('BL', 'Pacific Airlines')
+  ('BL', 'Pacific Airlines'),
+ 
+  -- 🇹🇭 Thái Lan
+  ('TG', 'Thai Airways'),
+  ('FD', 'Thai AirAsia'),
+  ('WE', 'Thai Smile Airways'),
+  ('SL', 'Lion Air Thailand'),
+ 
+  -- 🇸🇬 Singapore
+  ('SQ', 'Singapore Airlines'),
+  ('TR', 'Scoot Airlines'),
+  ('MI', 'SilkAir'),
+ 
+  -- 🇲🇾 Malaysia
+  ('MH', 'Malaysia Airlines'),
+  ('AK', 'AirAsia'),
+  ('D7', 'AirAsia X'),
+ 
+  -- 🇮🇩 Indonesia
+  ('GA', 'Garuda Indonesia'),
+  ('JT', 'Lion Air'),
+  ('QZ', 'Indonesia AirAsia'),
+ 
+  -- 🇨🇳 Trung Quốc
+  ('CA', 'Air China'),
+  ('MU', 'China Eastern Airlines'),
+  ('CZ', 'China Southern Airlines'),
+  ('HU', 'Hainan Airlines'),
+ 
+  -- 🇯🇵 Nhật Bản
+  ('JL', 'Japan Airlines'),
+  ('NH', 'All Nippon Airways'),
+  ('MM', 'Peach Aviation'),
+ 
+  -- 🇰🇷 Hàn Quốc
+  ('KE', 'Korean Air'),
+  ('OZ', 'Asiana Airlines'),
+  ('7C', 'Jeju Air'),
+ 
+  -- 🇺🇸 Mỹ
+  ('AA', 'American Airlines'),
+  ('DL', 'Delta Air Lines'),
+  ('UA', 'United Airlines'),
+  ('WN', 'Southwest Airlines'),
+  ('B6', 'JetBlue Airways'),
+ 
+  -- 🇬🇧 Anh
+  ('BA', 'British Airways'),
+  ('VS', 'Virgin Atlantic'),
+  ('U2', 'easyJet'),
+ 
+  -- 🇫🇷 Pháp
+  ('AF', 'Air France'),
+ 
+  -- 🇩🇪 Đức
+  ('LH', 'Lufthansa'),
+  ('EW', 'Eurowings'),
+ 
+  -- 🇮🇹 Ý
+  ('AZ', 'ITA Airways'),
+ 
+  -- 🇪🇸 Tây Ban Nha
+  ('IB', 'Iberia Airlines'),
+  ('VY', 'Vueling Airlines'),
+ 
+  -- 🇳🇱 Hà Lan
+  ('KL', 'KLM Royal Dutch Airlines'),
+ 
+  -- 🇦🇪 UAE
+  ('EK', 'Emirates'),
+  ('EY', 'Etihad Airways'),
+  ('FZ', 'flydubai'),
+ 
+  -- 🇶🇦 Qatar
+  ('QR', 'Qatar Airways'),
+ 
+  -- 🇦🇺 Úc
+  ('QF', 'Qantas Airways'),
+  ('JQ', 'Jetstar Airways'),
+  ('VA', 'Virgin Australia'),
+ 
+  -- 🇮🇳 Ấn Độ
+  ('AI', 'Air India'),
+  ('6E', 'IndiGo'),
+ 
+  -- 🇹🇷 Thổ Nhĩ Kỳ
+  ('TK', 'Turkish Airlines')
 ON CONFLICT (code) DO NOTHING;
 
 -- Sân bay
-INSERT INTO airports (code, name, city) VALUES
-  ('HAN', 'Sân bay Quốc tế Nội Bài',       'Hà Nội'),
-  ('SGN', 'Sân bay Quốc tế Tân Sơn Nhất',  'Hồ Chí Minh'),
-  ('DAD', 'Sân bay Quốc tế Đà Nẵng',       'Đà Nẵng'),
-  ('CXR', 'Sân bay Quốc tế Cam Ranh',      'Nha Trang'),
-  ('PQC', 'Sân bay Quốc tế Phú Quốc',      'Phú Quốc'),
-  ('HUI', 'Sân bay Quốc tế Phú Bài',       'Huế'),
-  ('VII', 'Sân bay Vinh',                  'Vinh'),
-  ('BMV', 'Sân bay Buôn Ma Thuột',         'Buôn Ma Thuột')
+INSERT INTO airports (code, name, city, country, timezone) VALUES
+  -- 🇻🇳 Việt Nam
+  ('HAN', 'Sân bay Quốc tế Nội Bài',              'Hà Nội',         'Vietnam',        'Asia/Bangkok'),
+  ('SGN', 'Sân bay Quốc tế Tân Sơn Nhất',         'Hồ Chí Minh',    'Vietnam',        'Asia/Bangkok'),
+  ('DAD', 'Sân bay Quốc tế Đà Nẵng',              'Đà Nẵng',        'Vietnam',        'Asia/Bangkok'),
+  ('CXR', 'Sân bay Quốc tế Cam Ranh',             'Nha Trang',      'Vietnam',        'Asia/Bangkok'),
+  ('PQC', 'Sân bay Quốc tế Phú Quốc',             'Phú Quốc',       'Vietnam',        'Asia/Bangkok'),
+  ('HUI', 'Sân bay Quốc tế Phú Bài',              'Huế',            'Vietnam',        'Asia/Bangkok'),
+  ('VII', 'Sân bay Vinh',                          'Vinh',           'Vietnam',        'Asia/Bangkok'),
+  ('BMV', 'Sân bay Buôn Ma Thuột',                 'Buôn Ma Thuột',  'Vietnam',        'Asia/Bangkok'),
+ 
+  -- 🇹🇭 Thái Lan
+  ('BKK', 'Sân bay Quốc tế Suvarnabhumi',          'Bangkok',        'Thailand',       'Asia/Bangkok'),
+  ('DMK', 'Sân bay Quốc tế Don Mueang',            'Bangkok',        'Thailand',       'Asia/Bangkok'),
+  ('CNX', 'Sân bay Quốc tế Chiang Mai',            'Chiang Mai',     'Thailand',       'Asia/Bangkok'),
+  ('HKT', 'Sân bay Quốc tế Phuket',               'Phuket',         'Thailand',       'Asia/Bangkok'),
+  ('USM', 'Sân bay Koh Samui',                     'Koh Samui',      'Thailand',       'Asia/Bangkok'),
+ 
+  -- 🇸🇬 Singapore
+  ('SIN', 'Sân bay Quốc tế Changi',               'Singapore',      'Singapore',      'Asia/Singapore'),
+ 
+  -- 🇲🇾 Malaysia
+  ('KUL', 'Sân bay Quốc tế Kuala Lumpur',         'Kuala Lumpur',   'Malaysia',       'Asia/Kuala_Lumpur'),
+  ('PEN', 'Sân bay Quốc tế Penang',               'Penang',         'Malaysia',       'Asia/Kuala_Lumpur'),
+  ('BKI', 'Sân bay Quốc tế Kota Kinabalu',        'Kota Kinabalu',  'Malaysia',       'Asia/Kuala_Lumpur'),
+ 
+  -- 🇮🇩 Indonesia
+  ('CGK', 'Sân bay Quốc tế Soekarno-Hatta',       'Jakarta',        'Indonesia',      'Asia/Jakarta'),
+  ('DPS', 'Sân bay Quốc tế Ngurah Rai',           'Bali',           'Indonesia',      'Asia/Makassar'),
+  ('SUB', 'Sân bay Quốc tế Juanda',               'Surabaya',       'Indonesia',      'Asia/Jakarta'),
+ 
+  -- 🇨🇳 Trung Quốc
+  ('PEK', 'Sân bay Quốc tế Capital Bắc Kinh',    'Bắc Kinh',       'China',          'Asia/Shanghai'),
+  ('PKX', 'Sân bay Quốc tế Daxing Bắc Kinh',     'Bắc Kinh',       'China',          'Asia/Shanghai'),
+  ('PVG', 'Sân bay Quốc tế Phố Đông Thượng Hải', 'Thượng Hải',     'China',          'Asia/Shanghai'),
+  ('SHA', 'Sân bay Hồng Kiều Thượng Hải',         'Thượng Hải',     'China',          'Asia/Shanghai'),
+  ('CAN', 'Sân bay Quốc tế Bạch Vân Quảng Châu', 'Quảng Châu',     'China',          'Asia/Shanghai'),
+  ('CTU', 'Sân bay Quốc tế Thiên Phủ Thành Đô',  'Thành Đô',       'China',          'Asia/Shanghai'),
+  ('HKG', 'Sân bay Quốc tế Hồng Kông',           'Hồng Kông',      'Hong Kong',      'Asia/Hong_Kong'),
+ 
+  -- 🇯🇵 Nhật Bản
+  ('NRT', 'Sân bay Quốc tế Narita',               'Tokyo',          'Japan',          'Asia/Tokyo'),
+  ('HND', 'Sân bay Haneda Tokyo',                  'Tokyo',          'Japan',          'Asia/Tokyo'),
+  ('KIX', 'Sân bay Quốc tế Kansai',               'Osaka',          'Japan',          'Asia/Tokyo'),
+  ('ITM', 'Sân bay Itami Osaka',                   'Osaka',          'Japan',          'Asia/Tokyo'),
+  ('NGO', 'Sân bay Quốc tế Chubu Centrair',       'Nagoya',         'Japan',          'Asia/Tokyo'),
+  ('CTS', 'Sân bay Quốc tế New Chitose',          'Sapporo',        'Japan',          'Asia/Tokyo'),
+  ('FUK', 'Sân bay Quốc tế Fukuoka',              'Fukuoka',        'Japan',          'Asia/Tokyo'),
+ 
+  -- 🇰🇷 Hàn Quốc
+  ('ICN', 'Sân bay Quốc tế Incheon',              'Seoul',          'South Korea',    'Asia/Seoul'),
+  ('GMP', 'Sân bay Gimpo Seoul',                   'Seoul',          'South Korea',    'Asia/Seoul'),
+  ('PUS', 'Sân bay Quốc tế Gimhae Busan',         'Busan',          'South Korea',    'Asia/Seoul'),
+ 
+  -- 🇮🇳 Ấn Độ
+  ('DEL', 'Sân bay Quốc tế Indira Gandhi',        'New Delhi',      'India',          'Asia/Kolkata'),
+  ('BOM', 'Sân bay Quốc tế Chhatrapati Shivaji',  'Mumbai',         'India',          'Asia/Kolkata'),
+  ('BLR', 'Sân bay Quốc tế Kempegowda',           'Bangalore',      'India',          'Asia/Kolkata'),
+ 
+  -- 🇦🇪 UAE
+  ('DXB', 'Sân bay Quốc tế Dubai',                'Dubai',          'UAE',            'Asia/Dubai'),
+  ('AUH', 'Sân bay Quốc tế Abu Dhabi',            'Abu Dhabi',      'UAE',            'Asia/Dubai'),
+ 
+  -- 🇶🇦 Qatar
+  ('DOH', 'Sân bay Quốc tế Hamad',                'Doha',           'Qatar',          'Asia/Qatar'),
+ 
+  -- 🇹🇷 Thổ Nhĩ Kỳ
+  ('IST', 'Sân bay Istanbul',                      'Istanbul',       'Turkey',         'Europe/Istanbul'),
+  ('SAW', 'Sân bay Sabiha Gökçen Istanbul',        'Istanbul',       'Turkey',         'Europe/Istanbul'),
+ 
+  -- 🇬🇧 Anh
+  ('LHR', 'Sân bay Heathrow London',               'London',         'United Kingdom', 'Europe/London'),
+  ('LGW', 'Sân bay Gatwick London',                'London',         'United Kingdom', 'Europe/London'),
+  ('STN', 'Sân bay Stansted London',               'London',         'United Kingdom', 'Europe/London'),
+  ('MAN', 'Sân bay Manchester',                    'Manchester',     'United Kingdom', 'Europe/London'),
+ 
+  -- 🇫🇷 Pháp
+  ('CDG', 'Sân bay Charles de Gaulle Paris',       'Paris',          'France',         'Europe/Paris'),
+  ('ORY', 'Sân bay Orly Paris',                    'Paris',          'France',         'Europe/Paris'),
+  ('NCE', 'Sân bay Nice Côte d''Azur',             'Nice',           'France',         'Europe/Paris'),
+ 
+  -- 🇩🇪 Đức
+  ('FRA', 'Sân bay Quốc tế Frankfurt',             'Frankfurt',      'Germany',        'Europe/Berlin'),
+  ('MUC', 'Sân bay Quốc tế Munich',               'Munich',         'Germany',        'Europe/Berlin'),
+  ('BER', 'Sân bay Quốc tế Berlin Brandenburg',   'Berlin',         'Germany',        'Europe/Berlin'),
+ 
+  -- 🇮🇹 Ý
+  ('FCO', 'Sân bay Leonardo da Vinci Rome',        'Rome',           'Italy',          'Europe/Rome'),
+  ('MXP', 'Sân bay Quốc tế Malpensa Milan',       'Milan',          'Italy',          'Europe/Rome'),
+  ('VCE', 'Sân bay Marco Polo Venice',             'Venice',         'Italy',          'Europe/Rome'),
+ 
+  -- 🇪🇸 Tây Ban Nha
+  ('MAD', 'Sân bay Adolfo Suárez Madrid-Barajas',  'Madrid',         'Spain',          'Europe/Madrid'),
+  ('BCN', 'Sân bay El Prat Barcelona',             'Barcelona',      'Spain',          'Europe/Madrid'),
+ 
+  -- 🇳🇱 Hà Lan
+  ('AMS', 'Sân bay Amsterdam Schiphol',            'Amsterdam',      'Netherlands',    'Europe/Amsterdam'),
+ 
+  -- 🇺🇸 Mỹ
+  ('JFK', 'Sân bay Quốc tế John F. Kennedy',      'New York',       'USA',            'America/New_York'),
+  ('EWR', 'Sân bay Quốc tế Newark Liberty',       'New York',       'USA',            'America/New_York'),
+  ('LAX', 'Sân bay Quốc tế Los Angeles',          'Los Angeles',    'USA',            'America/Los_Angeles'),
+  ('SFO', 'Sân bay Quốc tế San Francisco',        'San Francisco',  'USA',            'America/Los_Angeles'),
+  ('ORD', 'Sân bay Quốc tế O''Hare Chicago',      'Chicago',        'USA',            'America/Chicago'),
+  ('ATL', 'Sân bay Quốc tế Hartsfield-Jackson',   'Atlanta',        'USA',            'America/New_York'),
+  ('DFW', 'Sân bay Quốc tế Dallas/Fort Worth',    'Dallas',         'USA',            'America/Chicago'),
+  ('MIA', 'Sân bay Quốc tế Miami',                'Miami',          'USA',            'America/New_York'),
+  ('SEA', 'Sân bay Quốc tế Seattle-Tacoma',       'Seattle',        'USA',            'America/Los_Angeles'),
+ 
+  -- 🇦🇺 Úc
+  ('SYD', 'Sân bay Kingsford Smith Sydney',        'Sydney',         'Australia',      'Australia/Sydney'),
+  ('MEL', 'Sân bay Tullamarine Melbourne',         'Melbourne',      'Australia',      'Australia/Melbourne'),
+  ('BNE', 'Sân bay Quốc tế Brisbane',             'Brisbane',       'Australia',      'Australia/Brisbane'),
+  ('PER', 'Sân bay Quốc tế Perth',                'Perth',          'Australia',      'Australia/Perth')
 ON CONFLICT (code) DO NOTHING;
-
--- Test chuyến bay mẫu (ngày mai)
-DO $$
-DECLARE
-  v_vn   INT; v_vj INT; v_qh INT;
-  v_han  INT; v_sgn INT; v_dad INT; v_cxr INT;
-  v_fid  INT;
-  v_dep  TIMESTAMP;
-BEGIN
-  SELECT id INTO v_vn  FROM airlines WHERE code = 'VN';
-  SELECT id INTO v_vj  FROM airlines WHERE code = 'VJ';
-  SELECT id INTO v_qh  FROM airlines WHERE code = 'QH';
-  SELECT id INTO v_han FROM airports WHERE code = 'HAN';
-  SELECT id INTO v_sgn FROM airports WHERE code = 'SGN';
-  SELECT id INTO v_dad FROM airports WHERE code = 'DAD';
-  SELECT id INTO v_cxr FROM airports WHERE code = 'CXR';
-
-  -- ---- HAN -> SGN ----
-
-  -- VN123 | 07:00 | 2h
-  v_dep := DATE_TRUNC('day', NOW() + INTERVAL '1 day') + INTERVAL '7 hours';
-  INSERT INTO flights (flight_number, airline_id, departure_airport_id, arrival_airport_id,
-                       departure_time, arrival_time, duration_minutes)
-  VALUES ('VN123', v_vn, v_han, v_sgn, v_dep, v_dep + INTERVAL '120 min', 120)
-  RETURNING id INTO v_fid;
-  INSERT INTO flight_seats (flight_id, class, total_seats, available_seats, base_price) VALUES
-    (v_fid, 'economy',  150, 120, 899000),
-    (v_fid, 'business',  24,  20, 2500000);
-
-  -- VJ456 | 10:30 | 1h55m
-  v_dep := DATE_TRUNC('day', NOW() + INTERVAL '1 day') + INTERVAL '10 hours 30 minutes';
-  INSERT INTO flights (flight_number, airline_id, departure_airport_id, arrival_airport_id,
-                       departure_time, arrival_time, duration_minutes)
-  VALUES ('VJ456', v_vj, v_han, v_sgn, v_dep, v_dep + INTERVAL '115 min', 115)
-  RETURNING id INTO v_fid;
-  INSERT INTO flight_seats (flight_id, class, total_seats, available_seats, base_price) VALUES
-    (v_fid, 'economy',  180,  50, 599000),
-    (v_fid, 'business',  12,   5, 1800000);
-
-  -- QH789 | 14:00 | 2h05m
-  v_dep := DATE_TRUNC('day', NOW() + INTERVAL '1 day') + INTERVAL '14 hours';
-  INSERT INTO flights (flight_number, airline_id, departure_airport_id, arrival_airport_id,
-                       departure_time, arrival_time, duration_minutes)
-  VALUES ('QH789', v_qh, v_han, v_sgn, v_dep, v_dep + INTERVAL '125 min', 125)
-  RETURNING id INTO v_fid;
-  INSERT INTO flight_seats (flight_id, class, total_seats, available_seats, base_price) VALUES
-    (v_fid, 'economy',  160,  80, 749000),
-    (v_fid, 'business',  20,  15, 2100000);
-
-  -- VN999 | 19:00 | sold out economy
-  v_dep := DATE_TRUNC('day', NOW() + INTERVAL '1 day') + INTERVAL '19 hours';
-  INSERT INTO flights (flight_number, airline_id, departure_airport_id, arrival_airport_id,
-                       departure_time, arrival_time, duration_minutes)
-  VALUES ('VN999', v_vn, v_han, v_sgn, v_dep, v_dep + INTERVAL '120 min', 120)
-  RETURNING id INTO v_fid;
-  INSERT INTO flight_seats (flight_id, class, total_seats, available_seats, base_price) VALUES
-    (v_fid, 'economy',  150,   0, 1200000),
-    (v_fid, 'business',  24,  10, 3000000);
-
-  -- ---- SGN -> HAN ----
-
-  -- VN321 | 08:00
-  v_dep := DATE_TRUNC('day', NOW() + INTERVAL '1 day') + INTERVAL '8 hours';
-  INSERT INTO flights (flight_number, airline_id, departure_airport_id, arrival_airport_id,
-                       departure_time, arrival_time, duration_minutes)
-  VALUES ('VN321', v_vn, v_sgn, v_han, v_dep, v_dep + INTERVAL '120 min', 120)
-  RETURNING id INTO v_fid;
-  INSERT INTO flight_seats (flight_id, class, total_seats, available_seats, base_price) VALUES
-    (v_fid, 'economy',  150, 100, 950000),
-    (v_fid, 'business',  24,  18, 2600000);
-
-  -- VJ654 | 15:30
-  v_dep := DATE_TRUNC('day', NOW() + INTERVAL '1 day') + INTERVAL '15 hours 30 minutes';
-  INSERT INTO flights (flight_number, airline_id, departure_airport_id, arrival_airport_id,
-                       departure_time, arrival_time, duration_minutes)
-  VALUES ('VJ654', v_vj, v_sgn, v_han, v_dep, v_dep + INTERVAL '115 min', 115)
-  RETURNING id INTO v_fid;
-  INSERT INTO flight_seats (flight_id, class, total_seats, available_seats, base_price) VALUES
-    (v_fid, 'economy',  180,  90, 649000),
-    (v_fid, 'business',  12,   8, 1900000);
-
-  -- ---- HAN -> DAD ----
-
-  -- VN201 | 09:00
-  v_dep := DATE_TRUNC('day', NOW() + INTERVAL '1 day') + INTERVAL '9 hours';
-  INSERT INTO flights (flight_number, airline_id, departure_airport_id, arrival_airport_id,
-                       departure_time, arrival_time, duration_minutes)
-  VALUES ('VN201', v_vn, v_han, v_dad, v_dep, v_dep + INTERVAL '80 min', 80)
-  RETURNING id INTO v_fid;
-  INSERT INTO flight_seats (flight_id, class, total_seats, available_seats, base_price) VALUES
-    (v_fid, 'economy',  150,  70, 699000),
-    (v_fid, 'business',  24,  12, 1800000);
-
-  -- ---- SGN -> DAD ----
-
-  -- QH301 | 11:00
-  v_dep := DATE_TRUNC('day', NOW() + INTERVAL '1 day') + INTERVAL '11 hours';
-  INSERT INTO flights (flight_number, airline_id, departure_airport_id, arrival_airport_id,
-                       departure_time, arrival_time, duration_minutes)
-  VALUES ('QH301', v_qh, v_sgn, v_dad, v_dep, v_dep + INTERVAL '65 min', 65)
-  RETURNING id INTO v_fid;
-  INSERT INTO flight_seats (flight_id, class, total_seats, available_seats, base_price) VALUES
-    (v_fid, 'economy',  160, 110, 499000),
-    (v_fid, 'business',  20,  10, 1500000);
-
-END $$;
