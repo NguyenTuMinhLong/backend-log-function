@@ -1,6 +1,4 @@
--- =============================================
 -- MIGRATION 002: Create Flight Search Tables
--- =============================================
 
 -- 1. Bảng hãng hàng không
 CREATE TABLE IF NOT EXISTS airlines (

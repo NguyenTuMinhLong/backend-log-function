@@ -1,6 +1,4 @@
--- =============================================
 -- MIGRATION 003: Create Booking Tables
--- =============================================
 
 -- 1. Bảng bookings
 CREATE TABLE IF NOT EXISTS bookings (
