@@ -5,18 +5,17 @@ CREATE TABLE IF NOT EXISTS bookings (
   id                    BIGSERIAL PRIMARY KEY,
   booking_code          VARCHAR(10)    NOT NULL UNIQUE,   -- Mã PNR VD: ABC12345
   user_id               BIGINT         REFERENCES users(id) ON DELETE SET NULL,
-  -- NULL = khách vãng lai (guest)
+  -- user_id = NULL --> Khách vãng lai (guest)
 
-  -- Chuyến đi (bắt buộc)
+  -- Chuyến đi (bắt buộc nhập)
   outbound_flight_id    INT            NOT NULL REFERENCES flights(id),
   outbound_seat_class   VARCHAR(20)    NOT NULL,
 
-  -- Chuyến về (optional - khứ hồi)
+  -- Chuyến về (optional - khứ hồi) -- nếu không thứ hồi thì không cần nhập và nó NULL
   return_flight_id      INT            REFERENCES flights(id),
   return_seat_class     VARCHAR(20),
-
   trip_type             VARCHAR(20)    NOT NULL DEFAULT 'one_way',
-  -- one_way | round_trip
+  -- one_way | thay thành round_trip nếu khứ hồi
 
   -- Thông tin hành khách tổng
   total_adults          INT            NOT NULL DEFAULT 1,
@@ -37,7 +36,7 @@ CREATE TABLE IF NOT EXISTS bookings (
   contact_name          VARCHAR(100)   NOT NULL,
 
   -- Giữ ghế
-  held_until            TIMESTAMP      NULL,  -- thời gian giữ ghế (15 phút)
+  held_until            TIMESTAMP      NULL,  -- thời gian giữ ghế (30 phút)
 
   created_at            TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at            TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -82,7 +81,7 @@ CREATE TABLE IF NOT EXISTS passengers (
   passport_number VARCHAR(30)    NULL,
   passport_expiry DATE           NULL,
 
-  seat_number     VARCHAR(10)    NULL,   -- VD: 12A (nếu chọn ghế)
+  seat_number     VARCHAR(10)    NULL,   -- VD: 12A (Tự sinh)
 
   created_at      TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
 

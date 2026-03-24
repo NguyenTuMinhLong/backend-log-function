@@ -189,8 +189,8 @@ const createBooking = async (data, userId = null) => {
       if (check.rows.length === 0) isUnique = true;
     }
 
-    // 5. Thời gian giữ ghế (15 phút)
-    const heldUntil = new Date(Date.now() + 15 * 60 * 1000);
+    // 5. Thời gian giữ ghế (30 phút)
+    const heldUntil = new Date(Date.now() + 30 * 60 * 1000);
 
     // 6. Tạo booking record
     const bookingResult = await client.query(
@@ -291,7 +291,7 @@ const createBooking = async (data, userId = null) => {
         return_total:    returnTotal,
         total_price:     totalPrice,
       },
-      message: `Đặt vé thành công! Vui lòng thanh toán trong 15 phút (trước ${heldUntil.toLocaleString("vi-VN")})`,
+      message: `Đặt vé thành công! Vui lòng thanh toán trong 30 phút (trước ${heldUntil.toLocaleString("vi-VN")})`,
     };
   } catch (err) {
     await client.query("ROLLBACK");
