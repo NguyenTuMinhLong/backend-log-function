@@ -18,7 +18,8 @@ app.use("/api/flights",  flightRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/admin",    adminRoutes);
 
-// Tự động hủy booking hết hạn giữ ghế mỗi 1 phút
+// Mỗi 1 phút sẽ chạy 1 lần để kiểm tra toàn bộ danh sách booking nhằm tự động hủy booking đã hết hạn giữ ghế
+// 5. Thời gian giữ ghế (30 phút) nằm bên service dòng 192
 setInterval(expireHeldBookings, 60 * 1000);
 
 module.exports = app;
