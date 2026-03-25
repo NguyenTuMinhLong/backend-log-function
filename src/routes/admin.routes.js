@@ -13,6 +13,8 @@ router.put   ("/flights/:id",            c.updateFlight);
 router.patch ("/flights/:id/status",     c.updateFlightStatus);
 router.patch ("/flights/:id/visibility", c.toggleFlightVisibility);
 
+
+// WARNING : CẦN fIX MẤY CÁI NÀY CHƯA CÓ
 // // ── A-02: Manage Airports ─────────────────────────────────────────────────────
 // router.get   ("/airports",             c.getAirports);
 // router.post  ("/airports",             c.createAirport);
