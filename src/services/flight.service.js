@@ -251,7 +251,7 @@ const searchFlights = async (params) => {
   const outboundFlights = formatFlights(outboundRows, a, c, i);
 
   // Chuyến về (nếu khứ hồi)
-  let returnFlights = null; // mặc định để null trừ khi có khứ hồi
+  let returnFlights = null;
   if (return_date) {
     const returnRows = await queryFlights({
       ...baseParams,

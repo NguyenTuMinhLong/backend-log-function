@@ -1,4 +1,5 @@
 const pool = require("../config/db");
+const { assignSeat } = require("../utils/seat");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -94,6 +95,9 @@ const validateBookingInput = (data) => {
     if (!["outbound", "return"].includes(p.flight_type || "outbound")) {
       throw new Error("flight_type phải là outbound hoặc return");
     }
+    if (p.extra_baggage_kg !== undefined && parseInt(p.extra_baggage_kg) < 0) {
+      throw new Error("extra_baggage_kg không hợp lệ");
+    }
   }
 };
 
@@ -102,7 +106,9 @@ const validateBookingInput = (data) => {
  */
 const checkAndGetSeatInfo = async (client, flightId, seatClass, seatsNeeded) => {
   const result = await client.query(
-    `SELECT fs.base_price, fs.available_seats, f.status, f.departure_time
+    `SELECT fs.base_price, fs.available_seats, fs.total_seats,
+            fs.baggage_included_kg, fs.carry_on_kg, fs.extra_baggage_price,
+            f.status, f.departure_time
      FROM flight_seats fs
      JOIN flights f ON f.id = fs.flight_id
      WHERE fs.flight_id = $1 AND fs.class = $2`,
@@ -140,14 +146,14 @@ const checkAndGetSeatInfo = async (client, flightId, seatClass, seatsNeeded) => 
  */
 const createBooking = async (data, userId = null) => {
   validateBookingInput(data);
-
+ 
   const {
-    outbound_flight_id,  outbound_seat_class,
-    return_flight_id,    return_seat_class,
-    trip_type = "one_way",
-    adults   = 1,
-    children = 0,
-    infants  = 0,
+    outbound_flight_id, outbound_seat_class,
+    return_flight_id,   return_seat_class,
+    trip_type    = "one_way",
+    adults       = 1,
+    children     = 0,
+    infants      = 0,
     contact_name, contact_email, contact_phone,
     passengers,
   } = data;
@@ -162,7 +168,7 @@ const createBooking = async (data, userId = null) => {
   try {
     await client.query("BEGIN");
 
-    // 1. Kiểm tra ghế chuyến đi
+    // 1. Kiểm tra ghế + lấy thông tin baggage
     const outboundSeat = await checkAndGetSeatInfo(client, outbound_flight_id, outbound_seat_class, seatsNeeded);
 
     // 2. Kiểm tra ghế chuyến về (nếu khứ hồi)
@@ -174,18 +180,40 @@ const createBooking = async (data, userId = null) => {
     // 3. Tính tổng tiền
     const outboundTotal = calcTotalPrice(parseFloat(outboundSeat.base_price), a, c, i);
     const returnTotal   = returnSeat ? calcTotalPrice(parseFloat(returnSeat.base_price), a, c, i) : 0;
-    const totalPrice    = outboundTotal + returnTotal;
-    const basePrice     = parseFloat(outboundSeat.base_price);
 
-    // 4. Tạo mã booking (đảm bảo unique)
+    // 4. Tính tiền hành lý thêm
+    let baggageTotal = 0;
+    const outboundPassengers = passengers.filter(p => (p.flight_type || "outbound") === "outbound");
+    const returnPassengers   = passengers.filter(p => p.flight_type === "return");
+
+    for (const p of outboundPassengers) {
+      const extraKg = parseInt(p.extra_baggage_kg) || 0;
+      if (extraKg > 0 && p.passenger_type !== "infant") {
+        p._baggage_price = extraKg * parseFloat(outboundSeat.extra_baggage_price);
+        baggageTotal += p._baggage_price;
+      } else {
+        p._baggage_price = 0;
+      }
+    }
+    for (const p of returnPassengers) {
+      const extraKg = parseInt(p.extra_baggage_kg) || 0;
+      if (extraKg > 0 && returnSeat && p.passenger_type !== "infant") {
+        p._baggage_price = extraKg * parseFloat(returnSeat.extra_baggage_price);
+        baggageTotal += p._baggage_price;
+      } else {
+        p._baggage_price = 0;
+      }
+    }
+
+    const totalPrice = outboundTotal + returnTotal + baggageTotal;
+    const basePrice  = parseFloat(outboundSeat.base_price);
+
+    // 5. Tạo mã booking (đảm bảo unique)
     let bookingCode;
     let isUnique = false;
     while (!isUnique) {
       bookingCode = generateBookingCode();
-      const check = await client.query(
-        "SELECT id FROM bookings WHERE booking_code = $1",
-        [bookingCode]
-      );
+      const check = await client.query("SELECT id FROM bookings WHERE booking_code=$1", [bookingCode]);
       if (check.rows.length === 0) isUnique = true;
     }
 
@@ -203,41 +231,45 @@ const createBooking = async (data, userId = null) => {
         base_price, total_price,
         status, contact_name, contact_email, contact_phone,
         held_until
-      ) VALUES (
-        $1,  $2,
-        $3,  $4,
-        $5,  $6,
-        $7,
-        $8,  $9,  $10,
-        $11, $12,
-        'pending', $13, $14, $15,
-        $16
-      ) RETURNING *`,
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',$13,$14,$15,$16)
+      RETURNING *`,
       [
         bookingCode, userId,
         outbound_flight_id, outbound_seat_class,
         return_flight_id || null, return_seat_class || null,
-        trip_type,
-        a, c, i,
+        trip_type, a, c, i,
         basePrice, totalPrice,
         contact_name, contact_email, contact_phone || null,
         heldUntil,
       ]
     );
-
+ 
     const booking = bookingResult.rows[0];
 
-    // 7. Lưu thông tin từng hành khách
+    // 6. Lưu thông tin từng hành khách + tự động gán số ghế
+    const assignedSeats = { outbound: [], return: [] };
+ 
     for (const p of passengers) {
-      await client.query(
+      const flightType = p.flight_type || "outbound";
+      const isInfant   = p.passenger_type === "infant";
+      const extraKg    = parseInt(p.extra_baggage_kg) || 0;
+ 
+      // Lấy thông tin seat + baggage mặc định
+      const seatInfo = flightType === "outbound" ? outboundSeat : returnSeat;
+      const defaultBaggageKg = seatInfo ? parseInt(seatInfo.baggage_included_kg) : 23;
+
+      // Insert passenger
+      const passResult = await client.query(
         `INSERT INTO passengers (
           booking_id, flight_type, passenger_type,
           full_name, date_of_birth, gender,
-          nationality, passport_number, passport_expiry
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          nationality, passport_number, passport_expiry,
+          baggage_kg, extra_baggage_kg, baggage_price
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        RETURNING id`,
         [
           booking.id,
-          p.flight_type || "outbound",
+          flightType,
           p.passenger_type,
           p.full_name,
           p.date_of_birth    || null,
@@ -245,50 +277,70 @@ const createBooking = async (data, userId = null) => {
           p.nationality      || null,
           p.passport_number  || null,
           p.passport_expiry  || null,
+          defaultBaggageKg,
+          extraKg,
+          p._baggage_price || 0,
         ]
       );
+ 
+      const passengerId = passResult.rows[0].id;
+
+      // Gán số ghế (infants không chiếm ghế → không gán)
+      if (!isInfant) {
+        const flightId   = flightType === "outbound" ? outbound_flight_id : return_flight_id;
+        const seatClass  = flightType === "outbound" ? outbound_seat_class : return_seat_class;
+        const totalSeats = flightType === "outbound"
+          ? parseInt(outboundSeat.total_seats)
+          : parseInt(returnSeat?.total_seats || 0);
+ 
+        if (flightId && seatClass && totalSeats > 0) {
+          const seatNumber = await assignSeat(client, flightId, seatClass, totalSeats, passengerId, booking.id);
+          assignedSeats[flightType].push({ passenger: p.full_name, seat: seatNumber });
+        }
+      }
     }
 
-    // 8. Giảm số ghế available (giữ ghế tạm)
+    // 7. Giảm số ghế available (giữ ghế tạm)
     await client.query(
-      `UPDATE flight_seats
-       SET available_seats = available_seats - $1, updated_at = NOW()
+      `UPDATE flight_seats SET available_seats = available_seats - $1, updated_at = NOW()
        WHERE flight_id = $2 AND class = $3`,
       [seatsNeeded, outbound_flight_id, outbound_seat_class]
     );
-
+ 
     if (trip_type === "round_trip" && return_flight_id) {
       await client.query(
-        `UPDATE flight_seats
-         SET available_seats = available_seats - $1, updated_at = NOW()
+        `UPDATE flight_seats SET available_seats = available_seats - $1, updated_at = NOW()
          WHERE flight_id = $2 AND class = $3`,
         [seatsNeeded, return_flight_id, return_seat_class]
       );
     }
-
+ 
     await client.query("COMMIT");
-
+ 
     return {
-      booking_code:   booking.booking_code,
-      booking_id:     booking.id,
-      status:         booking.status,
-      trip_type:      booking.trip_type,
-      held_until:     booking.held_until,
+      booking_code: booking.booking_code,
+      booking_id:   booking.id,
+      status:       booking.status,
+      trip_type:    booking.trip_type,
+      held_until:   booking.held_until,
       contact: {
         name:  booking.contact_name,
         email: booking.contact_email,
         phone: booking.contact_phone,
       },
-      passengers: {
-        adults:   a,
-        children: c,
-        infants:  i,
-        total:    a + c + i,
+      passengers: { adults: a, children: c, infants: i, total: a + c + i },
+      seats_assigned: assignedSeats,
+      baggage: {
+        outbound_included_kg: parseInt(outboundSeat.baggage_included_kg),
+        outbound_carry_on_kg: parseInt(outboundSeat.carry_on_kg),
+        return_included_kg:   returnSeat ? parseInt(returnSeat.baggage_included_kg) : null,
+        extra_baggage_total:  baggageTotal,
       },
       price: {
         base_price:      basePrice,
         outbound_total:  outboundTotal,
         return_total:    returnTotal,
+        baggage_total:   baggageTotal,
         total_price:     totalPrice,
       },
       message: `Đặt vé thành công! Vui lòng thanh toán trong 30 phút (trước ${heldUntil.toLocaleString("vi-VN")})`,
@@ -306,37 +358,28 @@ const createBooking = async (data, userId = null) => {
  */
 const getBookingDetail = async (bookingCode, userId = null) => {
   const result = await pool.query(
-    `SELECT
-       b.*,
-       -- Chuyến đi
+    `SELECT b.*,
        f_out.flight_number   AS outbound_flight_number,
        f_out.departure_time  AS outbound_departure_time,
        f_out.arrival_time    AS outbound_arrival_time,
        f_out.duration_minutes AS outbound_duration,
        al_out.name           AS outbound_airline_name,
        al_out.code           AS outbound_airline_code,
-       dep_out.code          AS outbound_dep_code,
-       dep_out.city          AS outbound_dep_city,
-       arr_out.code          AS outbound_arr_code,
-       arr_out.city          AS outbound_arr_city,
-       -- Chuyến về
+       dep_out.code          AS outbound_dep_code, dep_out.city AS outbound_dep_city,
+       arr_out.code          AS outbound_arr_code, arr_out.city AS outbound_arr_city,
        f_ret.flight_number   AS return_flight_number,
        f_ret.departure_time  AS return_departure_time,
        f_ret.arrival_time    AS return_arrival_time,
        f_ret.duration_minutes AS return_duration,
        al_ret.name           AS return_airline_name,
        al_ret.code           AS return_airline_code,
-       dep_ret.code          AS return_dep_code,
-       dep_ret.city          AS return_dep_city,
-       arr_ret.code          AS return_arr_code,
-       arr_ret.city          AS return_arr_city
+       dep_ret.code          AS return_dep_code, dep_ret.city AS return_dep_city,
+       arr_ret.code          AS return_arr_code, arr_ret.city AS return_arr_city
      FROM bookings b
-     -- Join chuyến đi
      JOIN flights  f_out   ON f_out.id  = b.outbound_flight_id
      JOIN airlines al_out  ON al_out.id = f_out.airline_id
      JOIN airports dep_out ON dep_out.id = f_out.departure_airport_id
      JOIN airports arr_out ON arr_out.id = f_out.arrival_airport_id
-     -- Join chuyến về (optional)
      LEFT JOIN flights  f_ret   ON f_ret.id  = b.return_flight_id
      LEFT JOIN airlines al_ret  ON al_ret.id = f_ret.airline_id
      LEFT JOIN airports dep_ret ON dep_ret.id = f_ret.departure_airport_id
@@ -346,20 +389,21 @@ const getBookingDetail = async (bookingCode, userId = null) => {
   );
 
   if (result.rows.length === 0) throw new Error("Không tìm thấy booking");
-
+ 
   const b = result.rows[0];
 
   // Nếu user đã login → chỉ cho xem booking của mình
-  if (userId && b.user_id && b.user_id !== userId) {
+  if (userId && b.user_id && b.user_id !== userId)
     throw new Error("Bạn không có quyền xem booking này");
-  }
-
-  // Lấy danh sách hành khách
+ 
   const passResult = await pool.query(
-    `SELECT * FROM passengers WHERE booking_id = $1 ORDER BY flight_type, passenger_type`,
+    `SELECT id, flight_type, passenger_type, full_name, date_of_birth, gender,
+            nationality, passport_number, seat_number,
+            baggage_kg, extra_baggage_kg, baggage_price
+     FROM passengers WHERE booking_id = $1 ORDER BY flight_type, passenger_type`,
     [b.id]
   );
-
+ 
   return {
     booking_code: b.booking_code,
     booking_id:   b.id,
@@ -367,42 +411,28 @@ const getBookingDetail = async (bookingCode, userId = null) => {
     trip_type:    b.trip_type,
     held_until:   b.held_until,
     created_at:   b.created_at,
-
-    contact: {
-      name:  b.contact_name,
-      email: b.contact_email,
-      phone: b.contact_phone,
-    },
-
+    contact: { name: b.contact_name, email: b.contact_email, phone: b.contact_phone },
     outbound_flight: {
-      flight_number:  b.outbound_flight_number,
-      seat_class:     b.outbound_seat_class,
-      airline:        { code: b.outbound_airline_code, name: b.outbound_airline_name },
-      departure:      { code: b.outbound_dep_code, city: b.outbound_dep_city, time: b.outbound_departure_time },
-      arrival:        { code: b.outbound_arr_code, city: b.outbound_arr_city, time: b.outbound_arrival_time },
+      flight_number:    b.outbound_flight_number,
+      seat_class:       b.outbound_seat_class,
+      airline:          { code: b.outbound_airline_code, name: b.outbound_airline_name },
+      departure:        { code: b.outbound_dep_code, city: b.outbound_dep_city, time: b.outbound_departure_time },
+      arrival:          { code: b.outbound_arr_code, city: b.outbound_arr_city, time: b.outbound_arrival_time },
       duration_minutes: b.outbound_duration,
     },
-
     return_flight: b.return_flight_id ? {
-      flight_number:  b.return_flight_number,
-      seat_class:     b.return_seat_class,
-      airline:        { code: b.return_airline_code, name: b.return_airline_name },
-      departure:      { code: b.return_dep_code, city: b.return_dep_city, time: b.return_departure_time },
-      arrival:        { code: b.return_arr_code, city: b.return_arr_city, time: b.return_arrival_time },
+      flight_number:    b.return_flight_number,
+      seat_class:       b.return_seat_class,
+      airline:          { code: b.return_airline_code, name: b.return_airline_name },
+      departure:        { code: b.return_dep_code, city: b.return_dep_city, time: b.return_departure_time },
+      arrival:          { code: b.return_arr_code, city: b.return_arr_city, time: b.return_arrival_time },
       duration_minutes: b.return_duration,
     } : null,
-
     passengers: {
-      adults:   b.total_adults,
-      children: b.total_children,
-      infants:  b.total_infants,
-      list:     passResult.rows,
+      adults: b.total_adults, children: b.total_children, infants: b.total_infants,
+      list: passResult.rows,
     },
-
-    price: {
-      base_price:  parseFloat(b.base_price),
-      total_price: parseFloat(b.total_price),
-    },
+    price: { base_price: parseFloat(b.base_price), total_price: parseFloat(b.total_price) },
   };
 };
 
@@ -411,8 +441,7 @@ const getBookingDetail = async (bookingCode, userId = null) => {
  */
 const getMyBookings = async (userId) => {
   const result = await pool.query(
-    `SELECT
-       b.booking_code, b.status, b.trip_type,
+    `SELECT b.booking_code, b.status, b.trip_type,
        b.total_adults, b.total_children, b.total_infants,
        b.total_price, b.held_until, b.created_at,
        f_out.flight_number  AS outbound_flight_number,
@@ -425,11 +454,9 @@ const getMyBookings = async (userId) => {
      JOIN airports dep_out ON dep_out.id = f_out.departure_airport_id
      JOIN airports arr_out ON arr_out.id = f_out.arrival_airport_id
      JOIN airlines al_out  ON al_out.id  = f_out.airline_id
-     WHERE b.user_id = $1
-     ORDER BY b.created_at DESC`,
+     WHERE b.user_id = $1 ORDER BY b.created_at DESC`,
     [userId]
   );
-
   return result.rows;
 };
 
@@ -438,33 +465,23 @@ const getMyBookings = async (userId) => {
  */
 const cancelBooking = async (bookingCode, userId = null) => {
   const client = await pool.connect();
-
   try {
     await client.query("BEGIN");
-
-    const result = await client.query(
-      "SELECT * FROM bookings WHERE booking_code = $1 FOR UPDATE",
-      [bookingCode]
-    );
-
+    const result = await client.query("SELECT * FROM bookings WHERE booking_code=$1 FOR UPDATE", [bookingCode]);
     if (result.rows.length === 0) throw new Error("Không tìm thấy booking");
-
     const booking = result.rows[0];
 
     // Kiểm tra quyền
-    if (userId && booking.user_id && booking.user_id !== userId) {
+    if (userId && booking.user_id && booking.user_id !== userId)
       throw new Error("Bạn không có quyền hủy booking này");
-    }
-
     if (booking.status === "cancelled") throw new Error("Booking đã bị hủy trước đó");
     if (booking.status === "expired")   throw new Error("Booking đã hết hạn");
-
+ 
     const seatsNeeded = booking.total_adults + booking.total_children;
 
     // Hoàn ghế chuyến đi
     await client.query(
-      `UPDATE flight_seats
-       SET available_seats = available_seats + $1, updated_at = NOW()
+      `UPDATE flight_seats SET available_seats = available_seats + $1, updated_at = NOW()
        WHERE flight_id = $2 AND class = $3`,
       [seatsNeeded, booking.outbound_flight_id, booking.outbound_seat_class]
     );
@@ -472,21 +489,22 @@ const cancelBooking = async (bookingCode, userId = null) => {
     // Hoàn ghế chuyến về
     if (booking.return_flight_id) {
       await client.query(
-        `UPDATE flight_seats
-         SET available_seats = available_seats + $1, updated_at = NOW()
+        `UPDATE flight_seats SET available_seats = available_seats + $1, updated_at = NOW()
          WHERE flight_id = $2 AND class = $3`,
         [seatsNeeded, booking.return_flight_id, booking.return_seat_class]
       );
     }
 
-    // Cập nhật trạng thái
+    // Giải phóng ghế đã gán
     await client.query(
-      `UPDATE bookings SET status = 'cancelled', updated_at = NOW() WHERE id = $1`,
+      `UPDATE flight_seat_assignments SET status = 'available', passenger_id = NULL
+       WHERE booking_id = $1`,
       [booking.id]
     );
 
+    // Cập nhật trạng thái
+    await client.query("UPDATE bookings SET status='cancelled', updated_at=NOW() WHERE id=$1", [booking.id]);
     await client.query("COMMIT");
-
     return { message: `Booking ${bookingCode} đã được hủy thành công` };
   } catch (err) {
     await client.query("ROLLBACK");
@@ -501,24 +519,19 @@ const cancelBooking = async (bookingCode, userId = null) => {
  */
 const expireHeldBookings = async () => {
   const client = await pool.connect();
-
   try {
     await client.query("BEGIN");
 
     // Tìm booking pending đã hết thời gian giữ ghế
     const expired = await client.query(
-      `SELECT * FROM bookings
-       WHERE status = 'pending' AND held_until < NOW()
-       FOR UPDATE SKIP LOCKED`
+      `SELECT * FROM bookings WHERE status='pending' AND held_until < NOW() FOR UPDATE SKIP LOCKED`
     );
-
     for (const booking of expired.rows) {
       const seatsNeeded = booking.total_adults + booking.total_children;
 
       // Hoàn ghế chuyến đi
       await client.query(
-        `UPDATE flight_seats
-         SET available_seats = available_seats + $1, updated_at = NOW()
+        `UPDATE flight_seats SET available_seats = available_seats + $1, updated_at = NOW()
          WHERE flight_id = $2 AND class = $3`,
         [seatsNeeded, booking.outbound_flight_id, booking.outbound_seat_class]
       );
@@ -526,25 +539,22 @@ const expireHeldBookings = async () => {
       // Hoàn ghế chuyến về
       if (booking.return_flight_id) {
         await client.query(
-          `UPDATE flight_seats
-           SET available_seats = available_seats + $1, updated_at = NOW()
+          `UPDATE flight_seats SET available_seats = available_seats + $1, updated_at = NOW()
            WHERE flight_id = $2 AND class = $3`,
           [seatsNeeded, booking.return_flight_id, booking.return_seat_class]
         );
       }
-
-      // Đánh dấu expired
       await client.query(
-        `UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1`,
+        `UPDATE flight_seat_assignments SET status='available', passenger_id=NULL WHERE booking_id=$1`,
         [booking.id]
       );
-    }
 
+      // Đánh dấu expired
+      await client.query("UPDATE bookings SET status='expired', updated_at=NOW() WHERE id=$1", [booking.id]);
+    }
     await client.query("COMMIT");
-
-    if (expired.rows.length > 0) {
+    if (expired.rows.length > 0)
       console.log(`[Auto-expire] Đã hủy ${expired.rows.length} booking hết hạn`);
-    }
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("[Auto-expire] Lỗi:", err.message);
@@ -553,10 +563,4 @@ const expireHeldBookings = async () => {
   }
 };
 
-module.exports = {
-  createBooking,
-  getBookingDetail,
-  getMyBookings,
-  cancelBooking,
-  expireHeldBookings,
-};
+module.exports = { createBooking, getBookingDetail, getMyBookings, cancelBooking, expireHeldBookings };
