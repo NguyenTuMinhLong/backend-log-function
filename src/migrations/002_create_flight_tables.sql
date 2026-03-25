@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS flights (
   CONSTRAINT chk_airports_diff CHECK (departure_airport_id <> arrival_airport_id),
   CONSTRAINT chk_times         CHECK (arrival_time > departure_time)
 );
+-- Thêm cột is_active vào bảng flights (dùng cho soft delete)
+ALTER TABLE flights ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
 
 CREATE INDEX IF NOT EXISTS idx_flights_dep_arr_date
   ON flights (departure_airport_id, arrival_airport_id, departure_time);
