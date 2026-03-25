@@ -95,3 +95,9 @@ CREATE TABLE IF NOT EXISTS passengers (
 
 CREATE INDEX IF NOT EXISTS idx_passengers_booking_id
   ON passengers (booking_id);
+
+-- Thêm cột baggage vào passengers (hành lý của từng người)
+ALTER TABLE passengers
+  ADD COLUMN IF NOT EXISTS baggage_kg        INT  NOT NULL DEFAULT 0,  -- kg ký gửi chọn (0 = dùng mặc định)
+  ADD COLUMN IF NOT EXISTS extra_baggage_kg  INT  NOT NULL DEFAULT 0,  -- kg mua thêm
+  ADD COLUMN IF NOT EXISTS baggage_price     NUMERIC(10,2) NOT NULL DEFAULT 0; -- tiền hành lý thêm

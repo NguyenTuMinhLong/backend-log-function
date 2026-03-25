@@ -61,6 +61,51 @@ CREATE TABLE IF NOT EXISTS flight_seats (
   CONSTRAINT chk_seats CHECK (available_seats >= 0 AND available_seats <= total_seats),
   CONSTRAINT chk_price CHECK (base_price >= 0)
 );
+-- Thêm cột baggage vào flight_seats (ký gửi mặc định theo hạng)
+ALTER TABLE flight_seats
+  ADD COLUMN IF NOT EXISTS baggage_included_kg  INT  NOT NULL DEFAULT 0,   -- kg ký gửi miễn phí
+  ADD COLUMN IF NOT EXISTS carry_on_kg          INT  NOT NULL DEFAULT 7,   -- kg xách tay
+  ADD COLUMN IF NOT EXISTS extra_baggage_price  NUMERIC(10,2) NOT NULL DEFAULT 0; -- giá/kg thêm
+ 
+-- Cập nhật mặc định theo hạng ghế
+-- economy: 23kg, business: 32kg, first: 40kg
+UPDATE flight_seats SET
+  baggage_included_kg = CASE class
+    WHEN 'economy'  THEN 23
+    WHEN 'business' THEN 32
+    WHEN 'first'    THEN 40
+    ELSE 23
+  END,
+  carry_on_kg = CASE class
+    WHEN 'economy'  THEN 7
+    WHEN 'business' THEN 10
+    WHEN 'first'    THEN 14
+    ELSE 7
+  END,
+  extra_baggage_price = CASE class
+    WHEN 'economy'  THEN 250000   -- 250k/kg thêm
+    WHEN 'business' THEN 150000
+    WHEN 'first'    THEN 0        -- first: miễn phí thêm hành lý
+    ELSE 250000
+  END;
+
+-- 5. Bảng theo dõi ghế đã được gán trong từng chuyến bay
+CREATE TABLE IF NOT EXISTS flight_seat_assignments (
+  id          BIGSERIAL PRIMARY KEY,
+  flight_id   INT     NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+  seat_number VARCHAR(10) NOT NULL,   -- VD: 1A, 12B, 33C
+  class       VARCHAR(20) NOT NULL,
+  status      VARCHAR(20) NOT NULL DEFAULT 'occupied',  -- occupied | available
+  passenger_id BIGINT REFERENCES passengers(id) ON DELETE SET NULL,
+  booking_id   BIGINT REFERENCES bookings(id)  ON DELETE SET NULL,
+  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ 
+  UNIQUE (flight_id, seat_number)
+);
+ 
+CREATE INDEX IF NOT EXISTS idx_seat_assignments_flight
+  ON flight_seat_assignments (flight_id, class);
+
 
 -- =============================================
 -- SEED DATA
