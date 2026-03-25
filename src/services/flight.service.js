@@ -30,7 +30,7 @@ const validateSearchParams = ({
     if (!dateRegex.test(return_date)) {
       throw new Error("return_date phải có định dạng YYYY-MM-DD");
     }
-    if (new Date(return_date) < depDate) {
+    if (new Date(return_date) <= depDate) {
       throw new Error("Ngày về phải sau ngày đi");
     }
   }
