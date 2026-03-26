@@ -115,13 +115,11 @@ const formatFlights = (rows, adults, children, infants) =>
       total_seats: r.total_seats,
       base_price: r.base_price ? parseFloat(r.base_price) : 0,
 
-      baggage: {
-        included_kg: r.baggage_included_kg,
-        carry_on_kg: r.carry_on_kg,
-        extra_price_per_kg: r.extra_baggage_price
-          ? parseFloat(r.extra_baggage_price)
-          : 0,
-      },
+      included_kg: r.baggage_included_kg,
+      carry_on_kg: r.carry_on_kg,
+      extra_price_per_kg: r.extra_baggage_price
+        ? parseFloat(r.extra_baggage_price)
+        : 0,
 
       // Giá từng loại hành khách
       price_breakdown: {
