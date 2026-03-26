@@ -235,7 +235,10 @@ const queryFlights = async ({
       fs.class                AS seat_class,
       fs.available_seats,
       fs.total_seats,
-      fs.base_price
+      fs.base_price,
+      fs.baggage_included_kg,
+      fs.carry_on_kg,
+      fs.extra_baggage_price
 
     FROM flights f
     JOIN airlines     al     ON al.id     = f.airline_id
@@ -366,13 +369,16 @@ const getFlightById = async (flightId) => {
        dep.code AS departure_code, dep.name AS departure_name, dep.city AS departure_city,
        arr.code AS arrival_code,  arr.name AS arrival_name,  arr.city AS arrival_city,
        json_agg(
-         json_build_object(
-           'class',           fs.class,
-           'available_seats', fs.available_seats,
-           'total_seats',     fs.total_seats,
-           'base_price',      fs.base_price
-         ) ORDER BY fs.base_price
-       ) AS seats
+        json_build_object(
+          'class', fs.class,
+          'available_seats', fs.available_seats,
+          'total_seats', fs.total_seats,
+          'base_price', fs.base_price,
+          'baggage_included_kg', fs.baggage_included_kg,
+          'carry_on_kg', fs.carry_on_kg,
+          'extra_baggage_price', fs.extra_baggage_price
+        ) ORDER BY fs.base_price
+      ) AS seats
      FROM flights f
      JOIN airlines     al  ON al.id  = f.airline_id
      JOIN airports     dep ON dep.id = f.departure_airport_id
