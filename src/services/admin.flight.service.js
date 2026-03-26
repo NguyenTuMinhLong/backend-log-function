@@ -357,15 +357,6 @@ const toggleFlightVisibility = async (flightId) => {
   };
 };
 
-module.exports = {
-  getFlights,
-  createFlight,
-  updateFlight,
-  updateFlightStatus,
-  toggleFlightVisibility,
-};
-
-
 // ══════════════════════════════════════════════════════
 // A-02: Manage Airports
 // ══════════════════════════════════════════════════════
