@@ -66,9 +66,9 @@ const formatDuration = (minutes) => {
 
 /**
  * Tính tổng tiền theo loại hành khách
- * - Adults:   100% giá
- * - Children: 75%  giá
- * - Infants:  10%  giá (không chiếm ghế)
+ * - Adults:   100%
+ * - Children: 75%
+ * - Infants:  10% (không chiếm ghế)
  */
 const calcTotalPrice = (basePrice, adults, children, infants) => {
   const adultTotal = basePrice * adults;
@@ -78,65 +78,64 @@ const calcTotalPrice = (basePrice, adults, children, infants) => {
 };
 
 const formatFlights = (rows, adults, children, infants) =>
-  rows.map((r) => ({
-    flight_id: r.flight_id,
-    flight_number: r.flight_number,
-    status: r.status,
+  rows.map((r) => {
+    const base = parseFloat(r.base_price) || 0;
+    return {
+      flight_id: r.flight_id,
+      flight_number: r.flight_number,
+      status: r.status,
 
-    airline: {
-      id: r.airline_id,
-      code: r.airline_code,
-      name: r.airline_name,
-      logo_url: r.airline_logo,
-    },
-
-    departure: {
-      airport_id: r.departure_airport_id,
-      code: r.departure_code,
-      airport_name: r.departure_airport_name,
-      city: r.departure_city,
-      time: r.departure_time,
-    },
-
-    arrival: {
-      airport_id: r.arrival_airport_id,
-      code: r.arrival_code,
-      airport_name: r.arrival_airport_name,
-      city: r.arrival_city,
-      time: r.arrival_time,
-    },
-
-    duration_minutes: r.duration_minutes,
-    duration_label: formatDuration(r.duration_minutes),
-
-    seat: {
-      class: r.seat_class,
-      available_seats: r.available_seats,
-      total_seats: r.total_seats,
-      base_price: r.base_price ? parseFloat(r.base_price) : 0,
-
-      baggage_included_kg: r.baggage_included_kg,
-      carry_on_kg: r.carry_on_kg,
-      extra_baggage_price: r.extra_baggage_price
-        ? parseFloat(r.extra_baggage_price)
-        : 0,
-
-      // Giá từng loại hành khách
-      price_breakdown: {
-        adult_price: parseFloat(r.base_price),
-        child_price: Math.round(parseFloat(r.base_price) * 0.75),
-        infant_price: Math.round(parseFloat(r.base_price) * 0.1),
+      airline: {
+        id: r.airline_id,
+        code: r.airline_code,
+        name: r.airline_name,
+        logo_url: r.airline_logo,
       },
 
-      // Tổng tiền cho toàn bộ hành khách
-      total_price: calcTotalPrice(
-        parseFloat(r.base_price),
-        adults,
-        children,
-        infants,
-      ),
-    },
-  }));
+      departure: {
+        airport_id: r.departure_airport_id,
+        code: r.departure_code,
+        airport_name: r.departure_airport_name,
+        city: r.departure_city,
+        time: r.departure_time,
+      },
+
+      arrival: {
+        airport_id: r.arrival_airport_id,
+        code: r.arrival_code,
+        airport_name: r.arrival_airport_name,
+        city: r.arrival_city,
+        time: r.arrival_time,
+      },
+
+      duration_minutes: r.duration_minutes,
+      duration_label: formatDuration(r.duration_minutes),
+
+      seat: {
+        class: r.seat_class,
+        available_seats: r.available_seats,
+        total_seats: r.total_seats,
+
+        // ✅ base_price = giá gốc 1 người lớn (dùng để hiển thị /Customer)
+        base_price: base,
+
+        baggage_included_kg: r.baggage_included_kg,
+        carry_on_kg: r.carry_on_kg,
+        extra_baggage_price: parseFloat(r.extra_baggage_price) || 0,
+
+        // ✅ price_breakdown: giá từng loại hành khách (tính cho 1 người)
+        price_breakdown: {
+          adult_price: base,
+          child_price: Math.round(base * 0.75),
+          infant_price: Math.round(base * 0.1),
+        },
+
+        // ✅ total_price = tổng tiền toàn đoàn (adults + children + infants)
+        // Frontend dùng cái này để hiển thị tổng, KHÔNG dùng để hiển thị /Customer
+        total_price: calcTotalPrice(base, adults, children, infants),
+      },
+    };
+  });
 
 const queryFlights = async ({
   departure_code,
@@ -155,11 +154,9 @@ const queryFlights = async ({
 }) => {
   const a = parseInt(adults) || 1;
   const c = parseInt(children) || 0;
-  const i = parseInt(infants) || 0;
   const cls = seat_class.toLowerCase();
 
-  // Infants không chiếm ghế → chỉ cần đủ ghế cho adults + children
-  const seatsNeeded = a + c;
+  const seatsNeeded = a + c; // infants không chiếm ghế
 
   const sortMap = {
     price_asc: "fs.base_price ASC",
@@ -173,7 +170,6 @@ const queryFlights = async ({
   const values = [];
   let idx = 1;
 
-  // Điều kiện bắt buộc
   conditions.push(`dep_ap.code = $${idx++}`);
   values.push(departure_code.toUpperCase());
   conditions.push(`arr_ap.code = $${idx++}`);
@@ -185,8 +181,8 @@ const queryFlights = async ({
   conditions.push(`fs.available_seats >= $${idx++}`);
   values.push(seatsNeeded);
   conditions.push(`f.status = 'scheduled'`);
+  conditions.push(`f.is_active = TRUE`);
 
-  // Filter tuỳ chọn
   if (min_price !== undefined && min_price !== "") {
     conditions.push(`fs.base_price >= $${idx++}`);
     values.push(parseFloat(min_price));
@@ -216,22 +212,18 @@ const queryFlights = async ({
       f.arrival_time,
       f.duration_minutes,
       f.status,
-
       al.id                   AS airline_id,
       al.code                 AS airline_code,
       al.name                 AS airline_name,
       al.logo_url             AS airline_logo,
-
       dep_ap.id               AS departure_airport_id,
       dep_ap.code             AS departure_code,
       dep_ap.name             AS departure_airport_name,
       dep_ap.city             AS departure_city,
-
       arr_ap.id               AS arrival_airport_id,
       arr_ap.code             AS arrival_code,
       arr_ap.name             AS arrival_airport_name,
       arr_ap.city             AS arrival_city,
-
       fs.class                AS seat_class,
       fs.available_seats,
       fs.total_seats,
@@ -239,13 +231,11 @@ const queryFlights = async ({
       fs.baggage_included_kg,
       fs.carry_on_kg,
       fs.extra_baggage_price
-
     FROM flights f
     JOIN airlines     al     ON al.id     = f.airline_id
     JOIN airports     dep_ap ON dep_ap.id = f.departure_airport_id
     JOIN airports     arr_ap ON arr_ap.id = f.arrival_airport_id
     JOIN flight_seats fs     ON fs.flight_id = f.id
-
     WHERE ${conditions.join(" AND ")}
     ORDER BY ${orderBy}
   `;
@@ -305,11 +295,9 @@ const searchFlights = async (params) => {
     arrival_city,
   };
 
-  // Chuyến đi
   const outboundRows = await queryFlights(baseParams);
   const outboundFlights = formatFlights(outboundRows, a, c, i);
 
-  // Chuyến về (nếu khứ hồi)
   let returnFlights = null;
   if (return_date) {
     const returnRows = await queryFlights({
@@ -323,16 +311,8 @@ const searchFlights = async (params) => {
 
   return {
     trip_type: return_date ? "round_trip" : "one_way",
-
-    passengers: {
-      adults,
-      children: c,
-      infants: i,
-      total: a + c + i,
-    },
-
+    passengers: { adults: a, children: c, infants: i, total: a + c + i },
     seat_class,
-
     outbound_flights: outboundFlights,
     return_flights: returnFlights,
     total_outbound: outboundFlights.length,
@@ -343,9 +323,7 @@ const searchFlights = async (params) => {
 const getAirports = async () => {
   const result = await pool.query(
     `SELECT id, code, name, city, country
-     FROM airports
-     WHERE is_active = TRUE
-     ORDER BY city ASC`,
+     FROM airports WHERE is_active = TRUE ORDER BY city ASC`,
   );
   return result.rows;
 };
@@ -353,14 +331,23 @@ const getAirports = async () => {
 const getAirlines = async () => {
   const result = await pool.query(
     `SELECT id, code, name, logo_url
-     FROM airlines
-     WHERE is_active = TRUE
-     ORDER BY name ASC`,
+     FROM airlines WHERE is_active = TRUE ORDER BY name ASC`,
   );
   return result.rows;
 };
 
-const getFlightById = async (flightId) => {
+/**
+ * GET /api/flights/:id
+ * ✅ Nhận thêm adults/children/infants để tính đúng total_price
+ */
+const getFlightById = async (
+  flightId,
+  { adults = 1, children = 0, infants = 0 } = {},
+) => {
+  const a = parseInt(adults) || 1;
+  const c = parseInt(children) || 0;
+  const i = parseInt(infants) || 0;
+
   const result = await pool.query(
     `SELECT
        f.id, f.flight_number, f.departure_time, f.arrival_time,
@@ -369,16 +356,16 @@ const getFlightById = async (flightId) => {
        dep.code AS departure_code, dep.name AS departure_name, dep.city AS departure_city,
        arr.code AS arrival_code,  arr.name AS arrival_name,  arr.city AS arrival_city,
        json_agg(
-        json_build_object(
-          'class', fs.class,
-          'available_seats', fs.available_seats,
-          'total_seats', fs.total_seats,
-          'base_price', fs.base_price,
-          'baggage_included_kg', fs.baggage_included_kg,
-          'carry_on_kg', fs.carry_on_kg,
-          'extra_baggage_price', fs.extra_baggage_price
-        ) ORDER BY fs.base_price
-      ) AS seats
+         json_build_object(
+           'class',               fs.class,
+           'available_seats',     fs.available_seats,
+           'total_seats',         fs.total_seats,
+           'base_price',          fs.base_price,
+           'baggage_included_kg', fs.baggage_included_kg,
+           'carry_on_kg',         fs.carry_on_kg,
+           'extra_baggage_price', fs.extra_baggage_price
+         ) ORDER BY fs.base_price
+       ) AS seats
      FROM flights f
      JOIN airlines     al  ON al.id  = f.airline_id
      JOIN airports     dep ON dep.id = f.departure_airport_id
@@ -394,12 +381,31 @@ const getFlightById = async (flightId) => {
   if (result.rows.length === 0) throw new Error("Không tìm thấy chuyến bay");
 
   const r = result.rows[0];
+
+  // ✅ Gắn thêm price_breakdown và total_price vào từng hạng ghế
+  const seatsWithPrice = (r.seats || []).map((s) => {
+    const base = parseFloat(s.base_price) || 0;
+    return {
+      ...s,
+      base_price: base,
+      extra_baggage_price: parseFloat(s.extra_baggage_price) || 0,
+      price_breakdown: {
+        adult_price: base,
+        child_price: Math.round(base * 0.75),
+        infant_price: Math.round(base * 0.1),
+      },
+      // total_price = tổng tiền cho số người đã truyền vào
+      total_price: calcTotalPrice(base, a, c, i),
+    };
+  });
+
   return {
     flight_id: r.id,
     flight_number: r.flight_number,
     status: r.status,
     duration_minutes: r.duration_minutes,
     duration_label: formatDuration(r.duration_minutes),
+    passengers: { adults: a, children: c, infants: i, total: a + c + i },
     airline: {
       code: r.airline_code,
       name: r.airline_name,
@@ -417,7 +423,7 @@ const getFlightById = async (flightId) => {
       city: r.arrival_city,
       time: r.arrival_time,
     },
-    seats: r.seats,
+    seats: seatsWithPrice,
   };
 };
 
