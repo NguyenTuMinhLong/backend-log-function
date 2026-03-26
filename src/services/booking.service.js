@@ -828,13 +828,13 @@ const cancelBooking = async (userId, bookingCode) => {
     let paymentStatusAfterCancel = null;
 
     if (payment) {
-      if (payment.status === "SUCCESS") {
+      if (payment.status === "success") {
         if (refundAmount === 0) {
-          paymentStatusAfterCancel = "CANCELLED";
+          paymentStatusAfterCancel = "cancelled";
         } else if (refundAmount < paidAmount) {
-          paymentStatusAfterCancel = "PARTIAL_REFUND_PENDING";
+          paymentStatusAfterCancel = "partial_refund_pending";
         } else {
-          paymentStatusAfterCancel = "REFUND_PENDING";
+          paymentStatusAfterCancel = "refund_pending";
         }
 
         await client.query(
@@ -848,12 +848,12 @@ const cancelBooking = async (userId, bookingCode) => {
           [paymentStatusAfterCancel, payment.id],
         );
       } else {
-        paymentStatusAfterCancel = "CANCELLED";
+        paymentStatusAfterCancel = "cancelled";
 
         await client.query(
           `
       UPDATE payments
-      SET status = 'CANCELLED',
+      SET status = 'cancelled',
           cancelled_at = NOW(),
           updated_at = NOW()
       WHERE id = $1
