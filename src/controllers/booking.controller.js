@@ -8,6 +8,7 @@ const createBooking = async (req, res) => {
   try {
     const userId = req.user ? req.user.id : null;
     const result = await bookingService.createBooking(req.body, userId);
+
     res.status(201).json({
       message: "Đặt vé thành công",
       data: result,
@@ -28,8 +29,9 @@ const getBookingDetail = async (req, res) => {
     const userId = req.user ? req.user.id : null;
     const result = await bookingService.getBookingDetail(
       req.params.bookingCode.toUpperCase(),
-      userId
+      userId,
     );
+
     res.json({
       message: "Lấy thông tin booking thành công",
       data: result,
@@ -45,10 +47,14 @@ const getBookingDetail = async (req, res) => {
  */
 const getMyBookings = async (req, res) => {
   try {
-    const result = await bookingService.getMyBookings(req.user.id);
+    const filter = req.query.filter || "all";
+    const data = await bookingService.getMyBookings(req.user.id, filter);
+
     res.json({
-      message: "Lấy lịch sử đặt vé thành công",
-      data: result,
+      message: "Lấy lịch sử chuyến bay thành công",
+      filter,
+      total: data.length,
+      data,
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -57,19 +63,25 @@ const getMyBookings = async (req, res) => {
 
 /**
  * POST /api/bookings/:bookingCode/cancel
- * Hủy booking
+ * Hủy booking - chỉ user đã đăng nhập mới được hủy
  */
 const cancelBooking = async (req, res) => {
   try {
-    const userId = req.user ? req.user.id : null;
-    const result = await bookingService.cancelBooking(
-      req.params.bookingCode.toUpperCase(),
-      userId
-    );
-    res.json(result);
+    const bookingCode = req.params.bookingCode.toUpperCase();
+    const result = await bookingService.cancelBooking(req.user.id, bookingCode);
+
+    res.json({
+      message: "Hủy booking thành công",
+      data: result,
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 };
 
-module.exports = { createBooking, getBookingDetail, getMyBookings, cancelBooking };
+module.exports = {
+  createBooking,
+  getBookingDetail,
+  getMyBookings,
+  cancelBooking,
+};
