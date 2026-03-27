@@ -5,7 +5,7 @@ const { authenticate, authenticateOptional } = require("../middlewares/auth.midd
 
 // Lịch sử booking của tôi: phải đăng nhập
 router.get("/my", authenticate, bookingController.getMyBookings);
-// ?filter=all|upcoming|completed|cancelled|expired
+// http://localhost:3000/api/bookings/my?filter=   all|upcoming|completed|cancelled|expired
 
 // Tạo booking: guest hoặc user login đều được
 router.post("/", authenticateOptional, bookingController.createBooking);

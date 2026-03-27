@@ -570,29 +570,45 @@ const updateBookingStatus = async (bookingId, status) => {
 
 const getStatistics = async (params) => {
   const { from_date, to_date } = params;
-  const dateFilter = from_date && to_date
-    ? `AND b.created_at BETWEEN '${from_date}' AND '${to_date}'`
+
+  // Dùng parameterized query thay vì string interpolation
+  const dateValues = [];
+  let   dateFilter = "";
+  if (from_date && to_date) {
+    dateValues.push(from_date, to_date);
+    dateFilter = `AND created_at BETWEEN $1 AND $2`;
+  }
+
+  // Alias "b" dùng cho query nào có JOIN, không dùng alias cho query đơn giản
+  const bDateFilter = from_date && to_date
+    ? `AND b.created_at BETWEEN $1 AND $2`
     : "";
 
-  // Tổng booking theo trạng thái
+  // 1. Tổng booking theo trạng thái
+  // ✅ Không có alias → dùng dateFilter (không có b.)
   const bookingSummary = await pool.query(
     `SELECT status, COUNT(*) AS count, SUM(total_price) AS revenue
-     FROM bookings WHERE 1=1 ${dateFilter}
-     GROUP BY status ORDER BY status`
+     FROM bookings
+     WHERE 1=1 ${dateFilter}
+     GROUP BY status ORDER BY status`,
+    dateValues
   );
 
-  // Doanh thu theo ngày (7 ngày gần nhất)
+  // 2. Doanh thu theo ngày (7 ngày gần nhất hoặc theo filter)
   const dailyRevenue = await pool.query(
     `SELECT DATE(created_at) AS date,
             COUNT(*) AS bookings,
             SUM(total_price) FILTER (WHERE status IN ('confirmed','pending')) AS revenue
      FROM bookings
      WHERE created_at >= NOW() - INTERVAL '7 days'
+     ${from_date && to_date ? "AND created_at BETWEEN $1 AND $2" : ""}
      GROUP BY DATE(created_at)
-     ORDER BY date DESC`
+     ORDER BY date DESC`,
+    dateValues
   );
 
-  // Top 5 chuyến bay phổ biến nhất
+  // 3. Top 5 chuyến bay phổ biến nhất
+  // ✅ Có JOIN → dùng alias b → bDateFilter (có b.)
   const popularFlights = await pool.query(
     `SELECT f.flight_number,
             al.name AS airline,
@@ -604,13 +620,15 @@ const getStatistics = async (params) => {
      JOIN airlines al  ON al.id  = f.airline_id
      JOIN airports dep ON dep.id = f.departure_airport_id
      JOIN airports arr ON arr.id = f.arrival_airport_id
-     WHERE b.status IN ('confirmed','pending') ${dateFilter}
+     WHERE b.status IN ('confirmed','pending') ${bDateFilter}
      GROUP BY f.id, f.flight_number, al.name, dep.city, arr.city
      ORDER BY total_bookings DESC
-     LIMIT 5`
+     LIMIT 5`,
+    dateValues
   );
 
-  // Tổng quan
+  // 4. Tổng quan
+  // ✅ Không có alias → dùng dateFilter (không có b.)
   const overview = await pool.query(
     `SELECT
        COUNT(*) FILTER (WHERE status IN ('confirmed','pending'))          AS total_bookings,
@@ -621,7 +639,9 @@ const getStatistics = async (params) => {
        COUNT(*) FILTER (WHERE status = 'expired')                         AS expired,
        SUM(total_adults + total_children + total_infants)
          FILTER (WHERE status IN ('confirmed','pending'))                  AS total_passengers
-     FROM bookings WHERE 1=1 ${dateFilter}`
+     FROM bookings
+     WHERE 1=1 ${dateFilter}`,
+    dateValues
   );
 
   return {
