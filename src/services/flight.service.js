@@ -116,22 +116,21 @@ const formatFlights = (rows, adults, children, infants) =>
         available_seats: r.available_seats,
         total_seats: r.total_seats,
 
-        // ✅ base_price = giá gốc 1 người lớn (dùng để hiển thị /Customer)
+        // base_price = giá gốc 1 người lớn (dùng để hiển thị /Customer)
         base_price: base,
 
         baggage_included_kg: r.baggage_included_kg,
         carry_on_kg: r.carry_on_kg,
         extra_baggage_price: parseFloat(r.extra_baggage_price) || 0,
 
-        // ✅ price_breakdown: giá từng loại hành khách (tính cho 1 người)
+        // price_breakdown: giá từng loại hành khách (tính cho 1 người)
         price_breakdown: {
           adult_price: base,
           child_price: Math.round(base * 0.75),
           infant_price: Math.round(base * 0.1),
         },
 
-        // ✅ total_price = tổng tiền toàn đoàn (adults + children + infants)
-        // Frontend dùng cái này để hiển thị tổng, KHÔNG dùng để hiển thị /Customer
+        // total_price = tổng tiền vé toàn đoàn (chưa tính hành lý thêm)
         total_price: calcTotalPrice(base, adults, children, infants),
       },
     };
