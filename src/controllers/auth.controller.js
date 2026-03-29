@@ -187,6 +187,26 @@ const resendOTP = async (req, res) => {
     });
   }
 };
+const socialMe = async (req, res) => {
+  try {
+    res.json({
+      message: "Social login success",
+      user: req.user,
+      supabase_user: {
+        id: req.supabaseUser.id,
+        email: req.supabaseUser.email,
+        provider:
+          req.supabaseUser.app_metadata?.provider ||
+          req.supabaseUser.app_metadata?.providers?.[0] ||
+          "email",
+      },
+    });
+  } catch (err) {
+    res.status(400).json({
+      error: err.message,
+    });
+  }
+};
 
 module.exports = {
   register,
@@ -198,5 +218,6 @@ module.exports = {
   me,
   changePassword,
   logout,
-  resendOTP
+  resendOTP,
+  socialMe
 };

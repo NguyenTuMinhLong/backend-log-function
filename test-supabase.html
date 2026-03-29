@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Supabase Test</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <button id="loginBtn">Login test</button>
+  <pre id="output"></pre>
+
+  <script>
+    const output = document.getElementById("output");
+
+    const SUPABASE_URL = "https://sautvlazbocyvirdzuvl.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNhdXR2bGF6Ym9jeXZpcmR6dXZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4OTk1NzIsImV4cCI6MjA4OTQ3NTU3Mn0.XEsGiX__PyT45eEESfJirwowch9bKm5ELCV5ZdceUzk";
+    const TEST_EMAIL = "test@gmail.com";
+    const TEST_PASSWORD = "123456";
+    const BACKEND_URL = "http://localhost:3000"; // doi neu backend bro khong chay 5000
+
+    if (!window.supabase || !window.supabase.createClient) {
+      output.textContent = "Khong load duoc supabase-js";
+      throw new Error("supabase-js not loaded");
+    }
+
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    document.getElementById("loginBtn").addEventListener("click", async () => {
+      try {
+        output.textContent = "Loading...";
+
+        const { data, error } = await sb.auth.signInWithPassword({
+          email: TEST_EMAIL,
+          password: TEST_PASSWORD,
+        });
+
+        if (error) {
+          output.textContent = "Login error: " + error.message;
+          console.error(error);
+          return;
+        }
+
+        const token = data?.session?.access_token;
+
+        if (!token) {
+          output.textContent = "Khong lay duoc access token";
+          return;
+        }
+
+        console.log("TOKEN:", token);
+
+        const res = await fetch(`${BACKEND_URL}/api/auth/social/me`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
+
+        const result = await res.json();
+
+        console.log("BACKEND:", result);
+        output.textContent = JSON.stringify(result, null, 2);
+      } catch (err) {
+        console.error(err);
+        output.textContent = "Unexpected error: " + err.message;
+      }
+    });
+  </script>
+</body>
+</html>

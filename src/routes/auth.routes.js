@@ -3,6 +3,7 @@ const router = express.Router();
 
 const authController = require("../controllers/auth.controller");
 const { authenticate } = require("../middlewares/auth.middleware");
+const { authenticateSupabase } = require("../middlewares/supabase-auth.middleware");
 
 router.post("/register", authController.register);
 router.post("/login", authController.login);
@@ -14,5 +15,8 @@ router.get("/me", authenticate, authController.me);
 router.post("/change-password", authenticate, authController.changePassword);
 router.post("/logout", authenticate, authController.logout);
 router.post("/resend-otp", authController.resendOTP);
+
+// social login qua Supabase
+router.get("/social/me", authenticateSupabase, authController.socialMe);
 
 module.exports = router;
