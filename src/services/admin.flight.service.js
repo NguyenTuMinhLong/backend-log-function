@@ -201,10 +201,25 @@ const createFlight = async (data) => {
         ? parseInt(s.available_seats)
         : totalSeats;
 
+      // Baggage defaults theo hạng nếu không truyền vào
+      const defaultBaggage = {
+        economy:  { baggage_included_kg: 23, carry_on_kg: 7,  extra_baggage_price: 250000 },
+        business: { baggage_included_kg: 32, carry_on_kg: 10, extra_baggage_price: 150000 },
+        first:    { baggage_included_kg: 40, carry_on_kg: 14, extra_baggage_price: 0      },
+      };
+      const def = defaultBaggage[s.class] || defaultBaggage.economy;
+
+      const baggageIncludedKg  = s.baggage_included_kg  !== undefined ? parseInt(s.baggage_included_kg)       : def.baggage_included_kg;
+      const carryOnKg          = s.carry_on_kg          !== undefined ? parseInt(s.carry_on_kg)               : def.carry_on_kg;
+      const extraBaggagePrice  = s.extra_baggage_price  !== undefined ? parseFloat(s.extra_baggage_price)     : def.extra_baggage_price;
+
       await client.query(
-        `INSERT INTO flight_seats (flight_id, class, total_seats, available_seats, base_price)
-         VALUES ($1,$2,$3,$4,$5)`,
-        [flight.id, s.class, totalSeats, available, parseFloat(s.base_price)]
+        `INSERT INTO flight_seats (
+           flight_id, class, total_seats, available_seats, base_price,
+           baggage_included_kg, carry_on_kg, extra_baggage_price
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [flight.id, s.class, totalSeats, available, parseFloat(s.base_price),
+         baggageIncludedKg, carryOnKg, extraBaggagePrice]
       );
     }
 
@@ -277,8 +292,11 @@ const updateFlight = async (flightId, data) => {
           const seatValues  = [];
           let   sidx        = 1;
 
-          if (s.base_price   !== undefined) { seatFields.push(`base_price=$${sidx++}`);   seatValues.push(parseFloat(s.base_price)); }
-          if (s.total_seats  !== undefined) { seatFields.push(`total_seats=$${sidx++}`);  seatValues.push(parseInt(s.total_seats)); }
+          if (s.base_price          !== undefined) { seatFields.push(`base_price=$${sidx++}`);          seatValues.push(parseFloat(s.base_price)); }
+          if (s.total_seats         !== undefined) { seatFields.push(`total_seats=$${sidx++}`);         seatValues.push(parseInt(s.total_seats)); }
+          if (s.baggage_included_kg !== undefined) { seatFields.push(`baggage_included_kg=$${sidx++}`); seatValues.push(parseInt(s.baggage_included_kg)); }
+          if (s.carry_on_kg         !== undefined) { seatFields.push(`carry_on_kg=$${sidx++}`);         seatValues.push(parseInt(s.carry_on_kg)); }
+          if (s.extra_baggage_price !== undefined) { seatFields.push(`extra_baggage_price=$${sidx++}`); seatValues.push(parseFloat(s.extra_baggage_price)); }
 
           if (seatFields.length > 0) {
             seatFields.push(`updated_at=NOW()`);
@@ -292,10 +310,21 @@ const updateFlight = async (flightId, data) => {
         } else {
           // Chưa có → INSERT
           const totalSeats = parseInt(s.total_seats) || 0;
+          const defaultBaggage2 = {
+            economy:  { baggage_included_kg: 23, carry_on_kg: 7,  extra_baggage_price: 40000 },
+            business: { baggage_included_kg: 32, carry_on_kg: 12, extra_baggage_price: 40000 },
+            first:    { baggage_included_kg: 40, carry_on_kg: 15, extra_baggage_price: 40000 },
+          };
+          const def2 = defaultBaggage2[s.class] || defaultBaggage2.economy;
           await client.query(
-            `INSERT INTO flight_seats (flight_id,class,total_seats,available_seats,base_price)
-             VALUES ($1,$2,$3,$3,$4)`,
-            [flightId, s.class, totalSeats, parseFloat(s.base_price)]
+            `INSERT INTO flight_seats (
+               flight_id, class, total_seats, available_seats, base_price,
+               baggage_included_kg, carry_on_kg, extra_baggage_price
+             ) VALUES ($1,$2,$3,$3,$4,$5,$6,$7)`,
+            [flightId, s.class, totalSeats, parseFloat(s.base_price),
+             s.baggage_included_kg !== undefined ? parseInt(s.baggage_included_kg) : def2.baggage_included_kg,
+             s.carry_on_kg         !== undefined ? parseInt(s.carry_on_kg)         : def2.carry_on_kg,
+             s.extra_baggage_price !== undefined ? parseFloat(s.extra_baggage_price) : def2.extra_baggage_price]
           );
         }
       }
