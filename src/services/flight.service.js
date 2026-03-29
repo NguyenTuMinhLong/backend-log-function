@@ -396,7 +396,7 @@ const getFlightById = async (
       // total_price = tổng tiền cho số người đã truyền vào
       total_price: calcTotalPrice(base, a, c, i),
     };
-  });
+  });c
 
   return {
     flight_id: r.id,
