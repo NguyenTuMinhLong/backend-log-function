@@ -71,22 +71,22 @@ ALTER TABLE flight_seats
 -- economy: 23kg, business: 32kg, first: 40kg
 UPDATE flight_seats SET
   baggage_included_kg = CASE class
-    WHEN 'economy'  THEN 23
+    WHEN 'economy'  THEN 32
     WHEN 'business' THEN 32
-    WHEN 'first'    THEN 40
+    WHEN 'first'    THEN 23
     ELSE 23
   END,
   carry_on_kg = CASE class
-    WHEN 'economy'  THEN 7
-    WHEN 'business' THEN 10
-    WHEN 'first'    THEN 14
-    ELSE 7
+    WHEN 'economy'  THEN 12
+    WHEN 'business' THEN 18
+    WHEN 'first'    THEN 12
+    ELSE 12
   END,
   extra_baggage_price = CASE class
-    WHEN 'economy'  THEN 250000   -- 250k/kg thêm
-    WHEN 'business' THEN 150000
-    WHEN 'first'    THEN 0        -- first: miễn phí thêm hành lý
-    ELSE 250000
+    WHEN 'economy'  THEN 75000   -- 250k/kg thêm
+    WHEN 'business' THEN 75000
+    WHEN 'first'    THEN 50000        -- first: miễn phí thêm hành lý
+    ELSE 50000
   END;
 
 -- 5. Bảng theo dõi ghế đã được gán trong từng chuyến bay
