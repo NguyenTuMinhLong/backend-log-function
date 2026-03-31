@@ -78,6 +78,7 @@ const buildBaggageOptions = (extraBaggagePrice) => {
     { kg: 0,  label: "No extra", price_per_person: 0 },
     { kg: 5,  label: "+5 kg",    price_per_person: 5  * pricePerKg },
     { kg: 10, label: "+10 kg",   price_per_person: 10 * pricePerKg },
+    { kg: 15, label: "+15 kg",   price_per_person: 15 * pricePerKg },
     { kg: 20, label: "+20 kg",   price_per_person: 20 * pricePerKg },
   ];
 };

@@ -485,7 +485,7 @@ const getMyBookings = async (userId, filter = "all") => {
 
       COUNT(p.id) AS passenger_count,
 
-      -- FIX: history_type dựa vào payment status thay vì thời gian bay
+      -- FIX: history_type dựa vào payment status thay vì thời gian bay, trạng thái booking
       CASE
         WHEN b.status = 'cancelled' THEN 'cancelled'
         WHEN b.status = 'expired'   THEN 'expired'
@@ -623,6 +623,7 @@ const cancelBooking = async (userId, bookingCode) => {
       }
       for (const key of Object.keys(groupedSeats)) {
         const [flightId, seatClass] = key.split("__");
+        // Nâng lại số ghế trống
         await client.query(
           `UPDATE flight_seats SET available_seats = available_seats + $1, updated_at = NOW()
            WHERE flight_id = $2 AND class = $3`,
