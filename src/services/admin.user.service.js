@@ -184,7 +184,14 @@ const updateUserStatus = async (userId, status, currentAdmin) => {
 
     const existingResult = await client.query(
       `
-      SELECT id, full_name, email, role, status
+      SELECT
+        id,
+        full_name,
+        email,
+        role,
+        status,
+        failed_login_attempts,
+        locked_until
       FROM users
       WHERE id = $1
       `,
@@ -204,21 +211,23 @@ const updateUserStatus = async (userId, status, currentAdmin) => {
       throw new Error("Bạn không thể tự khóa hoặc vô hiệu hóa chính mình");
     }
 
+    const shouldResetLoginState = status === "active";
+    const nextFailedLoginAttempts = shouldResetLoginState
+      ? 0
+      : existingUser.failed_login_attempts;
+    const nextLockedUntil = shouldResetLoginState
+      ? null
+      : existingUser.locked_until;
+
     const result = await client.query(
       `
       UPDATE users
       SET
         status = $1,
-        failed_login_attempts = CASE
-          WHEN $1 = 'active' THEN 0
-          ELSE failed_login_attempts
-        END,
-        locked_until = CASE
-          WHEN $1 = 'active' THEN NULL
-          ELSE locked_until
-        END,
+        failed_login_attempts = $2,
+        locked_until = $3,
         updated_at = NOW()
-      WHERE id = $2
+      WHERE id = $4
       RETURNING
         id,
         full_name,
@@ -238,7 +247,7 @@ const updateUserStatus = async (userId, status, currentAdmin) => {
           ELSE FALSE
         END AS is_temporarily_locked
       `,
-      [status, userId]
+      [status, nextFailedLoginAttempts, nextLockedUntil, userId]
     );
 
     await client.query("COMMIT");
