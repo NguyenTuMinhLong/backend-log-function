@@ -1,6 +1,29 @@
 const jwt = require("jsonwebtoken");
+const pool = require("../config/db");
 
-const authenticate = (req, res, next) => {
+const loadActiveUser = async (userId) => {
+  const result = await pool.query(
+    `SELECT id, full_name, email, phone, role, status, email_verified
+     FROM users
+     WHERE id = $1
+     LIMIT 1`,
+    [userId]
+  );
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  const user = result.rows[0];
+
+  if (user.status !== "active") {
+    return null;
+  }
+
+  return user;
+};
+
+const authenticate = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
@@ -13,8 +36,15 @@ const authenticate = (req, res, next) => {
     const token = authHeader.split(" ")[1];
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await loadActiveUser(decoded.id);
 
-    req.user = decoded;
+    if (!user) {
+      return res.status(401).json({
+        error: "Account is inactive or blocked",
+      });
+    }
+
+    req.user = user;
 
     next();
   } catch (err) {
@@ -30,13 +60,13 @@ const authenticate = (req, res, next) => {
  * - Có token → decode, gán req.user
  * - Không có token → next() luôn (guest)
  */
-const authenticateOptional = (req, res, next) => {
+const authenticateOptional = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith("Bearer ")) {
       const token   = authHeader.split(" ")[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = decoded;
+      req.user = await loadActiveUser(decoded.id);
     }
   } catch (err) {
     // Token sai / hết hạn → coi như guest, không báo lỗi

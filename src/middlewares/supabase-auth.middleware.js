@@ -78,6 +78,12 @@ const authenticateSupabase = async (req, res, next) => {
     } else {
       const currentUser = result.rows[0];
 
+      if (currentUser.status !== "active") {
+        return res.status(403).json({
+          error: "Account is inactive or blocked",
+        });
+      }
+
       const updated = await pool.query(
         `UPDATE users
          SET
