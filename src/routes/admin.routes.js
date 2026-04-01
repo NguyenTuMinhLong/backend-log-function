@@ -6,6 +6,7 @@ const { authenticate, authorize } = require("../middlewares/auth.middleware");
 const adminFlightController = require("../controllers/admin.flight.controller");
 const adminAirportController = require("../controllers/admin.airport.controller");
 const adminAirlineController = require("../controllers/admin.airline.controller");
+const adminCouponController = require("../controllers/admin.coupon.controller");
 
 const adminUserController = require("../controllers/admin.user.controller");
 
@@ -36,6 +37,14 @@ router.get("/users", adminUserController.getUsers);
 router.get("/users/:id", adminUserController.getUserById);
 router.patch("/users/:id/status", adminUserController.updateUserStatus);
 router.patch("/users/:id/role", adminUserController.updateUserRole);
+
+// A-05: Manage Coupons
+router.get("/coupons", adminCouponController.getCoupons);
+router.get("/coupons/:id", adminCouponController.getCouponById);
+router.post("/coupons", adminCouponController.createCoupon);
+router.put("/coupons/:id", adminCouponController.updateCoupon);
+router.patch("/coupons/:id/status", adminCouponController.updateCouponStatus);
+router.delete("/coupons/:id", adminCouponController.deleteCoupon);
 
 // A-06: Manage Bookings
 router.get("/bookings", adminFlightController.getBookings);
