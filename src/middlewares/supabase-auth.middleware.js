@@ -81,6 +81,7 @@ const authenticateSupabase = async (req, res, next) => {
       if (currentUser.status !== "active") {
         return res.status(403).json({
           error: "Account is inactive or blocked",
+          code: "ACCOUNT_DISABLED",
         });
       }
 
