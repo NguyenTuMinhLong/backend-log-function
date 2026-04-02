@@ -677,8 +677,9 @@ const cancelBooking = async (userId, bookingCode) => {
 // ─── expireHeldBookings ───────────────────────────────────────────────────────
 
 const expireHeldBookings = async () => {
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     await client.query("BEGIN");
 
     const expired = await client.query(
@@ -721,10 +722,16 @@ const expireHeldBookings = async () => {
     if (expired.rows.length > 0)
       console.log(`[Auto-expire] Đã hủy ${expired.rows.length} booking hết hạn`);
   } catch (err) {
-    await client.query("ROLLBACK");
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (_) {}
+    }
     console.error("[Auto-expire] Lỗi:", err.message);
   } finally {
-    client.release();
+    if (client) {
+      client.release();
+    }
   }
 };
 

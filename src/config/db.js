@@ -12,19 +12,23 @@
 
 const { Pool } = require("pg");
 
-const connectionString = process.env.DATABASE_URL
-  .replace(':5432', ':6543')           // chuyển sang Transaction mode
-  + '?pgbouncer=true';                 // bắt buộc với Supabase
+const baseConnectionString = process.env.DATABASE_URL || "";
+const connectionString = baseConnectionString.includes(":5432")
+  ? baseConnectionString.replace(":5432", ":6543")
+  : baseConnectionString;
+const finalConnectionString = connectionString.includes("?")
+  ? `${connectionString}&pgbouncer=true`
+  : `${connectionString}?pgbouncer=true`;
 
 const pool = new Pool({
-  connectionString,
+  connectionString: finalConnectionString,
   ssl: {
     rejectUnauthorized: false,         // giữ nguyên fix self-signed cert
   },
   family: 4,                           // giữ nguyên IPv4
   max: 10,                             // giảm số connection tối đa (an toàn hơn)
   idleTimeoutMillis: 30000,            // tự động đóng connection idle
-  connectionTimeoutMillis: 2000,       // timeout nhanh hơn
+  connectionTimeoutMillis: 10000,      // Render/Supabase dễ timeout nếu quá thấp
 });
 
 module.exports = pool;

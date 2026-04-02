@@ -22,6 +22,22 @@ app.use("/api/payments", paymentRoutes);
 
 // Mỗi 1 phút sẽ chạy 1 lần để kiểm tra toàn bộ danh sách booking nhằm tự động hủy booking đã hết hạn giữ ghế
 // 5. Thời gian giữ ghế (30 phút) nằm bên service dòng 192
-setInterval(expireHeldBookings, 60 * 1000);
+let isExpiringHeldBookings = false;
+
+setInterval(async () => {
+  if (isExpiringHeldBookings) {
+    return;
+  }
+
+  isExpiringHeldBookings = true;
+
+  try {
+    await expireHeldBookings();
+  } catch (err) {
+    console.error("[Auto-expire] Unhandled error:", err.message);
+  } finally {
+    isExpiringHeldBookings = false;
+  }
+}, 60 * 1000);
 
 module.exports = app;
