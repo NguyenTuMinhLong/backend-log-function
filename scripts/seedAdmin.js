@@ -4,7 +4,7 @@ const pool = require("../src/config/db");
 
 async function seedAdmin() {
   const email = "admin@gmail.com";
-  const password = "123456";
+  const password = "Meomeomeo1990#";   // password mới
   const fullName = "System Admin";
 
   try {
@@ -18,29 +18,31 @@ async function seedAdmin() {
     if (existing.rows.length > 0) {
       const user = existing.rows[0];
 
-      if (user.role !== "admin") {
-        const updated = await pool.query(
-          `
-          UPDATE users
-          SET
-            role = 'admin',
-            status = 'active',
-            email_verified = true,
-            updated_at = NOW()
-          WHERE email = $1
-          RETURNING id, email, role, status
-          `,
-          [email]
-        );
+      // === UPDATE PASSWORD + các trường khác ===
+      const passwordHash = await bcrypt.hash(password, 10);
 
-        console.log("Đã nâng quyền thành admin:", updated.rows[0]);
-      } else {
-        console.log("Tài khoản admin đã tồn tại:", user);
-      }
+      const updated = await pool.query(
+        `
+        UPDATE users
+        SET
+          password_hash = $1,
+          role = 'admin',
+          status = 'active',
+          email_verified = true,
+          updated_at = NOW()
+        WHERE email = $2
+        RETURNING id, email, role, status
+        `,
+        [passwordHash, email]
+      );
 
+      console.log("Đã cập nhật password admin mới thành công:", updated.rows[0]);
+      console.log("email: admin@gmail.com");
+      console.log("password mới: Meomeomeo1990#");
       return;
     }
 
+    // Phần tạo mới (nếu chưa có)
     const passwordHash = await bcrypt.hash(password, 10);
 
     const inserted = await pool.query(
@@ -65,13 +67,9 @@ async function seedAdmin() {
 
     console.log("Tạo tài khoản admin thành công:", inserted.rows[0]);
     console.log("email: admin@gmail.com");
-    console.log("password: 123456");
+    console.log("password: Meomeomeo1990#");
   } catch (error) {
     console.error("Seed admin thất bại:");
-    console.error("message:", error.message);
-    console.error("code:", error.code);
-    console.error("detail:", error.detail);
-    console.error("hint:", error.hint);
     console.error(error);
   } finally {
     await pool.end();
