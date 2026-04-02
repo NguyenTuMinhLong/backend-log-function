@@ -317,7 +317,22 @@ const resetPassword = async (email, otp, newPassword, confirmPassword) => {
 
 const getMe = async (userId) => {
   const result = await pool.query(
-    `SELECT id, full_name, email, phone, role, status, email_verified, phone_verified, created_at
+    `SELECT
+       id,
+       full_name,
+       email,
+       phone,
+       role,
+       status,
+       email_verified,
+       phone_verified,
+       auth_provider,
+       avatar_url,
+       created_at,
+       CASE
+         WHEN password_hash IS NOT NULL THEN TRUE
+         ELSE FALSE
+       END AS has_password
      FROM users
      WHERE id = $1`,
     [userId]
@@ -354,6 +369,10 @@ const changePassword = async (userId, oldPassword, newPassword, confirmPassword)
 
   const user = result.rows[0];
 
+  if (!user.password_hash) {
+    throw new Error("Account does not have a password yet. Please use set-password first");
+  }
+
   const isMatch = await comparePassword(oldPassword, user.password_hash);
 
   if (!isMatch) {
@@ -362,6 +381,46 @@ const changePassword = async (userId, oldPassword, newPassword, confirmPassword)
 
   if (oldPassword === newPassword) {
     throw new Error("New password must be different from old password");
+  }
+
+  const newPasswordHash = await hashPassword(newPassword);
+
+  await pool.query(
+    `UPDATE users
+     SET password_hash = $1, updated_at = NOW()
+     WHERE id = $2`,
+    [newPasswordHash, userId]
+  );
+
+  return true;
+};
+
+const setPassword = async (userId, newPassword, confirmPassword) => {
+  if (!newPassword || !confirmPassword) {
+    throw new Error("new_password and confirm_password are required");
+  }
+
+  if (newPassword.length < 8) {
+    throw new Error("Password must be at least 8 characters");
+  }
+
+  if (newPassword !== confirmPassword) {
+    throw new Error("Password and confirm password do not match");
+  }
+
+  const result = await pool.query(
+    "SELECT id, password_hash FROM users WHERE id = $1",
+    [userId]
+  );
+
+  if (result.rows.length === 0) {
+    throw new Error("User not found");
+  }
+
+  const user = result.rows[0];
+
+  if (user.password_hash) {
+    throw new Error("Password already exists for this account. Please use change-password");
   }
 
   const newPasswordHash = await hashPassword(newPassword);
@@ -425,5 +484,6 @@ module.exports = {
   resetPassword,
   getMe,
   changePassword,
+  setPassword,
   resendRegisterOTP,
 };

@@ -96,6 +96,16 @@ const changePassword = async (req, res) => {
   }
 };
 
+const setPassword = async (req, res) => {
+  try {
+    const { new_password, confirm_password } = req.body;
+    await authService.setPassword(req.user.id, new_password, confirm_password);
+    res.json({ message: "Password set successfully" });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
 const logout = async (req, res) => {
   try {
     res.json({ message: "Logout successful" });
@@ -157,6 +167,7 @@ module.exports = {
   resetPassword,
   me,
   changePassword,
+  setPassword,
   logout,
   resendOTP,
   socialMe,

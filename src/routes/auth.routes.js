@@ -13,6 +13,7 @@ router.post("/verify-reset-otp", authController.verifyResetOTP);
 router.post("/reset-password", authController.resetPassword);
 router.get("/me", authenticate, authController.me);
 router.post("/change-password", authenticate, authController.changePassword);
+router.post("/set-password", authenticate, authController.setPassword);
 router.post("/logout", authenticate, authController.logout);
 router.post("/resend-otp", authController.resendOTP);
 

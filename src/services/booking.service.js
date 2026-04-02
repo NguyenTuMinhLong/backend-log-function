@@ -1,5 +1,6 @@
 const pool = require("../config/db");
 const { assignSeat } = require("../utils/seat");
+const { rollbackReservedVoucherUsageForBooking } = require("./payment.service");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -597,6 +598,8 @@ const cancelBooking = async (userId, bookingCode) => {
       [booking.id],
     );
 
+    await rollbackReservedVoucherUsageForBooking(client, booking.id);
+
     const ticketUpdateResult = await client.query(
       `UPDATE tickets SET status = 'cancelled' WHERE booking_id = $1 RETURNING id`,
       [booking.id],
@@ -700,6 +703,13 @@ const expireHeldBookings = async () => {
       await client.query(
         `UPDATE flight_seat_assignments SET status='available', passenger_id=NULL, booking_id=NULL
          WHERE booking_id=$1`,
+        [booking.id],
+      );
+      await rollbackReservedVoucherUsageForBooking(client, booking.id);
+      await client.query(
+        `UPDATE payments
+         SET status='EXPIRED', expired_at=NOW(), updated_at=NOW()
+         WHERE booking_id=$1 AND status='PENDING'`,
         [booking.id],
       );
       await client.query(

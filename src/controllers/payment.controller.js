@@ -1,4 +1,44 @@
 const pool = require("../config/db");
+const paymentService = require("../services/payment.service");
+
+const previewPayment = async (req, res) => {
+  try {
+    const userId = req.user ? req.user.id : null;
+    const result = await paymentService.previewPayment(req.body, userId);
+    res.json({
+      message: "Preview payment thành công",
+      data: result,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
+const createPayment = async (req, res) => {
+  try {
+    const userId = req.user ? req.user.id : null;
+    const result = await paymentService.createPayment(req.body, userId);
+    res.status(201).json({
+      message: "Tạo payment thành công",
+      data: result,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
+const confirmPayment = async (req, res) => {
+  try {
+    const userId = req.user ? req.user.id : null;
+    const result = await paymentService.confirmPayment(req.params.paymentCode, userId);
+    res.json({
+      message: "Xác nhận payment thành công",
+      data: result,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
 
 /**
  * GET /api/payments/my
@@ -21,6 +61,7 @@ const getMyPayments = async (req, res) => {
         p.status,
         p.created_at,
         p.paid_at,
+        p.voucher_code,
         b.booking_code,
         b.trip_type,
         f.flight_number,
@@ -44,6 +85,7 @@ const getMyPayments = async (req, res) => {
       payment_code:    row.payment_code,
       booking_code:    row.booking_code,
       payment_method:  row.payment_method,
+      voucher_code:    row.voucher_code || null,
       amount:          parseFloat(row.amount || 0),
       discount_amount: parseFloat(row.discount_amount || 0),
       final_amount:    parseFloat(row.final_amount || row.amount || 0),
@@ -69,4 +111,4 @@ const getMyPayments = async (req, res) => {
   }
 };
 
-module.exports = { getMyPayments };
+module.exports = { getMyPayments, previewPayment, createPayment, confirmPayment };
