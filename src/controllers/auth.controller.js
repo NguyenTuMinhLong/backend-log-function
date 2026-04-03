@@ -1,5 +1,4 @@
 const authService = require("../services/auth.service");
-const { generateToken } = require("../utils/jwt");
 
 const register = async (req, res) => {
   try {
@@ -17,10 +16,10 @@ const register = async (req, res) => {
 const login = async (req, res) => {
   try {
     const user  = await authService.loginUser(req.body);
-    const token = generateToken(user);
+    const tokens = await authService.issueAuthTokens(user);
     res.json({
       message: "Login success",
-      token,
+      ...tokens,
       user: {
         id:             user.id,
         full_name:      user.full_name,
@@ -108,9 +107,37 @@ const setPassword = async (req, res) => {
 
 const logout = async (req, res) => {
   try {
+    const { refresh_token } = req.body || {};
+    await authService.logoutUserSession(req.user.id, refresh_token || null);
     res.json({ message: "Logout successful" });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+};
+
+const refreshToken = async (req, res) => {
+  try {
+    const { refresh_token } = req.body || {};
+    const result = await authService.refreshUserSession(refresh_token);
+
+    res.json({
+      message: "Refresh token success",
+      token: result.token,
+      refresh_token: result.refresh_token,
+      refresh_token_expires_at: result.refresh_token_expires_at,
+      user: {
+        id:             result.user.id,
+        full_name:      result.user.full_name,
+        email:          result.user.email,
+        phone:          result.user.phone,
+        role:           result.user.role,
+        status:         result.user.status,
+        email_verified: result.user.email_verified,
+        avatar_url:     result.user.avatar_url || null,
+      },
+    });
+  } catch (err) {
+    res.status(401).json({ error: err.message });
   }
 };
 
@@ -135,12 +162,12 @@ const socialMe = async (req, res) => {
     const user = req.user;
     if (!user) return res.status(401).json({ error: "User not found" });
 
-    // Generate JWT của hệ thống (không phải Supabase token)
-    const token = generateToken(user);
+    // Generate access token + refresh token của hệ thống
+    const tokens = await authService.issueAuthTokens(user);
 
     res.json({
       message: "Social login success",
-      token, // FIX: trả token để frontend lưu
+      ...tokens,
       user: {
         id:             user.id,
         full_name:      user.full_name,
@@ -169,6 +196,7 @@ module.exports = {
   changePassword,
   setPassword,
   logout,
+  refreshToken,
   resendOTP,
   socialMe,
 };

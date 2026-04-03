@@ -2,6 +2,133 @@ const { sendOTPEmail } = require("../utils/mailer");
 const { generateOTP } = require("../utils/otp");
 const pool = require("../config/db");
 const { hashPassword, comparePassword } = require("../utils/password");
+const {
+  generateAccessToken,
+  generateRefreshToken,
+  verifyRefreshToken,
+  hashToken,
+} = require("../utils/jwt");
+
+const revokeAllUserRefreshTokens = async (userId, db = pool) => {
+  await db.query(
+    `UPDATE refresh_tokens
+     SET is_revoked = TRUE,
+         revoked_at = NOW()
+     WHERE user_id = $1
+       AND is_revoked = FALSE`,
+    [userId]
+  );
+};
+
+const issueAuthTokens = async (user, db = pool) => {
+  const accessToken = generateAccessToken(user);
+  const refreshTokenData = generateRefreshToken(user);
+
+  await db.query(
+    `DELETE FROM refresh_tokens
+     WHERE user_id = $1
+       AND (is_revoked = TRUE OR expires_at < NOW())`,
+    [user.id]
+  );
+
+  await db.query(
+    `INSERT INTO refresh_tokens (user_id, token, expires_at)
+     VALUES ($1, $2, $3)`,
+    [user.id, hashToken(refreshTokenData.token), refreshTokenData.expiresAt]
+  );
+
+  return {
+    token: accessToken,
+    refresh_token: refreshTokenData.token,
+    refresh_token_expires_at: refreshTokenData.expiresAt,
+  };
+};
+
+const refreshUserSession = async (refreshToken) => {
+  if (!refreshToken) {
+    throw new Error("refresh_token is required");
+  }
+
+  const decoded = verifyRefreshToken(refreshToken);
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const result = await client.query(
+      `SELECT
+         rt.id AS refresh_token_id,
+         u.*
+       FROM refresh_tokens rt
+       JOIN users u ON u.id = rt.user_id
+       WHERE rt.token = $1
+         AND rt.is_revoked = FALSE
+         AND rt.expires_at > NOW()
+       LIMIT 1
+       FOR UPDATE`,
+      [hashToken(refreshToken)]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error("Invalid or expired refresh token");
+    }
+
+    const user = result.rows[0];
+
+    if (Number(user.id) !== Number(decoded.id)) {
+      throw new Error("Refresh token does not match user");
+    }
+
+    if (user.status !== "active") {
+      throw new Error("Account is inactive or blocked");
+    }
+
+    await client.query(
+      `UPDATE refresh_tokens
+       SET is_revoked = TRUE,
+           revoked_at = NOW()
+       WHERE id = $1`,
+      [user.refresh_token_id]
+    );
+
+    const tokens = await issueAuthTokens(user, client);
+
+    await client.query("COMMIT");
+
+    return {
+      ...tokens,
+      user,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+const logoutUserSession = async (userId, refreshToken = null) => {
+  if (!userId) {
+    throw new Error("userId is required");
+  }
+
+  if (!refreshToken) {
+    await revokeAllUserRefreshTokens(userId);
+    return true;
+  }
+
+  await pool.query(
+    `UPDATE refresh_tokens
+     SET is_revoked = TRUE,
+         revoked_at = NOW()
+     WHERE user_id = $1
+       AND token = $2
+       AND is_revoked = FALSE`,
+    [userId, hashToken(refreshToken)]
+  );
+
+  return true;
+};
 
 const registerUser = async (data) => {
   const { full_name, email, phone, password, confirm_password } = data;
@@ -326,6 +453,8 @@ const resetPassword = async (email, otp, newPassword, confirmPassword) => {
     [passwordHash, user.id]
   );
 
+  await revokeAllUserRefreshTokens(user.id);
+
   return true;
 };
 
@@ -406,6 +535,8 @@ const changePassword = async (userId, oldPassword, newPassword, confirmPassword)
     [newPasswordHash, userId]
   );
 
+  await revokeAllUserRefreshTokens(userId);
+
   return true;
 };
 
@@ -445,6 +576,8 @@ const setPassword = async (userId, newPassword, confirmPassword) => {
      WHERE id = $2`,
     [newPasswordHash, userId]
   );
+
+  await revokeAllUserRefreshTokens(userId);
 
   return true;
 };
@@ -499,5 +632,8 @@ module.exports = {
   getMe,
   changePassword,
   setPassword,
+  issueAuthTokens,
+  refreshUserSession,
+  logoutUserSession,
   resendRegisterOTP,
 };
