@@ -19,11 +19,18 @@ const registerUser = async (data) => {
   }
 
   const existingEmail = await pool.query(
-    "SELECT id FROM users WHERE LOWER(email)=LOWER($1)",
+    "SELECT id, password_hash, auth_provider FROM users WHERE LOWER(email)=LOWER($1)",
     [email]
   );
 
   if (existingEmail.rows.length > 0) {
+    const existing = existingEmail.rows[0];
+    // Tài khoản đã tồn tại qua social login (không có password)
+    if (!existing.password_hash) {
+      throw new Error(
+        "This email is already linked to a social account (Google/Facebook). Please sign in with social login, then set a password from your profile if needed."
+      );
+    }
     throw new Error("Email already exists");
   }
 
@@ -97,6 +104,13 @@ const loginUser = async (data) => {
 
   if (user.locked_until && new Date(user.locked_until) > new Date()) {
     throw new Error("Account is temporarily locked. Please try again later");
+  }
+
+  // Tài khoản chỉ dùng social login, chưa đặt mật khẩu
+  if (!user.password_hash) {
+    throw new Error(
+      "This account uses Google/Facebook login and has no password set. Please sign in with social login, or use 'Forgot Password' to set a password."
+    );
   }
 
   const match = await comparePassword(password, user.password_hash);

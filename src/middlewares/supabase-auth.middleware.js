@@ -85,14 +85,25 @@ const authenticateSupabase = async (req, res, next) => {
         });
       }
 
+      // Merge tài khoản:
+      // - supabase_user_id: chỉ set nếu chưa có (tránh ghi đè provider khác)
+      // - auth_provider: cập nhật nếu tài khoản đang là 'email' mặc định (tức là đây là lần đầu link social)
+      // - avatar_url: chỉ set nếu chưa có
+      // - email_verified: luôn set true (đăng nhập qua Google/Facebook = email đã xác thực)
       const updated = await pool.query(
         `UPDATE users
          SET
            supabase_user_id = COALESCE(supabase_user_id, $1),
-           auth_provider = COALESCE(auth_provider, $2),
-           avatar_url = COALESCE(avatar_url, $3),
-           email_verified = true,
-           updated_at = NOW()
+           auth_provider    = CASE
+                                -- Chỉ cập nhật provider nếu:
+                                -- 1. Chưa có supabase_user_id (lần đầu link social) VÀ
+                                -- 2. Chưa có password (tài khoản thuần social, không phải merge)
+                                WHEN supabase_user_id IS NULL AND password_hash IS NULL THEN $2
+                                ELSE auth_provider
+                              END,
+           avatar_url       = COALESCE(avatar_url, $3),
+           email_verified   = true,
+           updated_at       = NOW()
          WHERE id = $4
          RETURNING id, full_name, email, phone, role, status, email_verified, supabase_user_id, auth_provider, avatar_url`,
         [sbUser.id, provider, avatarUrl, currentUser.id]
