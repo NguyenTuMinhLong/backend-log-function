@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "migrate": "node scripts/runMigrations.js",
     "seed:admin": "node scripts/seedAdmin.js",
     "test": "node --test tests/unit/*.test.js"
   },
