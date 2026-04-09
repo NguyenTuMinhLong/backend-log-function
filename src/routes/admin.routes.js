@@ -9,6 +9,7 @@ const adminAirlineController = require("../controllers/admin.airline.controller"
 const adminCouponController = require("../controllers/admin.coupon.controller");
 
 const adminUserController = require("../controllers/admin.user.controller");
+const adminChatController = require("../controllers/admin.chat.controller");
 
 // Tất cả routes admin: phải đăng nhập + role = 'admin'
 router.use(authenticate, authorize("admin"));
@@ -53,5 +54,12 @@ router.patch("/bookings/:id/status", adminFlightController.updateBookingStatus);
 
 // A-07: Reports / Statistics
 router.get("/statistics", adminFlightController.getStatistics);
+
+// A-08: Admin Chat
+router.get("/chat/config", adminChatController.getChatConfig);
+router.put("/chat/config", adminChatController.replaceChatConfig);
+router.patch("/chat/config", adminChatController.patchChatConfig);
+router.post("/chat/message", adminChatController.sendChatMessage);
+
 
 module.exports = router;
