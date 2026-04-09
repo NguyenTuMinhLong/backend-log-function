@@ -60,6 +60,10 @@ router.get("/chat/config", adminChatController.getChatConfig);
 router.put("/chat/config", adminChatController.replaceChatConfig);
 router.patch("/chat/config", adminChatController.patchChatConfig);
 router.post("/chat/message", adminChatController.sendChatMessage);
+router.get("/chat/conversations", adminChatController.listSupportConversations);
+router.get("/chat/conversations/:id", adminChatController.getSupportConversation);
+router.post("/chat/conversations/:id/message", adminChatController.replySupportConversation);
+router.patch("/chat/conversations/:id/status", adminChatController.updateSupportConversationStatus);
 
 
 module.exports = router;

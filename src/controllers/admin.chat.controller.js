@@ -1,4 +1,5 @@
 const adminChatService = require("../services/admin.chat.service");
+const chatService = require("../services/chat.service");
 
 const getChatConfig = async (_req, res) => {
   try {
@@ -36,9 +37,49 @@ const sendChatMessage = async (req, res) => {
   }
 };
 
+const listSupportConversations = async (req, res) => {
+  try {
+    const data = await chatService.listSupportConversations(req.query);
+    return res.json({ message: "Lấy danh sách hội thoại hỗ trợ thành công", ...data });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+};
+
+const getSupportConversation = async (req, res) => {
+  try {
+    const data = await chatService.getSupportConversationForAdmin(req.params.id, req.user);
+    return res.json({ message: "Lấy chi tiết hội thoại hỗ trợ thành công", data });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+};
+
+const replySupportConversation = async (req, res) => {
+  try {
+    const data = await chatService.replySupportConversation(req.params.id, req.user, req.body);
+    return res.json({ message: "Gửi phản hồi hỗ trợ thành công", data });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+};
+
+const updateSupportConversationStatus = async (req, res) => {
+  try {
+    const data = await chatService.updateSupportConversationStatus(req.params.id, req.body.status, req.user);
+    return res.json({ message: "Cập nhật trạng thái hội thoại hỗ trợ thành công", data });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+};
+
 module.exports = {
   getChatConfig,
   replaceChatConfig,
   patchChatConfig,
   sendChatMessage,
+  listSupportConversations,
+  getSupportConversation,
+  replySupportConversation,
+  updateSupportConversationStatus,
 };

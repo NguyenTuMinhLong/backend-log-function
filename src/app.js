@@ -5,6 +5,7 @@ const authRoutes    = require("./routes/auth.routes");
 const flightRoutes  = require("./routes/flight.routes");
 const bookingRoutes = require("./routes/booking.routes");
 const adminRoutes   = require("./routes/admin.routes");
+const chatRoutes    = require("./routes/chat.routes");
 const paymentRoutes = require("./routes/payment.routes");
 const publicRoutes  = require("./routes/public.routes");
 
@@ -19,6 +20,7 @@ app.use("/api/auth",     authRoutes);
 app.use("/api",          publicRoutes);
 app.use("/api/flights",  flightRoutes);
 app.use("/api/bookings", bookingRoutes);
+app.use("/api/chat",     chatRoutes);
 app.use("/api/admin",    adminRoutes);
 app.use("/api/payments", paymentRoutes);
 

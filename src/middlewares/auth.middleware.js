@@ -97,4 +97,10 @@ const authorize = (...roles) => {
   };
 };
 
-module.exports = { authenticate, requireAuth, authorize, authenticateOptional };
+module.exports = {
+  loadUserAuthState,
+  authenticate,
+  requireAuth,
+  authorize,
+  authenticateOptional,
+};
