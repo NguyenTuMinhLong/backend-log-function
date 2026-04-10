@@ -85,6 +85,15 @@ const me = async (req, res) => {
   }
 };
 
+const updateProfile = async (req, res) => {
+  try {
+    const user = await authService.updateProfile(req.user.id, req.body);
+    res.json({ message: "Profile updated successfully", user });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
 const changePassword = async (req, res) => {
   try {
     const { old_password, new_password, confirm_password } = req.body;
@@ -193,6 +202,7 @@ module.exports = {
   verifyResetOTP,
   resetPassword,
   me,
+  updateProfile,
   changePassword,
   setPassword,
   logout,

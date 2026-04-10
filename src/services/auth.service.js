@@ -471,6 +471,9 @@ const getMe = async (userId) => {
        phone_verified,
        auth_provider,
        avatar_url,
+       date_of_birth,
+       gender,
+       address,
        created_at,
        CASE
          WHEN password_hash IS NOT NULL THEN TRUE
@@ -479,6 +482,98 @@ const getMe = async (userId) => {
      FROM users
      WHERE id = $1`,
     [userId]
+  );
+
+  if (result.rows.length === 0) {
+    throw new Error("User not found");
+  }
+
+  return result.rows[0];
+};
+
+const normalizeProfileText = (value) => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = String(value || "").trim();
+  return normalized || null;
+};
+
+const updateProfile = async (userId, data = {}) => {
+  const fullName = normalizeProfileText(data.full_name);
+  const phone = normalizeProfileText(data.phone);
+  const dateOfBirth = normalizeProfileText(data.date_of_birth);
+  const gender = normalizeProfileText(data.gender);
+  const address = normalizeProfileText(data.address);
+  const avatarUrl = normalizeProfileText(data.avatar_url);
+
+  if (!fullName) {
+    throw new Error("Full name is required");
+  }
+
+  if (phone && !/^[0-9+\-\s()]{8,20}$/.test(phone)) {
+    throw new Error("Phone number is not valid");
+  }
+
+  if (dateOfBirth && Number.isNaN(new Date(dateOfBirth).getTime())) {
+    throw new Error("Date of birth is not valid");
+  }
+
+  if (gender && !["male", "female", "other"].includes(gender)) {
+    throw new Error("Gender must be male, female or other");
+  }
+
+  if (avatarUrl && avatarUrl.length > 750000) {
+    throw new Error("Avatar image is too large");
+  }
+
+  if (phone) {
+    const existingPhone = await pool.query(
+      "SELECT id FROM users WHERE phone = $1 AND id <> $2",
+      [phone, userId]
+    );
+
+    if (existingPhone.rows.length > 0) {
+      throw new Error("Phone already exists");
+    }
+  }
+
+  const result = await pool.query(
+    `UPDATE users
+     SET full_name = $1,
+         phone = $2,
+         date_of_birth = $3,
+         gender = $4,
+         address = $5,
+         avatar_url = $6,
+         updated_at = NOW()
+     WHERE id = $7
+     RETURNING
+       id,
+       full_name,
+       email,
+       phone,
+       role,
+       status,
+       email_verified,
+       phone_verified,
+       auth_provider,
+       avatar_url,
+       date_of_birth,
+       gender,
+       address,
+       created_at,
+       updated_at`,
+    [
+      fullName,
+      phone,
+      dateOfBirth,
+      gender,
+      address,
+      avatarUrl,
+      userId,
+    ]
   );
 
   if (result.rows.length === 0) {
@@ -630,6 +725,7 @@ module.exports = {
   verifyResetOTP,
   resetPassword,
   getMe,
+  updateProfile,
   changePassword,
   setPassword,
   issueAuthTokens,
