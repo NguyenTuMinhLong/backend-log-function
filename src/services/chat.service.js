@@ -15,7 +15,7 @@ const buildPreview = (value = "") => String(value).trim().replace(/\s+/g, " ").s
 const requireMessage = (payload = {}) => {
   const message = String(payload.message || "").trim();
   if (!message) {
-    throw new Error("message là bắt buộc");
+    throw new Error("message la bat buoc");
   }
 
   return message;
@@ -23,15 +23,72 @@ const requireMessage = (payload = {}) => {
 
 const ensureConversationType = (type) => {
   if (!CONVERSATION_TYPES.includes(type)) {
-    throw new Error(`type phải là: ${CONVERSATION_TYPES.join(", ")}`);
+    throw new Error(`type phai la: ${CONVERSATION_TYPES.join(", ")}`);
   }
 };
 
 const ensureSupportStatus = (status) => {
   if (!SUPPORT_STATUSES.includes(status)) {
-    throw new Error(`status phải là: ${SUPPORT_STATUSES.join(", ")}`);
+    throw new Error(`status phai la: ${SUPPORT_STATUSES.join(", ")}`);
   }
 };
+
+const sanitizeGuestSessionId = (value) => {
+  const guestSessionId = String(value || "").trim();
+
+  if (!guestSessionId) {
+    return "";
+  }
+
+  if (!/^[a-zA-Z0-9_-]{12,120}$/.test(guestSessionId)) {
+    throw new Error("guest_session_id khong hop le");
+  }
+
+  return guestSessionId;
+};
+
+const sanitizeGuestName = (value, guestSessionId = "") => {
+  const normalized = String(value || "").trim().slice(0, 120);
+
+  if (normalized) {
+    return normalized;
+  }
+
+  const suffix = guestSessionId ? guestSessionId.slice(-6).toUpperCase() : "GUEST";
+  return `Khach ${suffix}`;
+};
+
+const resolveActor = (user, payload = {}, reqMeta = {}) => {
+  if (user?.id) {
+    return {
+      kind: "user",
+      userId: Number(user.id),
+      senderId: Number(user.id),
+      displayName: user.full_name || user.email || "Ban",
+    };
+  }
+
+  const guestSessionId = sanitizeGuestSessionId(
+    reqMeta.guestSessionId || payload.guest_session_id || payload.guestSessionId
+  );
+
+  if (!guestSessionId) {
+    throw new Error("Ban can dang nhap hoac cung cap guest session hop le");
+  }
+
+  return {
+    kind: "guest",
+    userId: null,
+    senderId: null,
+    guestSessionId,
+    displayName: sanitizeGuestName(payload.guest_name || payload.guestName, guestSessionId),
+  };
+};
+
+const getActorRoom = (actor = {}) => ({
+  userId: actor.userId ? Number(actor.userId) : null,
+  guestSessionId: actor.guestSessionId || null,
+});
 
 const mapConversation = (row) => {
   if (!row) {
@@ -42,6 +99,8 @@ const mapConversation = (row) => {
     id: Number(row.id),
     type: row.type,
     status: row.status,
+    guest_session_id: row.guest_session_id || null,
+    guest_name: row.guest_name || null,
     last_message_preview: row.last_message_preview,
     last_message_at: row.last_message_at,
     last_user_read_at: row.last_user_read_at,
@@ -67,6 +126,13 @@ const mapConversation = (row) => {
           phone: row.user_phone,
         }
       : null,
+    guest:
+      row.guest_session_id || row.guest_name
+        ? {
+            session_id: row.guest_session_id || null,
+            name: row.guest_name || null,
+          }
+        : null,
   };
 };
 
@@ -81,6 +147,24 @@ const mapMessage = (row) => ({
   created_at: row.created_at,
 });
 
+const getConversationLookupClause = (actor = {}, startIndex = 1) => {
+  if (actor.kind === "user") {
+    return {
+      clause: `user_id = $${startIndex}`,
+      values: [actor.userId],
+    };
+  }
+
+  if (actor.kind === "guest") {
+    return {
+      clause: `guest_session_id = $${startIndex}`,
+      values: [actor.guestSessionId],
+    };
+  }
+
+  throw new Error("Khong xac dinh duoc actor chat");
+};
+
 const getConversationDetailById = async (client, conversationId, unreadFor = "user") => {
   const unreadRole = unreadFor === "admin" ? "user" : "admin";
   const readColumn = unreadFor === "admin" ? "last_admin_read_at" : "last_user_read_at";
@@ -90,6 +174,8 @@ const getConversationDetailById = async (client, conversationId, unreadFor = "us
     SELECT
       c.id,
       c.user_id,
+      c.guest_session_id,
+      c.guest_name,
       c.type,
       c.status,
       c.assigned_admin_id,
@@ -112,7 +198,7 @@ const getConversationDetailById = async (client, conversationId, unreadFor = "us
           AND m.created_at > COALESCE(c.${readColumn}, TO_TIMESTAMP(0))
       ), 0) AS unread_count
     FROM chat_conversations c
-    JOIN users u
+    LEFT JOIN users u
       ON u.id = c.user_id
     LEFT JOIN users admin_u
       ON admin_u.id = c.assigned_admin_id
@@ -125,18 +211,19 @@ const getConversationDetailById = async (client, conversationId, unreadFor = "us
   return result.rows[0] || null;
 };
 
-const getConversationByUserAndType = async (client, userId, type, unreadFor = "user") => {
+const getConversationByActorAndType = async (client, actor, type, unreadFor = "user") => {
   ensureConversationType(type);
 
+  const lookup = getConversationLookupClause(actor, 1);
   const result = await client.query(
     `
     SELECT id
     FROM chat_conversations
-    WHERE user_id = $1
-      AND type = $2
+    WHERE ${lookup.clause}
+      AND type = $${lookup.values.length + 1}
     LIMIT 1
     `,
-    [userId, type]
+    [...lookup.values, type]
   );
 
   if (result.rows.length === 0) {
@@ -146,28 +233,61 @@ const getConversationByUserAndType = async (client, userId, type, unreadFor = "u
   return getConversationDetailById(client, result.rows[0].id, unreadFor);
 };
 
-const createOrGetConversation = async (client, userId, type) => {
+const createOrGetConversation = async (client, actor, type) => {
   ensureConversationType(type);
+
+  if (actor.kind === "user") {
+    const result = await client.query(
+      `
+      INSERT INTO chat_conversations (
+        user_id,
+        type,
+        status,
+        last_user_read_at
+      )
+      VALUES (
+        $1,
+        $2,
+        'open',
+        NOW()
+      )
+      ON CONFLICT (user_id, type)
+      WHERE user_id IS NOT NULL
+      DO UPDATE SET updated_at = NOW()
+      RETURNING id
+      `,
+      [actor.userId, type]
+    );
+
+    return result.rows[0];
+  }
 
   const result = await client.query(
     `
     INSERT INTO chat_conversations (
       user_id,
+      guest_session_id,
+      guest_name,
       type,
       status,
       last_user_read_at
     )
     VALUES (
+      NULL,
       $1,
       $2,
+      $3,
       'open',
       NOW()
     )
-    ON CONFLICT (user_id, type)
-    DO UPDATE SET updated_at = NOW()
+    ON CONFLICT (guest_session_id, type)
+    WHERE guest_session_id IS NOT NULL
+    DO UPDATE SET
+      updated_at = NOW(),
+      guest_name = COALESCE(EXCLUDED.guest_name, chat_conversations.guest_name)
     RETURNING id
     `,
-    [userId, type]
+    [actor.guestSessionId, actor.displayName, type]
   );
 
   return result.rows[0];
@@ -204,34 +324,37 @@ const updateConversation = async (client, conversationId, updates = {}) => {
   return result.rows[0] || null;
 };
 
-const insertMessage = async (client, { conversationId, senderId = null, senderRole, content, meta = {} }) => {
-  if (!MESSAGE_ROLES.includes(senderRole)) {
-    throw new Error(`senderRole phải là: ${MESSAGE_ROLES.join(", ")}`);
-  }
+const insertMessage = async (
+  client,
+  { conversationId, senderId = null, senderRole, content, meta = {} }
+) => {
+    if (!MESSAGE_ROLES.includes(senderRole)) {
+      throw new Error(`senderRole phai la: ${MESSAGE_ROLES.join(", ")}`);
+    }
 
-  const result = await client.query(
-    `
-    INSERT INTO chat_messages (
-      conversation_id,
-      sender_id,
-      sender_role,
-      content,
-      meta
-    )
-    VALUES ($1, $2, $3, $4, $5::jsonb)
-    RETURNING
-      id,
-      conversation_id,
-      sender_id,
-      sender_role,
-      content,
-      meta,
-      created_at
-    `,
-    [conversationId, senderId, senderRole, content, JSON.stringify(meta)]
-  );
+    const result = await client.query(
+      `
+      INSERT INTO chat_messages (
+        conversation_id,
+        sender_id,
+        sender_role,
+        content,
+        meta
+      )
+      VALUES ($1, $2, $3, $4, $5::jsonb)
+      RETURNING
+        id,
+        conversation_id,
+        sender_id,
+        sender_role,
+        content,
+        meta,
+        created_at
+      `,
+      [conversationId, senderId, senderRole, content, JSON.stringify(meta)]
+    );
 
-  return result.rows[0];
+    return result.rows[0];
 };
 
 const getMessagesByConversationId = async (client, conversationId, limit = MESSAGE_LIMIT) => {
@@ -252,13 +375,16 @@ const getMessagesByConversationId = async (client, conversationId, limit = MESSA
           CASE
             WHEN m.sender_role = 'assistant' THEN 'Vivudee AI'
             WHEN m.sender_role = 'admin' THEN 'Admin'
-            WHEN m.sender_role = 'system' THEN 'Hệ thống'
+            WHEN m.sender_role = 'system' THEN 'He thong'
+            WHEN m.sender_role = 'user' THEN COALESCE(c.guest_name, 'Khach')
             ELSE 'User'
           END
         ) AS sender_name
       FROM chat_messages m
       LEFT JOIN users u
         ON u.id = m.sender_id
+      LEFT JOIN chat_conversations c
+        ON c.id = m.conversation_id
       WHERE m.conversation_id = $1
       ORDER BY m.created_at DESC, m.id DESC
       LIMIT $2
@@ -284,12 +410,10 @@ const buildAiHistory = async (client, conversationId, maxHistory = 8) => {
     [conversationId, maxHistory]
   );
 
-  return result.rows
-    .reverse()
-    .map((item) => ({
-      role: item.sender_role === "assistant" ? "assistant" : "user",
-      content: item.content,
-    }));
+  return result.rows.reverse().map((item) => ({
+    role: item.sender_role === "assistant" ? "assistant" : "user",
+    content: item.content,
+  }));
 };
 
 const getConversationPayload = async (client, conversationId, unreadFor = "user") => {
@@ -302,13 +426,14 @@ const getConversationPayload = async (client, conversationId, unreadFor = "user"
   };
 };
 
-const getConversationByType = async (user, type) => {
+const getConversationByType = async (user, type, options = {}) => {
   ensureConversationType(type);
 
+  const actor = resolveActor(user, {}, options);
   const client = await pool.connect();
 
   try {
-    const conversation = await getConversationByUserAndType(client, user.id, type, "user");
+    const conversation = await getConversationByActorAndType(client, actor, type, "user");
 
     if (!conversation) {
       return {
@@ -329,8 +454,9 @@ const getConversationByType = async (user, type) => {
   }
 };
 
-const sendAiMessage = async (user, payload = {}) => {
+const sendAiMessage = async (user, payload = {}, options = {}) => {
   const message = requireMessage(payload);
+  const actor = resolveActor(user, payload, options);
 
   const client = await pool.connect();
   let conversationId;
@@ -340,18 +466,22 @@ const sendAiMessage = async (user, payload = {}) => {
   try {
     await client.query("BEGIN");
 
-    const created = await createOrGetConversation(client, user.id, "ai");
+    const created = await createOrGetConversation(client, actor, "ai");
     conversationId = Number(created.id);
 
     userMessageRow = await insertMessage(client, {
       conversationId,
-      senderId: user.id,
+      senderId: actor.senderId,
       senderRole: "user",
       content: message,
-      meta: { source: "user" },
+      meta: {
+        source: actor.kind,
+        guest_session_id: actor.guestSessionId || null,
+      },
     });
 
     await updateConversation(client, conversationId, {
+      guest_name: actor.kind === "guest" ? actor.displayName : undefined,
       last_message_preview: buildPreview(message),
       last_message_at: userMessageRow.created_at,
       last_user_read_at: userMessageRow.created_at,
@@ -396,21 +526,23 @@ const sendAiMessage = async (user, payload = {}) => {
     });
 
     if (aiResult.route === "admin") {
-      const supportConversation = await createOrGetConversation(writeClient, user.id, "support");
+      const supportConversation = await createOrGetConversation(writeClient, actor, "support");
       supportConversationId = Number(supportConversation.id);
 
       const supportUserMessage = await insertMessage(writeClient, {
         conversationId: supportConversationId,
-        senderId: user.id,
+        senderId: actor.senderId,
         senderRole: "user",
         content: message,
         meta: {
           source: "ai_escalation",
           reason: aiResult.reason || null,
+          guest_session_id: actor.guestSessionId || null,
         },
       });
 
       await updateConversation(writeClient, supportConversationId, {
+        guest_name: actor.kind === "guest" ? actor.displayName : undefined,
         status: "pending_admin",
         last_message_preview: buildPreview(message),
         last_message_at: supportUserMessage.created_at,
@@ -429,17 +561,21 @@ const sendAiMessage = async (user, payload = {}) => {
 
   try {
     const payloadData = await getConversationPayload(readClient, conversationId, "user");
-    emitAiConversationChanged(user.id, {
+    const roomActor = getActorRoom(actor);
+
+    emitAiConversationChanged(roomActor, {
       conversationId,
       type: "ai",
-      userId: Number(user.id),
+      userId: roomActor.userId,
+      guestSessionId: roomActor.guestSessionId,
     });
 
     if (supportConversationId) {
-      emitSupportConversationChanged(user.id, {
+      emitSupportConversationChanged(roomActor, {
         conversationId: supportConversationId,
         type: "support",
-        userId: Number(user.id),
+        userId: roomActor.userId,
+        guestSessionId: roomActor.guestSessionId,
       });
     }
 
@@ -459,25 +595,30 @@ const sendAiMessage = async (user, payload = {}) => {
   }
 };
 
-const sendSupportMessage = async (user, payload = {}) => {
+const sendSupportMessage = async (user, payload = {}, options = {}) => {
   const message = requireMessage(payload);
+  const actor = resolveActor(user, payload, options);
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
 
-    const conversationRef = await createOrGetConversation(client, user.id, "support");
+    const conversationRef = await createOrGetConversation(client, actor, "support");
     const conversationId = Number(conversationRef.id);
 
     const supportUserMessage = await insertMessage(client, {
       conversationId,
-      senderId: user.id,
+      senderId: actor.senderId,
       senderRole: "user",
       content: message,
-      meta: { source: "support" },
+      meta: {
+        source: "support",
+        guest_session_id: actor.guestSessionId || null,
+      },
     });
 
     await updateConversation(client, conversationId, {
+      guest_name: actor.kind === "guest" ? actor.displayName : undefined,
       status: "pending_admin",
       last_message_preview: buildPreview(message),
       last_message_at: supportUserMessage.created_at,
@@ -487,11 +628,15 @@ const sendSupportMessage = async (user, payload = {}) => {
     await client.query("COMMIT");
 
     const payloadData = await getConversationPayload(client, conversationId, "user");
-    emitSupportConversationChanged(user.id, {
+    const roomActor = getActorRoom(actor);
+
+    emitSupportConversationChanged(roomActor, {
       conversationId,
       type: "support",
-      userId: Number(user.id),
+      userId: roomActor.userId,
+      guestSessionId: roomActor.guestSessionId,
     });
+
     return payloadData;
   } catch (error) {
     await client.query("ROLLBACK");
@@ -502,12 +647,7 @@ const sendSupportMessage = async (user, payload = {}) => {
 };
 
 const listSupportConversations = async (params = {}) => {
-  const {
-    page = 1,
-    limit = 20,
-    search,
-    status,
-  } = params;
+  const { page = 1, limit = 20, search, status } = params;
 
   if (status) {
     ensureSupportStatus(status);
@@ -523,10 +663,12 @@ const listSupportConversations = async (params = {}) => {
 
   if (search) {
     conditions.push(`(
-      u.full_name ILIKE $${index}
-      OR u.email ILIKE $${index}
+      COALESCE(u.full_name, '') ILIKE $${index}
+      OR COALESCE(u.email, '') ILIKE $${index}
       OR COALESCE(u.phone, '') ILIKE $${index}
-      OR CAST(u.id AS TEXT) ILIKE $${index}
+      OR COALESCE(c.guest_name, '') ILIKE $${index}
+      OR COALESCE(c.guest_session_id, '') ILIKE $${index}
+      OR CAST(COALESCE(c.user_id, c.id) AS TEXT) ILIKE $${index}
     )`);
     values.push(`%${search}%`);
     index += 1;
@@ -544,7 +686,7 @@ const listSupportConversations = async (params = {}) => {
     `
     SELECT COUNT(*) AS total
     FROM chat_conversations c
-    JOIN users u
+    LEFT JOIN users u
       ON u.id = c.user_id
     ${whereClause}
     `,
@@ -556,6 +698,8 @@ const listSupportConversations = async (params = {}) => {
     SELECT
       c.id,
       c.user_id,
+      c.guest_session_id,
+      c.guest_name,
       c.type,
       c.status,
       c.assigned_admin_id,
@@ -578,7 +722,7 @@ const listSupportConversations = async (params = {}) => {
           AND m.created_at > COALESCE(c.last_admin_read_at, TO_TIMESTAMP(0))
       ), 0) AS unread_count
     FROM chat_conversations c
-    JOIN users u
+    LEFT JOIN users u
       ON u.id = c.user_id
     LEFT JOIN users admin_u
       ON admin_u.id = c.assigned_admin_id
@@ -611,7 +755,7 @@ const getSupportConversationForAdmin = async (conversationId, adminUser) => {
     const conversation = await getConversationDetailById(client, conversationId, "admin");
 
     if (!conversation || conversation.type !== "support") {
-      throw new Error("Không tìm thấy hội thoại hỗ trợ");
+      throw new Error("Khong tim thay hoi thoai ho tro");
     }
 
     await updateConversation(client, conversationId, {
@@ -622,11 +766,18 @@ const getSupportConversationForAdmin = async (conversationId, adminUser) => {
     await client.query("COMMIT");
 
     const payloadData = await getConversationPayload(client, conversationId, "admin");
-    emitSupportConversationChanged(conversation.user_id, {
-      conversationId: Number(conversationId),
-      type: "support",
-      userId: Number(conversation.user_id),
-    });
+    emitSupportConversationChanged(
+      {
+        userId: conversation.user_id ? Number(conversation.user_id) : null,
+        guestSessionId: conversation.guest_session_id || null,
+      },
+      {
+        conversationId: Number(conversationId),
+        type: "support",
+        userId: conversation.user_id ? Number(conversation.user_id) : null,
+        guestSessionId: conversation.guest_session_id || null,
+      }
+    );
     return payloadData;
   } catch (error) {
     await client.query("ROLLBACK");
@@ -646,7 +797,7 @@ const replySupportConversation = async (conversationId, adminUser, payload = {})
     const conversation = await getConversationDetailById(client, conversationId, "admin");
 
     if (!conversation || conversation.type !== "support") {
-      throw new Error("Không tìm thấy hội thoại hỗ trợ");
+      throw new Error("Khong tim thay hoi thoai ho tro");
     }
 
     const adminMessage = await insertMessage(client, {
@@ -666,8 +817,21 @@ const replySupportConversation = async (conversationId, adminUser, payload = {})
     });
 
     await client.query("COMMIT");
+    const payloadData = await getConversationPayload(client, conversationId, "admin");
+    emitSupportConversationChanged(
+      {
+        userId: conversation.user_id ? Number(conversation.user_id) : null,
+        guestSessionId: conversation.guest_session_id || null,
+      },
+      {
+        conversationId: Number(conversationId),
+        type: "support",
+        userId: conversation.user_id ? Number(conversation.user_id) : null,
+        guestSessionId: conversation.guest_session_id || null,
+      }
+    );
 
-    return getConversationPayload(client, conversationId, "admin");
+    return payloadData;
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -685,7 +849,7 @@ const updateSupportConversationStatus = async (conversationId, status, adminUser
     const conversation = await getConversationDetailById(client, conversationId, "admin");
 
     if (!conversation || conversation.type !== "support") {
-      throw new Error("Không tìm thấy hội thoại hỗ trợ");
+      throw new Error("Khong tim thay hoi thoai ho tro");
     }
 
     await updateConversation(client, conversationId, {
@@ -695,11 +859,18 @@ const updateSupportConversationStatus = async (conversationId, status, adminUser
     });
 
     const payloadData = await getConversationPayload(client, conversationId, "admin");
-    emitSupportConversationChanged(conversation.user_id, {
-      conversationId: Number(conversationId),
-      type: "support",
-      userId: Number(conversation.user_id),
-    });
+    emitSupportConversationChanged(
+      {
+        userId: conversation.user_id ? Number(conversation.user_id) : null,
+        guestSessionId: conversation.guest_session_id || null,
+      },
+      {
+        conversationId: Number(conversationId),
+        type: "support",
+        userId: conversation.user_id ? Number(conversation.user_id) : null,
+        guestSessionId: conversation.guest_session_id || null,
+      }
+    );
     return payloadData;
   } finally {
     client.release();
