@@ -1,5 +1,6 @@
 node_modules
 
+#CSV supabase -- Đừng đụng 2 này nha ae
 generated
 gen_intl_flights.js
 
