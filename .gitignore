@@ -1,5 +1,8 @@
 node_modules
 
+generated
+gen_intl_flights.js
+
 .env
 .env.local
 .env.*.local
