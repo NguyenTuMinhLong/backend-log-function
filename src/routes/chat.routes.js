@@ -1,11 +1,11 @@
 const express = require("express");
 
 const chatController = require("../controllers/chat.controller");
-const { authenticate } = require("../middlewares/auth.middleware");
+const { authenticateOptional } = require("../middlewares/auth.middleware");
 
 const router = express.Router();
 
-router.use(authenticate);
+router.use(authenticateOptional);
 
 router.get("/ai", chatController.getAiConversation);
 router.post("/ai/message", chatController.sendAiMessage);
