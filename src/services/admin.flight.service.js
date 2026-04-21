@@ -4,6 +4,8 @@ const pool = require("../config/db");
 
 const VALID_STATUSES = ["scheduled", "delayed", "cancelled", "completed"];
 const VALID_CLASSES  = ["economy", "business", "first"];
+const FLIGHTS_TABLE_NAME = "flights";
+const FLIGHTS_ID_COLUMN = "id";
 
 const validateFlightInput = (data, isUpdate = false) => {
   const {
@@ -53,6 +55,21 @@ const validateSeats = (seats) => {
       throw new Error("base_price không hợp lệ");
     }
   }
+};
+
+const isFlightsPrimaryKeyConflict = (err) =>
+  err?.code === "23505" &&
+  (err?.constraint === "flights_pkey" || String(err?.message || "").includes("flights_pkey"));
+
+const resyncSerialSequence = async (tableName, columnName) => {
+  await pool.query(
+    `SELECT setval(
+       pg_get_serial_sequence($1, $2),
+       COALESCE((SELECT MAX(${columnName}) FROM ${tableName}), 0) + 1,
+       false
+     )`,
+    [tableName, columnName]
+  );
 };
 
 // ─── Exported Functions ───────────────────────────────────────────────────────
@@ -149,7 +166,73 @@ const getFlights = async (params) => {
 /**
  * Tạo chuyến bay mới (kèm seats)
  */
-const createFlight = async (data) => {
+const createFlightInTransaction = async (client, data) => {
+  const {
+    flight_number, airline_id,
+    departure_airport_id, arrival_airport_id,
+    departure_time, arrival_time,
+    duration_minutes,
+    seats = [],
+  } = data;
+
+  const airlineCheck = await client.query("SELECT id FROM airlines WHERE id=$1 AND is_active=TRUE", [airline_id]);
+  if (airlineCheck.rows.length === 0) throw new Error("HÃ£ng hÃ ng khÃ´ng khÃ´ng tá»“n táº¡i hoáº·c Ä‘Ã£ bá»‹ vÃ´ hiá»‡u");
+
+  const depCheck = await client.query("SELECT id FROM airports WHERE id=$1 AND is_active=TRUE", [departure_airport_id]);
+  if (depCheck.rows.length === 0) throw new Error("SÃ¢n bay Ä‘i khÃ´ng tá»“n táº¡i");
+
+  const arrCheck = await client.query("SELECT id FROM airports WHERE id=$1 AND is_active=TRUE", [arrival_airport_id]);
+  if (arrCheck.rows.length === 0) throw new Error("SÃ¢n bay Ä‘áº¿n khÃ´ng tá»“n táº¡i");
+
+  const flightResult = await client.query(
+    `INSERT INTO flights (
+       flight_number, airline_id,
+       departure_airport_id, arrival_airport_id,
+       departure_time, arrival_time,
+       duration_minutes, status
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,'scheduled')
+     RETURNING *`,
+    [
+      flight_number, airline_id,
+      departure_airport_id, arrival_airport_id,
+      departure_time, arrival_time,
+      parseInt(duration_minutes),
+    ]
+  );
+
+  const flight = flightResult.rows[0];
+
+  for (const s of seats) {
+    const totalSeats = parseInt(s.total_seats);
+    const available  = s.available_seats !== undefined
+      ? parseInt(s.available_seats)
+      : totalSeats;
+
+    const defaultBaggage = {
+      economy:  { baggage_included_kg: 23, carry_on_kg: 7,  extra_baggage_price: 250000 },
+      business: { baggage_included_kg: 32, carry_on_kg: 10, extra_baggage_price: 150000 },
+      first:    { baggage_included_kg: 40, carry_on_kg: 14, extra_baggage_price: 0      },
+    };
+    const def = defaultBaggage[s.class] || defaultBaggage.economy;
+
+    const baggageIncludedKg  = s.baggage_included_kg  !== undefined ? parseInt(s.baggage_included_kg)   : def.baggage_included_kg;
+    const carryOnKg          = s.carry_on_kg          !== undefined ? parseInt(s.carry_on_kg)           : def.carry_on_kg;
+    const extraBaggagePrice  = s.extra_baggage_price  !== undefined ? parseFloat(s.extra_baggage_price) : def.extra_baggage_price;
+
+    await client.query(
+      `INSERT INTO flight_seats (
+         flight_id, class, total_seats, available_seats, base_price,
+         baggage_included_kg, carry_on_kg, extra_baggage_price
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [flight.id, s.class, totalSeats, available, parseFloat(s.base_price),
+       baggageIncludedKg, carryOnKg, extraBaggagePrice]
+    );
+  }
+
+  return { flight_id: flight.id, flight_number: flight.flight_number, status: flight.status };
+};
+
+const createFlightLegacy = async (data) => {
   const {
     flight_number, airline_id,
     departure_airport_id, arrival_airport_id,
@@ -236,6 +319,32 @@ const createFlight = async (data) => {
 /**
  * Cập nhật thông tin chuyến bay (giờ bay, giá vé theo hạng)
  */
+const createFlight = async (data) => {
+  validateFlightInput(data);
+  validateSeats(data.seats);
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await createFlightInTransaction(client, data);
+      await client.query("COMMIT");
+      return result;
+    } catch (err) {
+      await client.query("ROLLBACK");
+
+      if (attempt === 0 && isFlightsPrimaryKeyConflict(err)) {
+        await resyncSerialSequence(FLIGHTS_TABLE_NAME, FLIGHTS_ID_COLUMN);
+        continue;
+      }
+
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+};
+
 const updateFlight = async (flightId, data) => {
   const {
     flight_number, airline_id,
