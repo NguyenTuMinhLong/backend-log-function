@@ -54,7 +54,26 @@ const validateSeats = (seats) => {
     if (!s.base_price || parseFloat(s.base_price) < 0) {
       throw new Error("base_price không hợp lệ");
     }
+    if (s.baggage_included_kg !== undefined && parseInt(s.baggage_included_kg) < 0) {
+      throw new Error("baggage_included_kg không hợp lệ");
+    }
+    if (s.carry_on_kg !== undefined && parseInt(s.carry_on_kg) < 0) {
+      throw new Error("carry_on_kg không hợp lệ");
+    }
+    if (s.extra_baggage_price !== undefined && parseFloat(s.extra_baggage_price) < 0) {
+      throw new Error("extra_baggage_price không hợp lệ");
+    }
   }
+};
+
+const getDefaultSeatConfig = (seatClass) => {
+  const defaults = {
+    economy:  { baggage_included_kg: 23, carry_on_kg: 7,  extra_baggage_price: 0 },
+    business: { baggage_included_kg: 32, carry_on_kg: 12, extra_baggage_price: 0 },
+    first:    { baggage_included_kg: 40, carry_on_kg: 15, extra_baggage_price: 0 },
+  };
+
+  return defaults[seatClass] || defaults.economy;
 };
 
 const isFlightsPrimaryKeyConflict = (err) =>
@@ -127,15 +146,22 @@ const getFlights = async (params) => {
        f.id, f.flight_number, f.departure_time, f.arrival_time,
        f.duration_minutes, f.status, f.is_active, f.created_at, f.updated_at,
        al.id   AS airline_id,   al.code  AS airline_code,  al.name AS airline_name,
-       dep.id  AS dep_id,       dep.code AS dep_code,      dep.city AS dep_city,
-       arr.id  AS arr_id,       arr.code AS arr_code,      arr.city AS arr_city,
+       dep.id  AS departure_airport_id, dep.id AS dep_id,
+       dep.code AS departure_code, dep.code AS dep_code,
+       dep.city AS departure_city, dep.city AS dep_city,
+       arr.id  AS arrival_airport_id, arr.id AS arr_id,
+       arr.code AS arrival_code, arr.code AS arr_code,
+       arr.city AS arrival_city, arr.city AS arr_city,
        -- Tổng hợp seats
        json_agg(
          json_build_object(
            'class',           fs.class,
            'total_seats',     fs.total_seats,
            'available_seats', fs.available_seats,
-           'base_price',      fs.base_price
+           'base_price',      fs.base_price,
+           'baggage_included_kg', fs.baggage_included_kg,
+           'carry_on_kg',     fs.carry_on_kg,
+           'extra_baggage_price', fs.extra_baggage_price
          ) ORDER BY fs.base_price
        ) AS seats
      FROM flights f
@@ -208,12 +234,7 @@ const createFlightInTransaction = async (client, data) => {
       ? parseInt(s.available_seats)
       : totalSeats;
 
-    const defaultBaggage = {
-      economy:  { baggage_included_kg: 23, carry_on_kg: 7,  extra_baggage_price: 250000 },
-      business: { baggage_included_kg: 32, carry_on_kg: 10, extra_baggage_price: 150000 },
-      first:    { baggage_included_kg: 40, carry_on_kg: 14, extra_baggage_price: 0      },
-    };
-    const def = defaultBaggage[s.class] || defaultBaggage.economy;
+    const def = getDefaultSeatConfig(s.class);
 
     const baggageIncludedKg  = s.baggage_included_kg  !== undefined ? parseInt(s.baggage_included_kg)   : def.baggage_included_kg;
     const carryOnKg          = s.carry_on_kg          !== undefined ? parseInt(s.carry_on_kg)           : def.carry_on_kg;
@@ -285,12 +306,7 @@ const createFlightLegacy = async (data) => {
         : totalSeats;
 
       // Baggage defaults theo hạng nếu không truyền vào
-      const defaultBaggage = {
-        economy:  { baggage_included_kg: 23, carry_on_kg: 7,  extra_baggage_price: 250000 },
-        business: { baggage_included_kg: 32, carry_on_kg: 10, extra_baggage_price: 150000 },
-        first:    { baggage_included_kg: 40, carry_on_kg: 14, extra_baggage_price: 0      },
-      };
-      const def = defaultBaggage[s.class] || defaultBaggage.economy;
+      const def = getDefaultSeatConfig(s.class);
 
       const baggageIncludedKg  = s.baggage_included_kg  !== undefined ? parseInt(s.baggage_included_kg)       : def.baggage_included_kg;
       const carryOnKg          = s.carry_on_kg          !== undefined ? parseInt(s.carry_on_kg)               : def.carry_on_kg;
@@ -419,12 +435,7 @@ const updateFlight = async (flightId, data) => {
         } else {
           // Chưa có → INSERT
           const totalSeats = parseInt(s.total_seats) || 0;
-          const defaultBaggage2 = {
-            economy:  { baggage_included_kg: 23, carry_on_kg: 7,  extra_baggage_price: 40000 },
-            business: { baggage_included_kg: 32, carry_on_kg: 12, extra_baggage_price: 40000 },
-            first:    { baggage_included_kg: 40, carry_on_kg: 15, extra_baggage_price: 40000 },
-          };
-          const def2 = defaultBaggage2[s.class] || defaultBaggage2.economy;
+          const def2 = getDefaultSeatConfig(s.class);
           await client.query(
             `INSERT INTO flight_seats (
                flight_id, class, total_seats, available_seats, base_price,

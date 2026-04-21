@@ -95,3 +95,78 @@ test("createFlight: tu dong reset sequence va retry khi flights_pkey bi trung", 
     status: "scheduled",
   });
 });
+
+test("createFlight: seat moi khong nhap gia hanh ly them thi mac dinh bang 0", async () => {
+  let insertedSeatValues = null;
+
+  const poolMock = {
+    query: async (sql) => {
+      throw new Error(`Unexpected pool.query: ${sql}`);
+    },
+    connect: async () => ({
+      query: async (sql, params = []) => {
+        const normalized = String(sql).replace(/\s+/g, " ").trim();
+
+        if (normalized === "BEGIN" || normalized === "COMMIT" || normalized === "ROLLBACK") {
+          return { rows: [] };
+        }
+
+        if (normalized.startsWith("SELECT id FROM airlines")) {
+          return { rows: [{ id: 1 }] };
+        }
+
+        if (normalized.startsWith("SELECT id FROM airports")) {
+          return { rows: [{ id: 10 }] };
+        }
+
+        if (normalized.startsWith("INSERT INTO flights")) {
+          return {
+            rows: [{ id: 55, flight_number: "VN500", status: "scheduled" }],
+          };
+        }
+
+        if (normalized.startsWith("INSERT INTO flight_seats")) {
+          insertedSeatValues = params;
+          return { rows: [] };
+        }
+
+        throw new Error(`Unexpected client.query: ${sql}`);
+      },
+      release: () => {},
+    }),
+  };
+
+  const adminFlightService = loadAdminFlightService(poolMock);
+
+  const result = await adminFlightService.createFlight({
+    flight_number: "VN500",
+    airline_id: 1,
+    departure_airport_id: 10,
+    arrival_airport_id: 11,
+    departure_time: "2026-05-01T08:00:00.000Z",
+    arrival_time: "2026-05-01T10:00:00.000Z",
+    duration_minutes: 120,
+    seats: [
+      {
+        class: "economy",
+        total_seats: 50,
+        base_price: 1200000,
+      },
+    ],
+  });
+
+  assert.deepEqual(result, {
+    flight_id: 55,
+    flight_number: "VN500",
+    status: "scheduled",
+  });
+  assert.ok(insertedSeatValues, "expected seat insert values to be captured");
+  assert.equal(insertedSeatValues[0], 55);
+  assert.equal(insertedSeatValues[1], "economy");
+  assert.equal(insertedSeatValues[2], 50);
+  assert.equal(insertedSeatValues[3], 50);
+  assert.equal(insertedSeatValues[4], 1200000);
+  assert.equal(insertedSeatValues[5], 23);
+  assert.equal(insertedSeatValues[6], 7);
+  assert.equal(insertedSeatValues[7], 0);
+});
