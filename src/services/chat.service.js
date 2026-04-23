@@ -570,7 +570,8 @@ const getConversationByType = async (user, type, options = {}) => {
       });
     }
 
-    return getConversationPayload(client, conversation.id, "user");
+    const payloadData = await getConversationPayload(client, conversation.id, "user");
+    return payloadData;
   } finally {
     client.release();
   }
