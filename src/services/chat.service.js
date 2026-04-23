@@ -9,16 +9,138 @@ const CONVERSATION_TYPES = ["ai", "support"];
 const SUPPORT_STATUSES = ["open", "pending_admin", "pending_user", "resolved"];
 const MESSAGE_ROLES = ["user", "admin", "assistant", "system"];
 const MESSAGE_LIMIT = 80;
+const ATTACHMENT_TYPES = ["image", "file", "sticker"];
+const MAX_ATTACHMENTS_PER_MESSAGE = 4;
+const MAX_ATTACHMENT_NAME_LENGTH = 160;
+const MAX_ATTACHMENT_MIME_LENGTH = 120;
+const MAX_ATTACHMENT_DATA_URL_LENGTH = 2_500_000;
+const MAX_ATTACHMENT_SIZE = 3 * 1024 * 1024;
 
 const buildPreview = (value = "") => String(value).trim().replace(/\s+/g, " ").slice(0, 160);
 
-const requireMessage = (payload = {}) => {
-  const message = String(payload.message || "").trim();
-  if (!message) {
-    throw new Error("message la bat buoc");
+const sanitizeAttachmentName = (value, fallback = "tep-dinh-kem") => {
+  const normalized = String(value || "").trim().replace(/\s+/g, " ").slice(0, MAX_ATTACHMENT_NAME_LENGTH);
+  return normalized || fallback;
+};
+
+const isPlainObject = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+const isDataUrl = (value) => /^data:[^,]+,.+/i.test(String(value || "").trim());
+
+const inferAttachmentMimeType = (attachment = {}, dataUrl = "") => {
+  const explicitMimeType = String(
+    attachment.mime_type || attachment.mimeType || attachment.content_type || ""
+  )
+    .trim()
+    .slice(0, MAX_ATTACHMENT_MIME_LENGTH);
+
+  if (explicitMimeType) {
+    return explicitMimeType;
   }
 
-  return message;
+  const matched = String(dataUrl).match(/^data:([^;,]+)/i);
+  return matched?.[1]?.slice(0, MAX_ATTACHMENT_MIME_LENGTH) || "application/octet-stream";
+};
+
+const normalizeAttachments = (value) => {
+  if (value == null) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error("attachments phai la mang");
+  }
+
+  if (value.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+    throw new Error(`Chi duoc gui toi da ${MAX_ATTACHMENTS_PER_MESSAGE} tep trong mot tin nhan`);
+  }
+
+  return value.map((attachment, index) => {
+    if (!isPlainObject(attachment)) {
+      throw new Error("attachments khong hop le");
+    }
+
+    const type = String(attachment.type || "").trim().toLowerCase();
+    if (!ATTACHMENT_TYPES.includes(type)) {
+      throw new Error(`attachment type phai la: ${ATTACHMENT_TYPES.join(", ")}`);
+    }
+
+    const dataUrl = String(attachment.data_url || attachment.dataUrl || "").trim();
+    if (!isDataUrl(dataUrl)) {
+      throw new Error("attachment data_url khong hop le");
+    }
+
+    if (dataUrl.length > MAX_ATTACHMENT_DATA_URL_LENGTH) {
+      throw new Error("attachment qua lon, vui long giam kich thuoc tep");
+    }
+
+    const size = Math.max(0, Math.trunc(Number(attachment.size) || 0));
+    if (size > MAX_ATTACHMENT_SIZE) {
+      throw new Error("attachment vuot qua gioi han dung luong");
+    }
+
+    const mimeType = inferAttachmentMimeType(attachment, dataUrl);
+    const defaultName =
+      type === "sticker" ? `sticker-${index + 1}.svg` : type === "image" ? `hinh-${index + 1}` : `tep-${index + 1}`;
+
+    return {
+      id: sanitizeAttachmentName(
+        attachment.id || attachment.attachment_id || attachment.attachmentId || `attachment-${index + 1}`,
+        `attachment-${index + 1}`
+      ),
+      type,
+      name: sanitizeAttachmentName(attachment.name || attachment.file_name || attachment.fileName, defaultName),
+      mime_type: mimeType,
+      size,
+      data_url: dataUrl,
+      sticker_id: attachment.sticker_id || attachment.stickerId || null,
+      label: sanitizeAttachmentName(attachment.label || attachment.title, ""),
+    };
+  });
+};
+
+const buildAttachmentPreview = (attachments = []) => {
+  if (!attachments.length) {
+    return "";
+  }
+
+  if (attachments.length === 1) {
+    const [attachment] = attachments;
+
+    if (attachment.type === "sticker") {
+      return "[Sticker]";
+    }
+
+    if (attachment.type === "image") {
+      return `[Hinh anh] ${attachment.name}`.trim();
+    }
+
+    return `[File] ${attachment.name}`.trim();
+  }
+
+  return `[${attachments.length} tep dinh kem]`;
+};
+
+const parseOutgoingMessage = (payload = {}, { allowAttachments = false } = {}) => {
+  const message = String(payload.message || payload.content || "").trim();
+  const attachments = normalizeAttachments(
+    payload.attachments || payload.meta?.attachments || payload.files
+  );
+
+  if (attachments.length > 0 && !allowAttachments) {
+    throw new Error("Kenh nay chi ho tro gui tin nhan van ban");
+  }
+
+  if (!message && attachments.length === 0) {
+    throw new Error("message hoac attachment la bat buoc");
+  }
+
+  return {
+    message,
+    attachments,
+    preview: message ? buildPreview(message) : buildAttachmentPreview(attachments),
+  };
 };
 
 const ensureConversationType = (type) => {
@@ -455,7 +577,7 @@ const getConversationByType = async (user, type, options = {}) => {
 };
 
 const sendAiMessage = async (user, payload = {}, options = {}) => {
-  const message = requireMessage(payload);
+  const { message, preview } = parseOutgoingMessage(payload, { allowAttachments: false });
   const actor = resolveActor(user, payload, options);
 
   const client = await pool.connect();
@@ -482,7 +604,7 @@ const sendAiMessage = async (user, payload = {}, options = {}) => {
 
     await updateConversation(client, conversationId, {
       guest_name: actor.kind === "guest" ? actor.displayName : undefined,
-      last_message_preview: buildPreview(message),
+      last_message_preview: preview,
       last_message_at: userMessageRow.created_at,
       last_user_read_at: userMessageRow.created_at,
     });
@@ -596,7 +718,7 @@ const sendAiMessage = async (user, payload = {}, options = {}) => {
 };
 
 const sendSupportMessage = async (user, payload = {}, options = {}) => {
-  const message = requireMessage(payload);
+  const { message, attachments, preview } = parseOutgoingMessage(payload, { allowAttachments: true });
   const actor = resolveActor(user, payload, options);
   const client = await pool.connect();
 
@@ -614,13 +736,14 @@ const sendSupportMessage = async (user, payload = {}, options = {}) => {
       meta: {
         source: "support",
         guest_session_id: actor.guestSessionId || null,
+        ...(attachments.length > 0 ? { attachments } : {}),
       },
     });
 
     await updateConversation(client, conversationId, {
       guest_name: actor.kind === "guest" ? actor.displayName : undefined,
       status: "pending_admin",
-      last_message_preview: buildPreview(message),
+      last_message_preview: preview,
       last_message_at: supportUserMessage.created_at,
       last_user_read_at: supportUserMessage.created_at,
     });
@@ -788,7 +911,7 @@ const getSupportConversationForAdmin = async (conversationId, adminUser) => {
 };
 
 const replySupportConversation = async (conversationId, adminUser, payload = {}) => {
-  const message = requireMessage(payload);
+  const { message, attachments, preview } = parseOutgoingMessage(payload, { allowAttachments: true });
   const client = await pool.connect();
 
   try {
@@ -805,13 +928,16 @@ const replySupportConversation = async (conversationId, adminUser, payload = {})
       senderId: adminUser.id,
       senderRole: "admin",
       content: message,
-      meta: { source: "admin_reply" },
+      meta: {
+        source: "admin_reply",
+        ...(attachments.length > 0 ? { attachments } : {}),
+      },
     });
 
     await updateConversation(client, conversationId, {
       assigned_admin_id: adminUser.id,
       status: "pending_user",
-      last_message_preview: buildPreview(message),
+      last_message_preview: preview,
       last_message_at: adminMessage.created_at,
       last_admin_read_at: adminMessage.created_at,
     });
@@ -885,4 +1011,9 @@ module.exports = {
   getSupportConversationForAdmin,
   replySupportConversation,
   updateSupportConversationStatus,
+  __test: {
+    normalizeAttachments,
+    parseOutgoingMessage,
+    buildAttachmentPreview,
+  },
 };
