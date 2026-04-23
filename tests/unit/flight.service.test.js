@@ -79,6 +79,7 @@ test('searchFlights: trả danh sách chuyến bay đã format đúng', async ()
           baggage_included_kg: 20,
           carry_on_kg: 7,
           extra_baggage_price: 2,
+          extra_baggage_options: { 0: 0, 5: 120000, 10: 210000, 20: 380000 },
         },
       ],
     };
@@ -99,5 +100,7 @@ test('searchFlights: trả danh sách chuyến bay đã format đúng', async ()
   assert.equal(result.outbound_flights[0].flight_number, 'VN123');
   assert.equal(result.outbound_flights[0].seat.total_price, 175);
   assert.equal(result.outbound_flights[0].seat.price_breakdown.child_price, 75);
-  assert.equal(result.outbound_flights[0].seat.extra_baggage_options[1].price_per_person, 10);
+  assert.equal(result.outbound_flights[0].seat.extra_baggage_options.length, 4);
+  assert.equal(result.outbound_flights[0].seat.extra_baggage_options[1].price_per_person, 120000);
+  assert.equal(result.outbound_flights[0].seat.extra_baggage_options[2].price_per_person, 210000);
 });

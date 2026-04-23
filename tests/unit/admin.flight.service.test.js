@@ -67,6 +67,10 @@ test("createFlight: tu dong reset sequence va retry khi flights_pkey bi trung", 
             };
           }
 
+          if (normalized.startsWith("INSERT INTO flight_seats")) {
+            return { rows: [] };
+          }
+
           throw new Error(`Unexpected client.query: ${sql}`);
         },
         release: () => {},
@@ -84,6 +88,11 @@ test("createFlight: tu dong reset sequence va retry khi flights_pkey bi trung", 
     departure_time: "2026-04-21T19:13:00.000Z",
     arrival_time: "2026-04-21T20:13:00.000Z",
     duration_minutes: 60,
+    seats: [
+      { class: "economy", total_seats: 50, base_price: 1000000, extra_baggage_options: { 0: 0, 5: 50000, 10: 90000, 20: 160000 } },
+      { class: "business", total_seats: 20, base_price: 2000000, extra_baggage_options: { 0: 0, 5: 70000, 10: 130000, 20: 240000 } },
+      { class: "first", total_seats: 10, base_price: 3000000, extra_baggage_options: { 0: 0, 5: 90000, 10: 170000, 20: 320000 } },
+    ],
   });
 
   assert.equal(connectCalls, 2);
@@ -97,7 +106,7 @@ test("createFlight: tu dong reset sequence va retry khi flights_pkey bi trung", 
 });
 
 test("createFlight: seat moi khong nhap gia hanh ly them thi mac dinh bang 0", async () => {
-  let insertedSeatValues = null;
+  const insertedSeatValues = [];
 
   const poolMock = {
     query: async (sql) => {
@@ -126,7 +135,7 @@ test("createFlight: seat moi khong nhap gia hanh ly them thi mac dinh bang 0", a
         }
 
         if (normalized.startsWith("INSERT INTO flight_seats")) {
-          insertedSeatValues = params;
+          insertedSeatValues.push(params);
           return { rows: [] };
         }
 
@@ -152,6 +161,16 @@ test("createFlight: seat moi khong nhap gia hanh ly them thi mac dinh bang 0", a
         total_seats: 50,
         base_price: 1200000,
       },
+      {
+        class: "business",
+        total_seats: 20,
+        base_price: 2200000,
+      },
+      {
+        class: "first",
+        total_seats: 10,
+        base_price: 3200000,
+      },
     ],
   });
 
@@ -160,13 +179,22 @@ test("createFlight: seat moi khong nhap gia hanh ly them thi mac dinh bang 0", a
     flight_number: "VN500",
     status: "scheduled",
   });
-  assert.ok(insertedSeatValues, "expected seat insert values to be captured");
-  assert.equal(insertedSeatValues[0], 55);
-  assert.equal(insertedSeatValues[1], "economy");
-  assert.equal(insertedSeatValues[2], 50);
-  assert.equal(insertedSeatValues[3], 50);
-  assert.equal(insertedSeatValues[4], 1200000);
-  assert.equal(insertedSeatValues[5], 23);
-  assert.equal(insertedSeatValues[6], 7);
-  assert.equal(insertedSeatValues[7], 0);
+  assert.equal(insertedSeatValues.length, 3);
+
+  const economySeatValues = insertedSeatValues.find((params) => params[1] === "economy");
+  assert.ok(economySeatValues, "expected economy seat insert values to be captured");
+  assert.equal(economySeatValues[0], 55);
+  assert.equal(economySeatValues[1], "economy");
+  assert.equal(economySeatValues[2], 50);
+  assert.equal(economySeatValues[3], 50);
+  assert.equal(economySeatValues[4], 1200000);
+  assert.equal(economySeatValues[5], 23);
+  assert.equal(economySeatValues[6], 7);
+  assert.equal(economySeatValues[7], 0);
+  assert.deepEqual(JSON.parse(economySeatValues[8]), {
+    0: 0,
+    5: 0,
+    10: 0,
+    20: 0,
+  });
 });

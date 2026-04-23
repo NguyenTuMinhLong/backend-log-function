@@ -4,6 +4,7 @@ const pool = require("../config/db");
 
 const VALID_STATUSES = ["scheduled", "delayed", "cancelled", "completed"];
 const VALID_CLASSES  = ["economy", "business", "first"];
+const BAGGAGE_OPTION_KGS = [0, 5, 10, 20];
 const FLIGHTS_TABLE_NAME = "flights";
 const FLIGHTS_ID_COLUMN = "id";
 
@@ -63,6 +64,120 @@ const validateSeats = (seats) => {
     if (s.extra_baggage_price !== undefined && parseFloat(s.extra_baggage_price) < 0) {
       throw new Error("extra_baggage_price không hợp lệ");
     }
+  }
+};
+
+const normalizeSeatExtraBaggageOptions = (options, legacyExtraBaggagePrice = 0) => {
+  const normalized = {};
+  const fallbackPricePerKg = parseFloat(legacyExtraBaggagePrice) || 0;
+
+  for (const kg of BAGGAGE_OPTION_KGS) {
+    let value;
+
+    if (Array.isArray(options)) {
+      const matched = options.find((option) => parseInt(option?.kg) === kg);
+      value = matched?.price ?? matched?.price_per_person ?? matched?.amount;
+    } else if (options && typeof options === "object") {
+      value = options[kg] ?? options[String(kg)];
+    }
+
+    if (kg === 0) {
+      normalized["0"] = 0;
+      continue;
+    }
+
+    if (value === undefined || value === null || value === "") {
+      normalized[String(kg)] = fallbackPricePerKg * kg;
+      continue;
+    }
+
+    const parsed = parseFloat(value);
+    normalized[String(kg)] = Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return normalized;
+};
+
+const getSeatConfig = (seatClass, options = {}) => {
+  const defaults = {
+    economy:  {
+      baggage_included_kg: 23,
+      carry_on_kg: 7,
+      extra_baggage_price: 0,
+      extra_baggage_options: { "0": 0, "5": 0, "10": 0, "20": 0 },
+    },
+    business: {
+      baggage_included_kg: 32,
+      carry_on_kg: 12,
+      extra_baggage_price: 0,
+      extra_baggage_options: { "0": 0, "5": 0, "10": 0, "20": 0 },
+    },
+    first:    {
+      baggage_included_kg: 40,
+      carry_on_kg: 15,
+      extra_baggage_price: 0,
+      extra_baggage_options: { "0": 0, "5": 0, "10": 0, "20": 0 },
+    },
+  };
+
+  const fallback = defaults[seatClass] || defaults.economy;
+  return {
+    ...fallback,
+    ...options,
+    extra_baggage_options: normalizeSeatExtraBaggageOptions(
+      options.extra_baggage_options,
+      options.extra_baggage_price ?? fallback.extra_baggage_price
+    ),
+  };
+};
+
+const validateSeatsStrict = (seats, { requireAllClasses = false } = {}) => {
+  if (!Array.isArray(seats) || seats.length === 0) {
+    if (requireAllClasses) {
+      throw new Error("Moi chuyen bay phai co du 3 hang ghe: economy, business, first");
+    }
+    return;
+  }
+
+  const seenClasses = new Set();
+
+  for (const seat of seats) {
+    if (!VALID_CLASSES.includes(seat.class)) {
+      throw new Error(`class phai la: ${VALID_CLASSES.join(", ")}`);
+    }
+    if (seenClasses.has(seat.class)) {
+      throw new Error("Khong duoc trung hang ghe trong cung mot chuyen bay");
+    }
+    seenClasses.add(seat.class);
+
+    if (!seat.total_seats || parseInt(seat.total_seats) <= 0) {
+      throw new Error("total_seats phai lon hon 0");
+    }
+    if (!seat.base_price || parseFloat(seat.base_price) < 0) {
+      throw new Error("base_price khong hop le");
+    }
+    if (seat.baggage_included_kg !== undefined && parseInt(seat.baggage_included_kg) < 0) {
+      throw new Error("baggage_included_kg khong hop le");
+    }
+    if (seat.carry_on_kg !== undefined && parseInt(seat.carry_on_kg) < 0) {
+      throw new Error("carry_on_kg khong hop le");
+    }
+
+    const baggageOptions = normalizeSeatExtraBaggageOptions(
+      seat.extra_baggage_options,
+      seat.extra_baggage_price
+    );
+
+    for (const kg of BAGGAGE_OPTION_KGS) {
+      const value = parseFloat(baggageOptions[String(kg)]);
+      if (!Number.isFinite(value) || value < 0) {
+        throw new Error(`gia hanh ly ${kg}kg khong hop le`);
+      }
+    }
+  }
+
+  if (requireAllClasses && seenClasses.size !== VALID_CLASSES.length) {
+    throw new Error("Moi chuyen bay phai co du 3 hang ghe: economy, business, first");
   }
 };
 
@@ -153,17 +268,31 @@ const getFlights = async (params) => {
        arr.code AS arrival_code, arr.code AS arr_code,
        arr.city AS arrival_city, arr.city AS arr_city,
        -- Tổng hợp seats
-       json_agg(
-         json_build_object(
-           'class',           fs.class,
-           'total_seats',     fs.total_seats,
-           'available_seats', fs.available_seats,
-           'base_price',      fs.base_price,
-           'baggage_included_kg', fs.baggage_included_kg,
-           'carry_on_kg',     fs.carry_on_kg,
-           'extra_baggage_price', fs.extra_baggage_price
-         ) ORDER BY fs.base_price
-       ) AS seats
+        json_agg(
+          json_build_object(
+            'class',           fs.class,
+            'total_seats',     fs.total_seats,
+            'available_seats', fs.available_seats,
+            'base_price',      fs.base_price,
+            'baggage_included_kg', fs.baggage_included_kg,
+            'carry_on_kg',     fs.carry_on_kg,
+            'extra_baggage_price', fs.extra_baggage_price,
+            'extra_baggage_options', COALESCE(
+              fs.extra_baggage_options,
+              jsonb_build_object(
+                '0', 0,
+                '5', COALESCE(fs.extra_baggage_price, 0) * 5,
+                '10', COALESCE(fs.extra_baggage_price, 0) * 10,
+                '20', COALESCE(fs.extra_baggage_price, 0) * 20
+              )
+            )
+          ) ORDER BY CASE fs.class
+            WHEN 'economy' THEN 1
+            WHEN 'business' THEN 2
+            WHEN 'first' THEN 3
+            ELSE 99
+          END
+        ) AS seats
      FROM flights f
      JOIN airlines     al  ON al.id  = f.airline_id
      JOIN airports     dep ON dep.id = f.departure_airport_id
@@ -234,19 +363,23 @@ const createFlightInTransaction = async (client, data) => {
       ? parseInt(s.available_seats)
       : totalSeats;
 
-    const def = getDefaultSeatConfig(s.class);
+    const def = getSeatConfig(s.class, s);
 
     const baggageIncludedKg  = s.baggage_included_kg  !== undefined ? parseInt(s.baggage_included_kg)   : def.baggage_included_kg;
     const carryOnKg          = s.carry_on_kg          !== undefined ? parseInt(s.carry_on_kg)           : def.carry_on_kg;
     const extraBaggagePrice  = s.extra_baggage_price  !== undefined ? parseFloat(s.extra_baggage_price) : def.extra_baggage_price;
+    const extraBaggageOptions = normalizeSeatExtraBaggageOptions(
+      s.extra_baggage_options,
+      extraBaggagePrice
+    );
 
     await client.query(
       `INSERT INTO flight_seats (
          flight_id, class, total_seats, available_seats, base_price,
-         baggage_included_kg, carry_on_kg, extra_baggage_price
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+         baggage_included_kg, carry_on_kg, extra_baggage_price, extra_baggage_options
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`,
       [flight.id, s.class, totalSeats, available, parseFloat(s.base_price),
-       baggageIncludedKg, carryOnKg, extraBaggagePrice]
+       baggageIncludedKg, carryOnKg, extraBaggagePrice, JSON.stringify(extraBaggageOptions)]
     );
   }
 
@@ -263,7 +396,7 @@ const createFlightLegacy = async (data) => {
   } = data;
 
   validateFlightInput(data);
-  validateSeats(seats);
+  validateSeatsStrict(seats, { requireAllClasses: true });
 
   const client = await pool.connect();
   try {
@@ -306,7 +439,7 @@ const createFlightLegacy = async (data) => {
         : totalSeats;
 
       // Baggage defaults theo hạng nếu không truyền vào
-      const def = getDefaultSeatConfig(s.class);
+      const def = getSeatConfig(s.class, s);
 
       const baggageIncludedKg  = s.baggage_included_kg  !== undefined ? parseInt(s.baggage_included_kg)       : def.baggage_included_kg;
       const carryOnKg          = s.carry_on_kg          !== undefined ? parseInt(s.carry_on_kg)               : def.carry_on_kg;
@@ -337,7 +470,7 @@ const createFlightLegacy = async (data) => {
  */
 const createFlight = async (data) => {
   validateFlightInput(data);
-  validateSeats(data.seats);
+  validateSeatsStrict(data.seats, { requireAllClasses: true });
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const client = await pool.connect();
@@ -371,7 +504,7 @@ const updateFlight = async (flightId, data) => {
   } = data;
 
   validateFlightInput(data, true);
-  if (seats) validateSeats(seats);
+  if (seats) validateSeatsStrict(seats, { requireAllClasses: true });
 
   const client = await pool.connect();
   try {
@@ -410,6 +543,10 @@ const updateFlight = async (flightId, data) => {
           "SELECT id FROM flight_seats WHERE flight_id=$1 AND class=$2",
           [flightId, s.class]
         );
+        const baggageOptions = normalizeSeatExtraBaggageOptions(
+          s.extra_baggage_options,
+          s.extra_baggage_price
+        );
 
         if (existing_seat.rows.length > 0) {
           // Đã có → UPDATE
@@ -422,6 +559,10 @@ const updateFlight = async (flightId, data) => {
           if (s.baggage_included_kg !== undefined) { seatFields.push(`baggage_included_kg=$${sidx++}`); seatValues.push(parseInt(s.baggage_included_kg)); }
           if (s.carry_on_kg         !== undefined) { seatFields.push(`carry_on_kg=$${sidx++}`);         seatValues.push(parseInt(s.carry_on_kg)); }
           if (s.extra_baggage_price !== undefined) { seatFields.push(`extra_baggage_price=$${sidx++}`); seatValues.push(parseFloat(s.extra_baggage_price)); }
+          if (s.extra_baggage_options !== undefined || s.extra_baggage_price !== undefined) {
+            seatFields.push(`extra_baggage_options=$${sidx++}::jsonb`);
+            seatValues.push(JSON.stringify(baggageOptions));
+          }
 
           if (seatFields.length > 0) {
             seatFields.push(`updated_at=NOW()`);
@@ -435,16 +576,17 @@ const updateFlight = async (flightId, data) => {
         } else {
           // Chưa có → INSERT
           const totalSeats = parseInt(s.total_seats) || 0;
-          const def2 = getDefaultSeatConfig(s.class);
+          const def2 = getSeatConfig(s.class, s);
           await client.query(
             `INSERT INTO flight_seats (
                flight_id, class, total_seats, available_seats, base_price,
-               baggage_included_kg, carry_on_kg, extra_baggage_price
-             ) VALUES ($1,$2,$3,$3,$4,$5,$6,$7)`,
+               baggage_included_kg, carry_on_kg, extra_baggage_price, extra_baggage_options
+             ) VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8::jsonb)`,
             [flightId, s.class, totalSeats, parseFloat(s.base_price),
              s.baggage_included_kg !== undefined ? parseInt(s.baggage_included_kg) : def2.baggage_included_kg,
              s.carry_on_kg         !== undefined ? parseInt(s.carry_on_kg)         : def2.carry_on_kg,
-             s.extra_baggage_price !== undefined ? parseFloat(s.extra_baggage_price) : def2.extra_baggage_price]
+             s.extra_baggage_price !== undefined ? parseFloat(s.extra_baggage_price) : def2.extra_baggage_price,
+             JSON.stringify(baggageOptions)]
           );
         }
       }

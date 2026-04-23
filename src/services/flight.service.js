@@ -68,6 +68,37 @@ const calcTotalPrice = (basePrice, adults, children, infants) => {
   return Math.round(adultTotal + childTotal + infantTotal);
 };
 
+const BAGGAGE_OPTION_KGS = [0, 5, 10, 20];
+
+const buildFixedBaggageOptions = (rawOptions, extraBaggagePrice = 0) => {
+  const fallbackPricePerKg = parseFloat(extraBaggagePrice) || 0;
+
+  return BAGGAGE_OPTION_KGS.map((kg) => {
+    let value;
+
+    if (Array.isArray(rawOptions)) {
+      const matched = rawOptions.find((option) => parseInt(option?.kg) === kg);
+      value = matched?.price ?? matched?.price_per_person ?? matched?.amount;
+    } else if (rawOptions && typeof rawOptions === "object") {
+      value = rawOptions[kg] ?? rawOptions[String(kg)];
+    }
+
+    const parsed = kg === 0
+      ? 0
+      : (
+          value === undefined || value === null || value === ""
+            ? fallbackPricePerKg * kg
+            : parseFloat(value)
+        );
+
+    return {
+      kg,
+      label: kg === 0 ? "No extra" : `+${kg} kg`,
+      price_per_person: Number.isFinite(parsed) ? parsed : 0,
+    };
+  });
+};
+
 /**
  * Tạo danh sách lựa chọn hành lý thêm đã tính sẵn giá (per person)
  * price_per_person = số_kg × extra_baggage_price
@@ -135,7 +166,7 @@ const formatFlights = (rows, adults, children, infants) =>
         extra_baggage_price: extraPrice,
 
         // Lựa chọn hành lý thêm — giá đã tính sẵn cho từng mức (per person)
-        extra_baggage_options: buildBaggageOptions(extraPrice),
+        extra_baggage_options: buildFixedBaggageOptions(r.extra_baggage_options, extraPrice),
 
         // Breakdown giá từng loại hành khách (per person)
         price_breakdown: {
@@ -230,7 +261,16 @@ const queryFlights = async ({
       fs.base_price,
       fs.baggage_included_kg,
       fs.carry_on_kg,
-      fs.extra_baggage_price
+      fs.extra_baggage_price,
+      COALESCE(
+        fs.extra_baggage_options,
+        jsonb_build_object(
+          '0', 0,
+          '5', COALESCE(fs.extra_baggage_price, 0) * 5,
+          '10', COALESCE(fs.extra_baggage_price, 0) * 10,
+          '20', COALESCE(fs.extra_baggage_price, 0) * 20
+        )
+      ) AS extra_baggage_options
     FROM flights f
     JOIN airlines     al     ON al.id     = f.airline_id
     JOIN airports     dep_ap ON dep_ap.id = f.departure_airport_id
@@ -339,17 +379,31 @@ const getFlightById = async (flightId, { adults = 1, children = 0, infants = 0 }
        al.code AS airline_code, al.name AS airline_name, al.logo_url,
        dep.code AS departure_code, dep.name AS departure_name, dep.city AS departure_city,
        arr.code AS arrival_code,  arr.name AS arrival_name,  arr.city AS arrival_city,
-       json_agg(
-         json_build_object(
-           'class',               fs.class,
-           'available_seats',     fs.available_seats,
-           'total_seats',         fs.total_seats,
-           'base_price',          fs.base_price,
-           'baggage_included_kg', fs.baggage_included_kg,
-           'carry_on_kg',         fs.carry_on_kg,
-           'extra_baggage_price', fs.extra_baggage_price
-         ) ORDER BY fs.base_price
-       ) AS seats
+        json_agg(
+          json_build_object(
+            'class',               fs.class,
+            'available_seats',     fs.available_seats,
+            'total_seats',         fs.total_seats,
+            'base_price',          fs.base_price,
+            'baggage_included_kg', fs.baggage_included_kg,
+            'carry_on_kg',         fs.carry_on_kg,
+            'extra_baggage_price', fs.extra_baggage_price,
+            'extra_baggage_options', COALESCE(
+              fs.extra_baggage_options,
+              jsonb_build_object(
+                '0', 0,
+                '5', COALESCE(fs.extra_baggage_price, 0) * 5,
+                '10', COALESCE(fs.extra_baggage_price, 0) * 10,
+                '20', COALESCE(fs.extra_baggage_price, 0) * 20
+              )
+            )
+          ) ORDER BY CASE fs.class
+            WHEN 'economy' THEN 1
+            WHEN 'business' THEN 2
+            WHEN 'first' THEN 3
+            ELSE 99
+          END
+        ) AS seats
      FROM flights f
      JOIN airlines     al  ON al.id  = f.airline_id
      JOIN airports     dep ON dep.id = f.departure_airport_id
@@ -375,7 +429,7 @@ const getFlightById = async (flightId, { adults = 1, children = 0, infants = 0 }
       extra_baggage_price: extraPrice,
 
       // Lựa chọn hành lý thêm đã tính sẵn (per person)
-      extra_baggage_options: buildBaggageOptions(extraPrice),
+      extra_baggage_options: buildFixedBaggageOptions(s.extra_baggage_options, extraPrice),
 
       // Breakdown giá từng loại hành khách (per person)
       price_breakdown: {

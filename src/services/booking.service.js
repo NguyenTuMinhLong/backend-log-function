@@ -22,6 +22,33 @@ const calcTotalPrice = (basePrice, adults, children, infants) => {
   return Math.round(adultTotal + childTotal + infantTotal);
 };
 
+const BAGGAGE_OPTION_KGS = [0, 5, 10, 20];
+
+const getFixedBaggagePrice = (rawOptions, extraKg, legacyExtraBaggagePrice = 0) => {
+  const kg = parseInt(extraKg) || 0;
+  if (kg === 0) return 0;
+
+  if (!BAGGAGE_OPTION_KGS.includes(kg)) {
+    throw new Error("extra_baggage_kg chi ho tro cac muc 0, 5, 10, 20");
+  }
+
+  let value;
+
+  if (Array.isArray(rawOptions)) {
+    const matched = rawOptions.find((option) => parseInt(option?.kg) === kg);
+    value = matched?.price ?? matched?.price_per_person ?? matched?.amount;
+  } else if (rawOptions && typeof rawOptions === "object") {
+    value = rawOptions[kg] ?? rawOptions[String(kg)];
+  }
+
+  if (value !== undefined && value !== null && value !== "") {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return kg * (parseFloat(legacyExtraBaggagePrice) || 0);
+};
+
 const validateBookingInput = (data) => {
   const {
     outbound_flight_id, outbound_seat_class,
@@ -82,10 +109,24 @@ const validateBookingInput = (data) => {
   }
 };
 
+const validateBookingInputStrict = (data) => {
+  validateBookingInput(data);
+
+  for (const passenger of data.passengers || []) {
+    if (
+      passenger.extra_baggage_kg !== undefined &&
+      !BAGGAGE_OPTION_KGS.includes(parseInt(passenger.extra_baggage_kg))
+    ) {
+      throw new Error("extra_baggage_kg chi ho tro cac muc 0, 5, 10, 20");
+    }
+  }
+};
+
 const checkAndGetSeatInfo = async (client, flightId, seatClass, seatsNeeded) => {
   const result = await client.query(
     `SELECT fs.base_price, fs.available_seats, fs.total_seats,
             fs.baggage_included_kg, fs.carry_on_kg, fs.extra_baggage_price,
+            fs.extra_baggage_options,
             f.status, f.departure_time
      FROM flight_seats fs
      JOIN flights f ON f.id = fs.flight_id
@@ -115,7 +156,7 @@ const checkAndGetSeatInfo = async (client, flightId, seatClass, seatsNeeded) => 
 // ─── createBooking ────────────────────────────────────────────────────────────
 
 const createBooking = async (data, userId = null) => {
-  validateBookingInput(data);
+  validateBookingInputStrict(data);
 
   const {
     outbound_flight_id, outbound_seat_class,
@@ -161,7 +202,11 @@ const createBooking = async (data, userId = null) => {
     for (const p of outboundPassengers) {
       const extraKg = parseInt(p.extra_baggage_kg) || 0;
       if (extraKg > 0 && p.passenger_type !== "infant") {
-        p._baggage_price = extraKg * parseFloat(outboundSeat.extra_baggage_price);
+        p._baggage_price = getFixedBaggagePrice(
+          outboundSeat.extra_baggage_options,
+          extraKg,
+          outboundSeat.extra_baggage_price
+        );
         baggageTotal += p._baggage_price;
       } else {
         p._baggage_price = 0;
@@ -170,7 +215,11 @@ const createBooking = async (data, userId = null) => {
     for (const p of returnPassengers) {
       const extraKg = parseInt(p.extra_baggage_kg) || 0;
       if (extraKg > 0 && returnSeat && p.passenger_type !== "infant") {
-        p._baggage_price = extraKg * parseFloat(returnSeat.extra_baggage_price);
+        p._baggage_price = getFixedBaggagePrice(
+          returnSeat.extra_baggage_options,
+          extraKg,
+          returnSeat.extra_baggage_price
+        );
         baggageTotal += p._baggage_price;
       } else {
         p._baggage_price = 0;
