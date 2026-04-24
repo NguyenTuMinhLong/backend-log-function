@@ -1,14 +1,15 @@
 const pool = require("../config/db");
+const Q    = require("../queries/airport.queries");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const validateAirportInput = (data, isUpdate = false) => {
-  const { code, name, city, country, timezone } = data;
+  const { code, name, city } = data;
 
   if (!isUpdate) {
-    if (!code)    throw new Error("code là bắt buộc (VD: HAN, SGN)");
-    if (!name)    throw new Error("name là bắt buộc");
-    if (!city)    throw new Error("city là bắt buộc");
+    if (!code) throw new Error("code là bắt buộc (VD: HAN, SGN)");
+    if (!name) throw new Error("name là bắt buộc");
+    if (!city) throw new Error("city là bắt buộc");
   }
 
   if (code && (code.length < 2 || code.length > 10)) {
@@ -46,17 +47,11 @@ const getAirports = async (params) => {
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  const countResult = await pool.query(
-    `SELECT COUNT(*) FROM airports ${whereClause}`, values
-  );
-  const total = parseInt(countResult.rows[0].count);
+  const countResult = await pool.query(Q.COUNT_AIRPORTS(whereClause), values);
+  const total       = parseInt(countResult.rows[0].count);
 
   const dataResult = await pool.query(
-    `SELECT id, code, name, city, country, timezone, is_active, created_at
-     FROM airports
-     ${whereClause}
-     ORDER BY country ASC, city ASC
-     LIMIT $${idx++} OFFSET $${idx++}`,
+    Q.SELECT_AIRPORTS(whereClause, idx, idx + 1),
     [...values, parseInt(limit), offset]
   );
 
@@ -83,21 +78,12 @@ const createAirport = async (data) => {
     timezone = "Asia/Ho_Chi_Minh",
   } = data;
 
-  // Kiểm tra code đã tồn tại chưa
-  const existing = await pool.query(
-    "SELECT id FROM airports WHERE UPPER(code) = UPPER($1)", [code]
-  );
+  const existing = await pool.query(Q.FIND_AIRPORT_BY_CODE, [code]);
   if (existing.rows.length > 0) {
     throw new Error(`Sân bay với code "${code.toUpperCase()}" đã tồn tại`);
   }
 
-  const result = await pool.query(
-    `INSERT INTO airports (code, name, city, country, timezone)
-     VALUES (UPPER($1), $2, $3, $4, $5)
-     RETURNING *`,
-    [code, name, city, country, timezone]
-  );
-
+  const result = await pool.query(Q.INSERT_AIRPORT, [code, name, city, country, timezone]);
   return result.rows[0];
 };
 
@@ -107,9 +93,7 @@ const createAirport = async (data) => {
 const updateAirport = async (airportId, data) => {
   validateAirportInput(data, true);
 
-  const existing = await pool.query(
-    "SELECT id FROM airports WHERE id=$1", [airportId]
-  );
+  const existing = await pool.query(Q.FIND_AIRPORT_BY_ID, [airportId]);
   if (existing.rows.length === 0) throw new Error("Không tìm thấy sân bay");
 
   const { name, city, country, timezone } = data;
@@ -126,11 +110,7 @@ const updateAirport = async (airportId, data) => {
   if (fields.length === 0) throw new Error("Không có thông tin nào để cập nhật");
 
   values.push(airportId);
-  const result = await pool.query(
-    `UPDATE airports SET ${fields.join(", ")} WHERE id=$${idx} RETURNING *`,
-    values
-  );
-
+  const result = await pool.query(Q.UPDATE_AIRPORT_FIELDS(fields, idx), values);
   return result.rows[0];
 };
 
@@ -144,17 +124,13 @@ const updateAirportStatus = async (airportId, is_active) => {
 
   const status = is_active === true || is_active === "true";
 
-  const result = await pool.query(
-    `UPDATE airports SET is_active=$1 WHERE id=$2
-     RETURNING id, code, name, city, is_active`,
-    [status, airportId]
-  );
+  const result = await pool.query(Q.UPDATE_AIRPORT_STATUS, [status, airportId]);
 
   if (result.rows.length === 0) throw new Error("Không tìm thấy sân bay");
 
   return {
-    message:   status ? "Đã kích hoạt sân bay" : "Đã vô hiệu hóa sân bay",
-    airport:   result.rows[0],
+    message: status ? "Đã kích hoạt sân bay" : "Đã vô hiệu hóa sân bay",
+    airport: result.rows[0],
   };
 };
 

@@ -1,4 +1,7 @@
 const pool = require("../config/db");
+const QF   = require("../queries/flight.queries");
+const QAL  = require("../queries/airline.queries");
+const QAP  = require("../queries/airport.queries");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -14,24 +17,15 @@ const validateSearchParams = ({
   }
 
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-  if (!dateRegex.test(departure_date)) {
-    throw new Error("departure_date phải có định dạng YYYY-MM-DD");
-  }
+  if (!dateRegex.test(departure_date)) throw new Error("departure_date phải có định dạng YYYY-MM-DD");
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const depDate = new Date(departure_date);
-  if (depDate < today) {
-    throw new Error("Ngày đi không được là ngày trong quá khứ");
-  }
+  if (new Date(departure_date) < today) throw new Error("Ngày đi không được là ngày trong quá khứ");
 
   if (return_date) {
-    if (!dateRegex.test(return_date)) {
-      throw new Error("return_date phải có định dạng YYYY-MM-DD");
-    }
-    if (new Date(return_date) <= depDate) {
-      throw new Error("Ngày về phải sau ngày đi");
-    }
+    if (!dateRegex.test(return_date)) throw new Error("return_date phải có định dạng YYYY-MM-DD");
+    if (new Date(return_date) <= new Date(departure_date)) throw new Error("Ngày về phải sau ngày đi");
   }
 
   const validClasses = ["economy", "business", "first"];
@@ -57,9 +51,6 @@ const formatDuration = (minutes) => {
 
 /**
  * Tính tổng tiền vé theo loại hành khách
- * - Adults:   100%
- * - Children: 75%
- * - Infants:  10% (không chiếm ghế)
  */
 const calcTotalPrice = (basePrice, adults, children, infants) => {
   const adultTotal  = basePrice * adults;
@@ -68,40 +59,8 @@ const calcTotalPrice = (basePrice, adults, children, infants) => {
   return Math.round(adultTotal + childTotal + infantTotal);
 };
 
-const BAGGAGE_OPTION_KGS = [0, 5, 10, 20];
-
-const buildFixedBaggageOptions = (rawOptions, extraBaggagePrice = 0) => {
-  const fallbackPricePerKg = parseFloat(extraBaggagePrice) || 0;
-
-  return BAGGAGE_OPTION_KGS.map((kg) => {
-    let value;
-
-    if (Array.isArray(rawOptions)) {
-      const matched = rawOptions.find((option) => parseInt(option?.kg) === kg);
-      value = matched?.price ?? matched?.price_per_person ?? matched?.amount;
-    } else if (rawOptions && typeof rawOptions === "object") {
-      value = rawOptions[kg] ?? rawOptions[String(kg)];
-    }
-
-    const parsed = kg === 0
-      ? 0
-      : (
-          value === undefined || value === null || value === ""
-            ? fallbackPricePerKg * kg
-            : parseFloat(value)
-        );
-
-    return {
-      kg,
-      label: kg === 0 ? "No extra" : `+${kg} kg`,
-      price_per_person: Number.isFinite(parsed) ? parsed : 0,
-    };
-  });
-};
-
 /**
  * Tạo danh sách lựa chọn hành lý thêm đã tính sẵn giá (per person)
- * price_per_person = số_kg × extra_baggage_price
  */
 const buildBaggageOptions = (extraBaggagePrice) => {
   const pricePerKg = parseFloat(extraBaggagePrice) || 0;
@@ -123,59 +82,33 @@ const formatFlights = (rows, adults, children, infants) =>
       flight_id:     r.flight_id,
       flight_number: r.flight_number,
       status:        r.status,
-
       airline: {
-        id:       r.airline_id,
-        code:     r.airline_code,
-        name:     r.airline_name,
-        logo_url: r.airline_logo,
+        id: r.airline_id, code: r.airline_code, name: r.airline_name, logo_url: r.airline_logo,
       },
-
       departure: {
-        airport_id:   r.departure_airport_id,
-        code:         r.departure_code,
-        airport_name: r.departure_airport_name,
-        city:         r.departure_city,
-        time:         r.departure_time,
+        airport_id: r.departure_airport_id, code: r.departure_code,
+        airport_name: r.departure_airport_name, city: r.departure_city, time: r.departure_time,
       },
-
       arrival: {
-        airport_id:   r.arrival_airport_id,
-        code:         r.arrival_code,
-        airport_name: r.arrival_airport_name,
-        city:         r.arrival_city,
-        time:         r.arrival_time,
+        airport_id: r.arrival_airport_id, code: r.arrival_code,
+        airport_name: r.arrival_airport_name, city: r.arrival_city, time: r.arrival_time,
       },
-
       duration_minutes: r.duration_minutes,
       duration_label:   formatDuration(r.duration_minutes),
-
       seat: {
-        class:           r.seat_class,
-        available_seats: r.available_seats,
-        total_seats:     r.total_seats,
-
-        // Giá gốc 1 người lớn — dùng để hiển thị "/Customer"
-        base_price: base,
-
-        // Hành lý
-        baggage_included_kg: r.baggage_included_kg,
-        carry_on_kg:         r.carry_on_kg,
-
-        // Giá mỗi kg thêm (raw)
-        extra_baggage_price: extraPrice,
-
-        // Lựa chọn hành lý thêm — giá đã tính sẵn cho từng mức (per person)
-        extra_baggage_options: buildFixedBaggageOptions(r.extra_baggage_options, extraPrice),
-
-        // Breakdown giá từng loại hành khách (per person)
+        class:                 r.seat_class,
+        available_seats:       r.available_seats,
+        total_seats:           r.total_seats,
+        base_price:            base,
+        baggage_included_kg:   r.baggage_included_kg,
+        carry_on_kg:           r.carry_on_kg,
+        extra_baggage_price:   extraPrice,
+        extra_baggage_options: buildBaggageOptions(extraPrice),
         price_breakdown: {
           adult_price:  base,
           child_price:  Math.round(base * 0.75),
           infant_price: Math.round(base * 0.10),
         },
-
-        // Tổng tiền vé toàn đoàn (chưa tính hành lý thêm)
         total_price: calcTotalPrice(base, adults, children, infants),
       },
     };
@@ -188,11 +121,10 @@ const queryFlights = async ({
   min_price, max_price, airline_code,
   departure_city, arrival_city,
 }) => {
-  const a   = parseInt(adults)   || 1;
+  const a   = parseInt(adults) || 1;
   const c   = parseInt(children) || 0;
   const cls = seat_class.toLowerCase();
-
-  const seatsNeeded = a + c; // infants không chiếm ghế
+  const seatsNeeded = a + c;
 
   const sortMap = {
     price_asc:     "fs.base_price ASC",
@@ -214,73 +146,16 @@ const queryFlights = async ({
   conditions.push(`f.status = 'scheduled'`);
   conditions.push(`f.is_active = TRUE`);
 
-  if (min_price !== undefined && min_price !== "") {
-    conditions.push(`fs.base_price >= $${idx++}`);
-    values.push(parseFloat(min_price));
-  }
-  if (max_price !== undefined && max_price !== "") {
-    conditions.push(`fs.base_price <= $${idx++}`);
-    values.push(parseFloat(max_price));
-  }
-  if (airline_code) {
-    conditions.push(`al.code = $${idx++}`);
-    values.push(airline_code.toUpperCase());
-  }
-  if (departure_city) {
-    conditions.push(`LOWER(dep_ap.city) LIKE LOWER($${idx++})`);
-    values.push(`%${departure_city}%`);
-  }
-  if (arrival_city) {
-    conditions.push(`LOWER(arr_ap.city) LIKE LOWER($${idx++})`);
-    values.push(`%${arrival_city}%`);
-  }
+  if (min_price !== undefined && min_price !== "") { conditions.push(`fs.base_price >= $${idx++}`); values.push(parseFloat(min_price)); }
+  if (max_price !== undefined && max_price !== "") { conditions.push(`fs.base_price <= $${idx++}`); values.push(parseFloat(max_price)); }
+  if (airline_code)   { conditions.push(`al.code = $${idx++}`);                         values.push(airline_code.toUpperCase()); }
+  if (departure_city) { conditions.push(`LOWER(dep_ap.city) LIKE LOWER($${idx++})`);    values.push(`%${departure_city}%`); }
+  if (arrival_city)   { conditions.push(`LOWER(arr_ap.city) LIKE LOWER($${idx++})`);    values.push(`%${arrival_city}%`); }
 
-  const sql = `
-    SELECT
-      f.id                    AS flight_id,
-      f.flight_number,
-      f.departure_time,
-      f.arrival_time,
-      f.duration_minutes,
-      f.status,
-      al.id                   AS airline_id,
-      al.code                 AS airline_code,
-      al.name                 AS airline_name,
-      al.logo_url             AS airline_logo,
-      dep_ap.id               AS departure_airport_id,
-      dep_ap.code             AS departure_code,
-      dep_ap.name             AS departure_airport_name,
-      dep_ap.city             AS departure_city,
-      arr_ap.id               AS arrival_airport_id,
-      arr_ap.code             AS arrival_code,
-      arr_ap.name             AS arrival_airport_name,
-      arr_ap.city             AS arrival_city,
-      fs.class                AS seat_class,
-      fs.available_seats,
-      fs.total_seats,
-      fs.base_price,
-      fs.baggage_included_kg,
-      fs.carry_on_kg,
-      fs.extra_baggage_price,
-      COALESCE(
-        fs.extra_baggage_options,
-        jsonb_build_object(
-          '0', 0,
-          '5', COALESCE(fs.extra_baggage_price, 0) * 5,
-          '10', COALESCE(fs.extra_baggage_price, 0) * 10,
-          '20', COALESCE(fs.extra_baggage_price, 0) * 20
-        )
-      ) AS extra_baggage_options
-    FROM flights f
-    JOIN airlines     al     ON al.id     = f.airline_id
-    JOIN airports     dep_ap ON dep_ap.id = f.departure_airport_id
-    JOIN airports     arr_ap ON arr_ap.id = f.arrival_airport_id
-    JOIN flight_seats fs     ON fs.flight_id = f.id
-    WHERE ${conditions.join(" AND ")}
-    ORDER BY ${orderBy}
-  `;
-
-  const result = await pool.query(sql, values);
+  const result = await pool.query(
+    QF.SEARCH_FLIGHTS(conditions.join(" AND "), orderBy),
+    values
+  );
   return result.rows;
 };
 
@@ -298,10 +173,7 @@ const searchFlights = async (params) => {
     departure_city, arrival_city,
   } = params;
 
-  validateSearchParams({
-    departure_code, arrival_code, departure_date,
-    adults, children, infants, seat_class, return_date,
-  });
+  validateSearchParams({ departure_code, arrival_code, departure_date, adults, children, infants, seat_class, return_date });
 
   const a = parseInt(adults);
   const c = parseInt(children) || 0;
@@ -314,11 +186,9 @@ const searchFlights = async (params) => {
     airline_code, departure_city, arrival_city,
   };
 
-  // Chuyến đi
   const outboundRows    = await queryFlights(baseParams);
   const outboundFlights = formatFlights(outboundRows, a, c, i);
 
-  // Chuyến về (khứ hồi)
   let returnFlights = null;
   if (return_date) {
     const returnRows = await queryFlights({
@@ -345,10 +215,7 @@ const searchFlights = async (params) => {
  * GET /api/flights/airports
  */
 const getAirports = async () => {
-  const result = await pool.query(
-    `SELECT id, code, name, city, country
-     FROM airports WHERE is_active = TRUE ORDER BY city ASC`
-  );
+  const result = await pool.query(QAP.SELECT_ACTIVE_AIRPORTS);
   return result.rows;
 };
 
@@ -356,66 +223,19 @@ const getAirports = async () => {
  * GET /api/flights/airlines
  */
 const getAirlines = async () => {
-  const result = await pool.query(
-    `SELECT id, code, name, logo_url
-     FROM airlines WHERE is_active = TRUE ORDER BY name ASC`
-  );
+  const result = await pool.query(QAL.SELECT_ACTIVE_AIRLINES);
   return result.rows;
 };
 
 /**
- * GET /api/flights/:id?adults=2&children=1&infants=0
- * Truyền số hành khách để tính đúng total_price
+ * GET /api/flights/:id
  */
 const getFlightById = async (flightId, { adults = 1, children = 0, infants = 0 } = {}) => {
   const a = parseInt(adults)   || 1;
   const c = parseInt(children) || 0;
   const i = parseInt(infants)  || 0;
 
-  const result = await pool.query(
-    `SELECT
-       f.id, f.flight_number, f.departure_time, f.arrival_time,
-       f.duration_minutes, f.status,
-       al.code AS airline_code, al.name AS airline_name, al.logo_url,
-       dep.code AS departure_code, dep.name AS departure_name, dep.city AS departure_city,
-       arr.code AS arrival_code,  arr.name AS arrival_name,  arr.city AS arrival_city,
-        json_agg(
-          json_build_object(
-            'class',               fs.class,
-            'available_seats',     fs.available_seats,
-            'total_seats',         fs.total_seats,
-            'base_price',          fs.base_price,
-            'baggage_included_kg', fs.baggage_included_kg,
-            'carry_on_kg',         fs.carry_on_kg,
-            'extra_baggage_price', fs.extra_baggage_price,
-            'extra_baggage_options', COALESCE(
-              fs.extra_baggage_options,
-              jsonb_build_object(
-                '0', 0,
-                '5', COALESCE(fs.extra_baggage_price, 0) * 5,
-                '10', COALESCE(fs.extra_baggage_price, 0) * 10,
-                '20', COALESCE(fs.extra_baggage_price, 0) * 20
-              )
-            )
-          ) ORDER BY CASE fs.class
-            WHEN 'economy' THEN 1
-            WHEN 'business' THEN 2
-            WHEN 'first' THEN 3
-            ELSE 99
-          END
-        ) AS seats
-     FROM flights f
-     JOIN airlines     al  ON al.id  = f.airline_id
-     JOIN airports     dep ON dep.id = f.departure_airport_id
-     JOIN airports     arr ON arr.id = f.arrival_airport_id
-     JOIN flight_seats fs  ON fs.flight_id = f.id
-     WHERE f.id = $1
-     GROUP BY f.id, al.code, al.name, al.logo_url,
-              dep.code, dep.name, dep.city,
-              arr.code, arr.name, arr.city`,
-    [flightId]
-  );
-
+  const result = await pool.query(QF.SELECT_FLIGHT_BY_ID, [flightId]);
   if (result.rows.length === 0) throw new Error("Không tìm thấy chuyến bay");
 
   const r = result.rows[0];
@@ -425,20 +245,14 @@ const getFlightById = async (flightId, { adults = 1, children = 0, infants = 0 }
     const extraPrice = parseFloat(s.extra_baggage_price) || 0;
     return {
       ...s,
-      base_price:          base,
-      extra_baggage_price: extraPrice,
-
-      // Lựa chọn hành lý thêm đã tính sẵn (per person)
-      extra_baggage_options: buildFixedBaggageOptions(s.extra_baggage_options, extraPrice),
-
-      // Breakdown giá từng loại hành khách (per person)
+      base_price:            base,
+      extra_baggage_price:   extraPrice,
+      extra_baggage_options: buildBaggageOptions(extraPrice),
       price_breakdown: {
         adult_price:  base,
         child_price:  Math.round(base * 0.75),
         infant_price: Math.round(base * 0.10),
       },
-
-      // Tổng tiền vé cho số hành khách đã truyền vào
       total_price: calcTotalPrice(base, a, c, i),
     };
   });
@@ -450,23 +264,9 @@ const getFlightById = async (flightId, { adults = 1, children = 0, infants = 0 }
     duration_minutes: r.duration_minutes,
     duration_label:   formatDuration(r.duration_minutes),
     passengers:       { adults: a, children: c, infants: i, total: a + c + i },
-    airline: {
-      code:     r.airline_code,
-      name:     r.airline_name,
-      logo_url: r.logo_url,
-    },
-    departure: {
-      code:         r.departure_code,
-      airport_name: r.departure_name,
-      city:         r.departure_city,
-      time:         r.departure_time,
-    },
-    arrival: {
-      code:         r.arrival_code,
-      airport_name: r.arrival_name,
-      city:         r.arrival_city,
-      time:         r.arrival_time,
-    },
+    airline:   { code: r.airline_code,    name: r.airline_name,    logo_url: r.logo_url },
+    departure: { code: r.departure_code,  airport_name: r.departure_name, city: r.departure_city, time: r.departure_time },
+    arrival:   { code: r.arrival_code,    airport_name: r.arrival_name,   city: r.arrival_city,   time: r.arrival_time },
     seats: seatsWithPrice,
   };
 };
