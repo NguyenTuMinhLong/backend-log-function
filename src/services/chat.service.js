@@ -13,10 +13,39 @@ const MESSAGE_LIMIT      = 80;
 
 const buildPreview = (value = "") => String(value).trim().replace(/\s+/g, " ").slice(0, 160);
 
+const buildAttachmentPreview = (attachments = []) => {
+  if (!Array.isArray(attachments) || !attachments.length) return "";
+  if (attachments.length === 1) {
+    const [a] = attachments;
+    if (a.type === "sticker") return "[Sticker]";
+    if (a.type === "image")   return `[Hinh anh] ${a.name || ""}`.trim();
+    return `[File] ${a.name || ""}`.trim();
+  }
+  return `[${attachments.length} tep dinh kem]`;
+};
+
+const sanitizeAttachments = (raw) => {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((a) => a && typeof a === "object" && a.type && a.data_url)
+    .slice(0, 4)
+    .map((a) => ({
+      id:         String(a.id        || ""),
+      type:       String(a.type      || "file"),
+      name:       String(a.name      || "").slice(0, 255),
+      mime_type:  String(a.mime_type || "").slice(0, 100),
+      size:       Number(a.size)     || 0,
+      data_url:   String(a.data_url  || ""),
+      sticker_id: a.sticker_id ? String(a.sticker_id) : null,
+      label:      a.label ? String(a.label).slice(0, 100) : "",
+    }));
+};
+
 const requireMessage = (payload = {}) => {
-  const message = String(payload.message || "").trim();
-  if (!message) throw new Error("message la bat buoc");
-  return message;
+  const message      = String(payload.message || "").trim();
+  const attachments  = sanitizeAttachments(payload.attachments);
+  if (!message && !attachments.length) throw new Error("Tin nhan hoac tep dinh kem la bat buoc");
+  return { message, attachments };
 };
 
 const ensureConversationType = (type) => {
@@ -216,7 +245,7 @@ const getConversationByType = async (user, type, options = {}) => {
 };
 
 const sendAiMessage = async (user, payload = {}, options = {}) => {
-  const message = requireMessage(payload);
+  const { message } = requireMessage(payload);
   const actor   = resolveActor(user, payload, options);
   const client  = await pool.connect();
 
@@ -328,7 +357,7 @@ const sendAiMessage = async (user, payload = {}, options = {}) => {
 };
 
 const sendSupportMessage = async (user, payload = {}, options = {}) => {
-  const message = requireMessage(payload);
+  const { message, attachments } = requireMessage(payload);
   const actor   = resolveActor(user, payload, options);
   const client  = await pool.connect();
 
@@ -340,13 +369,13 @@ const sendSupportMessage = async (user, payload = {}, options = {}) => {
 
     const supportUserMessage = await insertMessage(client, {
       conversationId, senderId: actor.senderId, senderRole: "user", content: message,
-      meta: { source: "support", guest_session_id: actor.guestSessionId || null },
+      meta: { source: "support", guest_session_id: actor.guestSessionId || null, attachments },
     });
 
     await updateConversation(client, conversationId, {
       guest_name:           actor.kind === "guest" ? actor.displayName : undefined,
       status:               "pending_admin",
-      last_message_preview: buildPreview(message),
+      last_message_preview: buildPreview(message) || buildAttachmentPreview(attachments),
       last_message_at:      supportUserMessage.created_at,
       last_user_read_at:    supportUserMessage.created_at,
     });
@@ -440,7 +469,7 @@ const getSupportConversationForAdmin = async (conversationId, adminUser) => {
 };
 
 const replySupportConversation = async (conversationId, adminUser, payload = {}) => {
-  const message = requireMessage(payload);
+  const { message, attachments } = requireMessage(payload);
   const client  = await pool.connect();
 
   try {
@@ -451,13 +480,13 @@ const replySupportConversation = async (conversationId, adminUser, payload = {})
 
     const adminMessage = await insertMessage(client, {
       conversationId, senderId: adminUser.id, senderRole: "admin", content: message,
-      meta: { source: "admin_reply" },
+      meta: { source: "admin_reply", attachments },
     });
 
     await updateConversation(client, conversationId, {
       assigned_admin_id:    adminUser.id,
       status:               "pending_user",
-      last_message_preview: buildPreview(message),
+      last_message_preview: buildPreview(message) || buildAttachmentPreview(attachments),
       last_message_at:      adminMessage.created_at,
       last_admin_read_at:   adminMessage.created_at,
     });
