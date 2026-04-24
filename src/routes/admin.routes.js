@@ -14,6 +14,7 @@ const adminChatController = require("../controllers/admin.chat.controller");
 // Tất cả routes admin: phải đăng nhập + role = 'admin'
 router.use(authenticate, authorize("admin"));
 
+// router.use("/flights", )
 // A-01: Manage Flights
 router.get("/flights", adminFlightController.getFlights);
 router.post("/flights", adminFlightController.createFlight);

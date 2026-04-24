@@ -32,3 +32,5 @@ const pool = new Pool({
 });
 
 module.exports = pool;
+
+// Tối ưu lại

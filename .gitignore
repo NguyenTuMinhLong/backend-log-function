@@ -5,3 +5,7 @@ node_modules
 .env.*.local
 
 DOCS.md
+.env*
+.flaskenv*
+!.env.project
+!.env.vault
