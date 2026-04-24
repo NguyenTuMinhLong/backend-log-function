@@ -1,4 +1,8 @@
 const pool = require("../config/db");
+const QA   = require("../queries/airline.queries");
+const QAP  = require("../queries/airport.queries");
+const QF   = require("../queries/flight.queries");
+const QB   = require("../queries/booking.queries");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -78,65 +82,29 @@ const getFlights = async (params) => {
   const values     = [];
   let   idx        = 1;
 
-  if (status)         { conditions.push(`f.status = $${idx++}`);                       values.push(status); }
-  if (airline_code)   { conditions.push(`al.code = $${idx++}`);                        values.push(airline_code.toUpperCase()); }
-  if (departure_code) { conditions.push(`dep.code = $${idx++}`);                       values.push(departure_code.toUpperCase()); }
-  if (arrival_code)   { conditions.push(`arr.code = $${idx++}`);                       values.push(arrival_code.toUpperCase()); }
-  if (departure_date) { conditions.push(`DATE(f.departure_time) = $${idx++}`);         values.push(departure_date); }
-  if (flight_number)  { conditions.push(`f.flight_number ILIKE $${idx++}`);            values.push(`%${flight_number}%`); }
+  if (status)         { conditions.push(`f.status = $${idx++}`);               values.push(status); }
+  if (airline_code)   { conditions.push(`al.code = $${idx++}`);                values.push(airline_code.toUpperCase()); }
+  if (departure_code) { conditions.push(`dep.code = $${idx++}`);               values.push(departure_code.toUpperCase()); }
+  if (arrival_code)   { conditions.push(`arr.code = $${idx++}`);               values.push(arrival_code.toUpperCase()); }
+  if (departure_date) { conditions.push(`DATE(f.departure_time) = $${idx++}`); values.push(departure_date); }
+  if (flight_number)  { conditions.push(`f.flight_number ILIKE $${idx++}`);    values.push(`%${flight_number}%`); }
 
-  // Mặc định không hiện chuyến bay đã bị ẩn (is_active = false)
-  // Admin muốn xem tất cả thì truyền show_hidden=true
   if (!params.show_hidden) {
     conditions.push(`f.is_active = TRUE`);
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  // Count total
-  const countResult = await pool.query(
-    `SELECT COUNT(*) FROM flights f
-     JOIN airlines al ON al.id = f.airline_id
-     JOIN airports dep ON dep.id = f.departure_airport_id
-     JOIN airports arr ON arr.id = f.arrival_airport_id
-     ${whereClause}`,
-    values
-  );
-  const total = parseInt(countResult.rows[0].count);
+  const countResult = await pool.query(QF.COUNT_FLIGHTS(whereClause), values);
+  const total       = parseInt(countResult.rows[0].count);
 
-  // Query data
   const dataResult = await pool.query(
-    `SELECT
-       f.id, f.flight_number, f.departure_time, f.arrival_time,
-       f.duration_minutes, f.status, f.is_active, f.created_at, f.updated_at,
-       al.id   AS airline_id,   al.code  AS airline_code,  al.name AS airline_name,
-       dep.id  AS dep_id,       dep.code AS dep_code,      dep.city AS dep_city,
-       arr.id  AS arr_id,       arr.code AS arr_code,      arr.city AS arr_city,
-       -- Tổng hợp seats
-       json_agg(
-         json_build_object(
-           'class',           fs.class,
-           'total_seats',     fs.total_seats,
-           'available_seats', fs.available_seats,
-           'base_price',      fs.base_price
-         ) ORDER BY fs.base_price
-       ) AS seats
-     FROM flights f
-     JOIN airlines     al  ON al.id  = f.airline_id
-     JOIN airports     dep ON dep.id = f.departure_airport_id
-     JOIN airports     arr ON arr.id = f.arrival_airport_id
-     LEFT JOIN flight_seats fs ON fs.flight_id = f.id
-     ${whereClause}
-     GROUP BY f.id, al.id, al.code, al.name,
-              dep.id, dep.code, dep.city,
-              arr.id, arr.code, arr.city
-     ORDER BY f.departure_time ASC
-     LIMIT $${idx++} OFFSET $${idx++}`,
+    QF.SELECT_FLIGHTS(whereClause, idx, idx + 1),
     [...values, parseInt(limit), offset]
   );
 
   return {
-    data:        dataResult.rows,
+    data:       dataResult.rows,
     pagination: {
       total,
       page:        parseInt(page),
@@ -165,43 +133,28 @@ const createFlight = async (data) => {
   try {
     await client.query("BEGIN");
 
-    // Kiểm tra airline + airport tồn tại
-    const airlineCheck = await client.query("SELECT id FROM airlines WHERE id=$1 AND is_active=TRUE", [airline_id]);
+    const airlineCheck = await client.query(QA.FIND_ACTIVE_AIRLINE_BY_ID, [airline_id]);
     if (airlineCheck.rows.length === 0) throw new Error("Hãng hàng không không tồn tại hoặc đã bị vô hiệu");
 
-    const depCheck = await client.query("SELECT id FROM airports WHERE id=$1 AND is_active=TRUE", [departure_airport_id]);
+    const depCheck = await client.query(QAP.FIND_ACTIVE_AIRPORT_BY_ID, [departure_airport_id]);
     if (depCheck.rows.length === 0) throw new Error("Sân bay đi không tồn tại");
 
-    const arrCheck = await client.query("SELECT id FROM airports WHERE id=$1 AND is_active=TRUE", [arrival_airport_id]);
+    const arrCheck = await client.query(QAP.FIND_ACTIVE_AIRPORT_BY_ID, [arrival_airport_id]);
     if (arrCheck.rows.length === 0) throw new Error("Sân bay đến không tồn tại");
 
-    // Tạo flight
-    const flightResult = await client.query(
-      `INSERT INTO flights (
-         flight_number, airline_id,
-         departure_airport_id, arrival_airport_id,
-         departure_time, arrival_time,
-         duration_minutes, status
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,'scheduled')
-       RETURNING *`,
-      [
-        flight_number, airline_id,
-        departure_airport_id, arrival_airport_id,
-        departure_time, arrival_time,
-        parseInt(duration_minutes),
-      ]
-    );
+    const flightResult = await client.query(QF.INSERT_FLIGHT, [
+      flight_number, airline_id,
+      departure_airport_id, arrival_airport_id,
+      departure_time, arrival_time,
+      parseInt(duration_minutes),
+    ]);
 
     const flight = flightResult.rows[0];
 
-    // Tạo seats
     for (const s of seats) {
       const totalSeats = parseInt(s.total_seats);
-      const available  = s.available_seats !== undefined
-        ? parseInt(s.available_seats)
-        : totalSeats;
+      const available  = s.available_seats !== undefined ? parseInt(s.available_seats) : totalSeats;
 
-      // Baggage defaults theo hạng nếu không truyền vào
       const defaultBaggage = {
         economy:  { baggage_included_kg: 23, carry_on_kg: 7,  extra_baggage_price: 250000 },
         business: { baggage_included_kg: 32, carry_on_kg: 10, extra_baggage_price: 150000 },
@@ -209,18 +162,14 @@ const createFlight = async (data) => {
       };
       const def = defaultBaggage[s.class] || defaultBaggage.economy;
 
-      const baggageIncludedKg  = s.baggage_included_kg  !== undefined ? parseInt(s.baggage_included_kg)       : def.baggage_included_kg;
-      const carryOnKg          = s.carry_on_kg          !== undefined ? parseInt(s.carry_on_kg)               : def.carry_on_kg;
-      const extraBaggagePrice  = s.extra_baggage_price  !== undefined ? parseFloat(s.extra_baggage_price)     : def.extra_baggage_price;
+      const baggageIncludedKg = s.baggage_included_kg  !== undefined ? parseInt(s.baggage_included_kg)   : def.baggage_included_kg;
+      const carryOnKg         = s.carry_on_kg          !== undefined ? parseInt(s.carry_on_kg)           : def.carry_on_kg;
+      const extraBaggagePrice = s.extra_baggage_price  !== undefined ? parseFloat(s.extra_baggage_price) : def.extra_baggage_price;
 
-      await client.query(
-        `INSERT INTO flight_seats (
-           flight_id, class, total_seats, available_seats, base_price,
-           baggage_included_kg, carry_on_kg, extra_baggage_price
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [flight.id, s.class, totalSeats, available, parseFloat(s.base_price),
-         baggageIncludedKg, carryOnKg, extraBaggagePrice]
-      );
+      await client.query(QF.INSERT_FLIGHT_SEAT, [
+        flight.id, s.class, totalSeats, available, parseFloat(s.base_price),
+        baggageIncludedKg, carryOnKg, extraBaggagePrice,
+      ]);
     }
 
     await client.query("COMMIT");
@@ -242,7 +191,7 @@ const updateFlight = async (flightId, data) => {
     departure_airport_id, arrival_airport_id,
     departure_time, arrival_time,
     duration_minutes,
-    seats, // array: [{ class, base_price, total_seats }]
+    seats,
   } = data;
 
   validateFlightInput(data, true);
@@ -252,45 +201,35 @@ const updateFlight = async (flightId, data) => {
   try {
     await client.query("BEGIN");
 
-    // Kiểm tra flight tồn tại
-    const existing = await client.query("SELECT * FROM flights WHERE id=$1", [flightId]);
+    const existing = await client.query(QF.FIND_FLIGHT_BY_ID, [flightId]);
     if (existing.rows.length === 0) throw new Error("Không tìm thấy chuyến bay");
 
-    // Build dynamic UPDATE
-    const fields  = [];
-    const values  = [];
-    let   idx     = 1;
+    const fields = [];
+    const values = [];
+    let   idx    = 1;
 
-    if (flight_number)        { fields.push(`flight_number=$${idx++}`);          values.push(flight_number); }
-    if (airline_id)           { fields.push(`airline_id=$${idx++}`);             values.push(airline_id); }
-    if (departure_airport_id) { fields.push(`departure_airport_id=$${idx++}`);   values.push(departure_airport_id); }
-    if (arrival_airport_id)   { fields.push(`arrival_airport_id=$${idx++}`);     values.push(arrival_airport_id); }
-    if (departure_time)       { fields.push(`departure_time=$${idx++}`);         values.push(departure_time); }
-    if (arrival_time)         { fields.push(`arrival_time=$${idx++}`);           values.push(arrival_time); }
-    if (duration_minutes)     { fields.push(`duration_minutes=$${idx++}`);       values.push(parseInt(duration_minutes)); }
+    if (flight_number)        { fields.push(`flight_number=$${idx++}`);         values.push(flight_number); }
+    if (airline_id)           { fields.push(`airline_id=$${idx++}`);            values.push(airline_id); }
+    if (departure_airport_id) { fields.push(`departure_airport_id=$${idx++}`);  values.push(departure_airport_id); }
+    if (arrival_airport_id)   { fields.push(`arrival_airport_id=$${idx++}`);    values.push(arrival_airport_id); }
+    if (departure_time)       { fields.push(`departure_time=$${idx++}`);        values.push(departure_time); }
+    if (arrival_time)         { fields.push(`arrival_time=$${idx++}`);          values.push(arrival_time); }
+    if (duration_minutes)     { fields.push(`duration_minutes=$${idx++}`);      values.push(parseInt(duration_minutes)); }
 
     if (fields.length > 0) {
       fields.push(`updated_at=NOW()`);
       values.push(flightId);
-      await client.query(
-        `UPDATE flights SET ${fields.join(", ")} WHERE id=$${idx}`,
-        values
-      );
+      await client.query(QF.UPDATE_FLIGHT_FIELDS(fields, idx), values);
     }
 
-    // Cập nhật giá + ghế từng hạng
     if (seats && seats.length > 0) {
       for (const s of seats) {
-        const existing_seat = await client.query(
-          "SELECT id FROM flight_seats WHERE flight_id=$1 AND class=$2",
-          [flightId, s.class]
-        );
+        const existingSeat = await client.query(QF.FIND_FLIGHT_SEAT, [flightId, s.class]);
 
-        if (existing_seat.rows.length > 0) {
-          // Đã có → UPDATE
-          const seatFields  = [];
-          const seatValues  = [];
-          let   sidx        = 1;
+        if (existingSeat.rows.length > 0) {
+          const seatFields = [];
+          const seatValues = [];
+          let   sidx       = 1;
 
           if (s.base_price          !== undefined) { seatFields.push(`base_price=$${sidx++}`);          seatValues.push(parseFloat(s.base_price)); }
           if (s.total_seats         !== undefined) { seatFields.push(`total_seats=$${sidx++}`);         seatValues.push(parseInt(s.total_seats)); }
@@ -301,14 +240,9 @@ const updateFlight = async (flightId, data) => {
           if (seatFields.length > 0) {
             seatFields.push(`updated_at=NOW()`);
             seatValues.push(flightId, s.class);
-            await client.query(
-              `UPDATE flight_seats SET ${seatFields.join(", ")}
-               WHERE flight_id=$${sidx++} AND class=$${sidx++}`,
-              seatValues
-            );
+            await client.query(QF.UPDATE_FLIGHT_SEAT_FIELDS(seatFields, sidx), seatValues);
           }
         } else {
-          // Chưa có → INSERT
           const totalSeats = parseInt(s.total_seats) || 0;
           const defaultBaggage2 = {
             economy:  { baggage_included_kg: 23, carry_on_kg: 7,  extra_baggage_price: 40000 },
@@ -316,16 +250,12 @@ const updateFlight = async (flightId, data) => {
             first:    { baggage_included_kg: 40, carry_on_kg: 15, extra_baggage_price: 40000 },
           };
           const def2 = defaultBaggage2[s.class] || defaultBaggage2.economy;
-          await client.query(
-            `INSERT INTO flight_seats (
-               flight_id, class, total_seats, available_seats, base_price,
-               baggage_included_kg, carry_on_kg, extra_baggage_price
-             ) VALUES ($1,$2,$3,$3,$4,$5,$6,$7)`,
-            [flightId, s.class, totalSeats, parseFloat(s.base_price),
-             s.baggage_included_kg !== undefined ? parseInt(s.baggage_included_kg) : def2.baggage_included_kg,
-             s.carry_on_kg         !== undefined ? parseInt(s.carry_on_kg)         : def2.carry_on_kg,
-             s.extra_baggage_price !== undefined ? parseFloat(s.extra_baggage_price) : def2.extra_baggage_price]
-          );
+          await client.query(QF.INSERT_FLIGHT_SEAT_UPSERT, [
+            flightId, s.class, totalSeats, parseFloat(s.base_price),
+            s.baggage_included_kg !== undefined ? parseInt(s.baggage_included_kg) : def2.baggage_included_kg,
+            s.carry_on_kg         !== undefined ? parseInt(s.carry_on_kg)         : def2.carry_on_kg,
+            s.extra_baggage_price !== undefined ? parseFloat(s.extra_baggage_price) : def2.extra_baggage_price,
+          ]);
         }
       }
     }
@@ -348,11 +278,7 @@ const updateFlightStatus = async (flightId, status) => {
     throw new Error(`status phải là: ${VALID_STATUSES.join(", ")}`);
   }
 
-  const result = await pool.query(
-    `UPDATE flights SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING id, flight_number, status`,
-    [status, flightId]
-  );
-
+  const result = await pool.query(QF.UPDATE_FLIGHT_STATUS, [status, flightId]);
   if (result.rows.length === 0) throw new Error("Không tìm thấy chuyến bay");
 
   return {
@@ -367,16 +293,13 @@ const updateFlightStatus = async (flightId, status) => {
  * Ẩn/hiện chuyến bay (soft delete)
  */
 const toggleFlightVisibility = async (flightId) => {
-  const existing = await pool.query("SELECT id, flight_number, is_active FROM flights WHERE id=$1", [flightId]);
+  const existing = await pool.query(QF.FIND_FLIGHT_VISIBILITY, [flightId]);
   if (existing.rows.length === 0) throw new Error("Không tìm thấy chuyến bay");
 
   const current   = existing.rows[0];
   const newStatus = !current.is_active;
 
-  await pool.query(
-    "UPDATE flights SET is_active=$1, updated_at=NOW() WHERE id=$2",
-    [newStatus, flightId]
-  );
+  await pool.query(QF.SET_FLIGHT_VISIBILITY, [newStatus, flightId]);
 
   return {
     message:       newStatus ? "Đã hiện chuyến bay" : "Đã ẩn chuyến bay",
@@ -395,16 +318,17 @@ const getAirports = async (params) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
   const conditions = []; const values = []; let idx = 1;
 
-  if (country)    { conditions.push(`LOWER(country) LIKE LOWER($${idx++})`); values.push(`%${country}%`); }
-  if (city)       { conditions.push(`LOWER(city) LIKE LOWER($${idx++})`);    values.push(`%${city}%`); }
+  if (country)   { conditions.push(`LOWER(country) LIKE LOWER($${idx++})`); values.push(`%${country}%`); }
+  if (city)      { conditions.push(`LOWER(city) LIKE LOWER($${idx++})`);    values.push(`%${city}%`); }
   if (is_active !== undefined) { conditions.push(`is_active = $${idx++}`);   values.push(is_active === "true"); }
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const countRes = await pool.query(`SELECT COUNT(*) FROM airports ${where}`, values);
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const countRes = await pool.query(QAP.COUNT_AIRPORTS(whereClause), values);
   const total    = parseInt(countRes.rows[0].count);
 
   const dataRes = await pool.query(
-    `SELECT * FROM airports ${where} ORDER BY country, city LIMIT $${idx++} OFFSET $${idx++}`,
+    QAP.SELECT_AIRPORTS_ALL(whereClause, idx, idx + 1),
     [...values, parseInt(limit), offset]
   );
 
@@ -415,11 +339,7 @@ const createAirport = async (data) => {
   const { code, name, city, country = "Vietnam", timezone = "Asia/Ho_Chi_Minh" } = data;
   if (!code || !name || !city) throw new Error("code, name, city là bắt buộc");
 
-  const result = await pool.query(
-    `INSERT INTO airports (code, name, city, country, timezone)
-     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [code.toUpperCase(), name, city, country, timezone]
-  );
+  const result = await pool.query(QAP.INSERT_AIRPORT, [code.toUpperCase(), name, city, country, timezone]);
   return result.rows[0];
 };
 
@@ -435,19 +355,13 @@ const updateAirport = async (airportId, data) => {
   if (fields.length === 0) throw new Error("Không có thông tin nào để cập nhật");
 
   values.push(airportId);
-  const result = await pool.query(
-    `UPDATE airports SET ${fields.join(", ")} WHERE id=$${idx} RETURNING *`,
-    values
-  );
+  const result = await pool.query(QAP.UPDATE_AIRPORT_FIELDS(fields, idx), values);
   if (result.rows.length === 0) throw new Error("Không tìm thấy sân bay");
   return result.rows[0];
 };
 
 const toggleAirportStatus = async (airportId) => {
-  const result = await pool.query(
-    `UPDATE airports SET is_active = NOT is_active WHERE id=$1 RETURNING id, code, name, is_active`,
-    [airportId]
-  );
+  const result = await pool.query(QAP.TOGGLE_AIRPORT_STATUS, [airportId]);
   if (result.rows.length === 0) throw new Error("Không tìm thấy sân bay");
   const r = result.rows[0];
   return { message: r.is_active ? "Đã kích hoạt sân bay" : "Đã vô hiệu hóa sân bay", ...r };
@@ -464,13 +378,16 @@ const getAirlinesAdmin = async (params) => {
 
   if (is_active !== undefined) { conditions.push(`is_active = $${idx++}`); values.push(is_active === "true"); }
 
-  const where   = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const countRes = await pool.query(`SELECT COUNT(*) FROM airlines ${where}`, values);
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const countRes = await pool.query(QA.COUNT_AIRLINES(whereClause), values);
   const total    = parseInt(countRes.rows[0].count);
-  const dataRes  = await pool.query(
-    `SELECT * FROM airlines ${where} ORDER BY name LIMIT $${idx++} OFFSET $${idx++}`,
+
+  const dataRes = await pool.query(
+    QA.SELECT_AIRLINES_ALL(whereClause, idx, idx + 1),
     [...values, parseInt(limit), offset]
   );
+
   return { data: dataRes.rows, pagination: { total, page: parseInt(page), limit: parseInt(limit), total_pages: Math.ceil(total / parseInt(limit)) } };
 };
 
@@ -478,10 +395,7 @@ const createAirline = async (data) => {
   const { code, name, logo_url } = data;
   if (!code || !name) throw new Error("code, name là bắt buộc");
 
-  const result = await pool.query(
-    `INSERT INTO airlines (code, name, logo_url) VALUES ($1,$2,$3) RETURNING *`,
-    [code.toUpperCase(), name, logo_url || null]
-  );
+  const result = await pool.query(QA.INSERT_AIRLINE_SIMPLE, [code.toUpperCase(), name, logo_url || null]);
   return result.rows[0];
 };
 
@@ -489,24 +403,19 @@ const updateAirline = async (airlineId, data) => {
   const { name, logo_url } = data;
   const fields = []; const values = []; let idx = 1;
 
-  if (name)     { fields.push(`name=$${idx++}`);     values.push(name); }
+  if (name)                   { fields.push(`name=$${idx++}`);     values.push(name); }
   if (logo_url !== undefined) { fields.push(`logo_url=$${idx++}`); values.push(logo_url); }
 
   if (fields.length === 0) throw new Error("Không có thông tin nào để cập nhật");
 
   values.push(airlineId);
-  const result = await pool.query(
-    `UPDATE airlines SET ${fields.join(", ")} WHERE id=$${idx} RETURNING *`, values
-  );
+  const result = await pool.query(QA.UPDATE_AIRLINE_FIELDS(fields, idx), values);
   if (result.rows.length === 0) throw new Error("Không tìm thấy hãng hàng không");
   return result.rows[0];
 };
 
 const toggleAirlineStatus = async (airlineId) => {
-  const result = await pool.query(
-    `UPDATE airlines SET is_active = NOT is_active WHERE id=$1 RETURNING id, code, name, is_active`,
-    [airlineId]
-  );
+  const result = await pool.query(QA.TOGGLE_AIRLINE_STATUS, [airlineId]);
   if (result.rows.length === 0) throw new Error("Không tìm thấy hãng hàng không");
   const r = result.rows[0];
   return { message: r.is_active ? "Đã kích hoạt hãng bay" : "Đã vô hiệu hóa hãng bay", ...r };
@@ -521,34 +430,21 @@ const getBookings = async (params) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
   const conditions = []; const values = []; let idx = 1;
 
-  if (status)    { conditions.push(`b.status = $${idx++}`);                   values.push(status); }
-  if (trip_type) { conditions.push(`b.trip_type = $${idx++}`);                values.push(trip_type); }
-  if (search)    { conditions.push(`(b.booking_code ILIKE $${idx} OR b.contact_email ILIKE $${idx} OR b.contact_name ILIKE $${idx})`); idx++; values.push(`%${search}%`); }
+  if (status)    { conditions.push(`b.status = $${idx++}`);    values.push(status); }
+  if (trip_type) { conditions.push(`b.trip_type = $${idx++}`); values.push(trip_type); }
+  if (search)    {
+    conditions.push(`(b.booking_code ILIKE $${idx} OR b.contact_email ILIKE $${idx} OR b.contact_name ILIKE $${idx})`);
+    idx++;
+    values.push(`%${search}%`);
+  }
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  const countRes = await pool.query(
-    `SELECT COUNT(*) FROM bookings b ${where}`, values
-  );
-  const total = parseInt(countRes.rows[0].count);
+  const countRes = await pool.query(QB.COUNT_BOOKINGS(whereClause), values);
+  const total    = parseInt(countRes.rows[0].count);
 
   const dataRes = await pool.query(
-    `SELECT b.id, b.booking_code, b.status, b.trip_type,
-       b.total_adults, b.total_children, b.total_infants,
-       b.total_price, b.held_until, b.created_at,
-       b.contact_name, b.contact_email, b.contact_phone,
-       b.user_id,
-       f_out.flight_number  AS outbound_flight,
-       dep_out.code         AS from_code, dep_out.city AS from_city,
-       arr_out.code         AS to_code,   arr_out.city AS to_city,
-       f_out.departure_time AS departure_time
-     FROM bookings b
-     JOIN flights  f_out   ON f_out.id   = b.outbound_flight_id
-     JOIN airports dep_out ON dep_out.id = f_out.departure_airport_id
-     JOIN airports arr_out ON arr_out.id = f_out.arrival_airport_id
-     ${where}
-     ORDER BY b.created_at DESC
-     LIMIT $${idx++} OFFSET $${idx++}`,
+    QB.SELECT_BOOKINGS_ADMIN(whereClause, idx, idx + 1),
     [...values, parseInt(limit), offset]
   );
 
@@ -556,28 +452,10 @@ const getBookings = async (params) => {
 };
 
 const getBookingDetailAdmin = async (bookingId) => {
-  const result = await pool.query(
-    `SELECT b.*,
-       f_out.flight_number AS outbound_flight_number,
-       f_out.departure_time AS outbound_dep_time, f_out.arrival_time AS outbound_arr_time,
-       al_out.name AS outbound_airline, dep_out.code AS from_code, arr_out.code AS to_code,
-       f_ret.flight_number AS return_flight_number,
-       f_ret.departure_time AS return_dep_time, f_ret.arrival_time AS return_arr_time
-     FROM bookings b
-     JOIN flights  f_out   ON f_out.id  = b.outbound_flight_id
-     JOIN airlines al_out  ON al_out.id = f_out.airline_id
-     JOIN airports dep_out ON dep_out.id = f_out.departure_airport_id
-     JOIN airports arr_out ON arr_out.id = f_out.arrival_airport_id
-     LEFT JOIN flights f_ret ON f_ret.id = b.return_flight_id
-     WHERE b.id = $1`,
-    [bookingId]
-  );
+  const result = await pool.query(QB.SELECT_BOOKING_DETAIL_ADMIN, [bookingId]);
   if (result.rows.length === 0) throw new Error("Không tìm thấy booking");
 
-  const passengers = await pool.query(
-    `SELECT * FROM passengers WHERE booking_id=$1 ORDER BY flight_type, passenger_type`, [bookingId]
-  );
-
+  const passengers = await pool.query(QB.SELECT_ALL_PASSENGERS_BY_BOOKING, [bookingId]);
   return { ...result.rows[0], passengers: passengers.rows };
 };
 
@@ -585,10 +463,7 @@ const updateBookingStatus = async (bookingId, status) => {
   const validStatuses = ["pending", "confirmed", "cancelled", "expired"];
   if (!validStatuses.includes(status)) throw new Error(`status phải là: ${validStatuses.join(", ")}`);
 
-  const result = await pool.query(
-    `UPDATE bookings SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING id, booking_code, status`,
-    [status, bookingId]
-  );
+  const result = await pool.query(QB.UPDATE_BOOKING_STATUS, [status, bookingId]);
   if (result.rows.length === 0) throw new Error("Không tìm thấy booking");
   return { message: `Đã cập nhật trạng thái booking thành "${status}"`, ...result.rows[0] };
 };
@@ -600,78 +475,20 @@ const updateBookingStatus = async (bookingId, status) => {
 const getStatistics = async (params) => {
   const { from_date, to_date } = params;
 
-  // Dùng parameterized query thay vì string interpolation
-  const dateValues = [];
-  let   dateFilter = "";
+  const dateValues  = [];
+  let   dateFilter  = "";
+  let   bDateFilter = "";
+
   if (from_date && to_date) {
     dateValues.push(from_date, to_date);
-    dateFilter = `AND created_at BETWEEN $1 AND $2`;
+    dateFilter  = `AND created_at BETWEEN $1 AND $2`;
+    bDateFilter = `AND b.created_at BETWEEN $1 AND $2`;
   }
 
-  // Alias "b" dùng cho query nào có JOIN, không dùng alias cho query đơn giản
-  const bDateFilter = from_date && to_date
-    ? `AND b.created_at BETWEEN $1 AND $2`
-    : "";
-
-  // 1. Tổng booking theo trạng thái
-  // ✅ Không có alias → dùng dateFilter (không có b.)
-  const bookingSummary = await pool.query(
-    `SELECT status, COUNT(*) AS count, SUM(total_price) AS revenue
-     FROM bookings
-     WHERE 1=1 ${dateFilter}
-     GROUP BY status ORDER BY status`,
-    dateValues
-  );
-
-  // 2. Doanh thu theo ngày (7 ngày gần nhất hoặc theo filter)
-  const dailyRevenue = await pool.query(
-    `SELECT DATE(created_at) AS date,
-            COUNT(*) AS bookings,
-            SUM(total_price) FILTER (WHERE status IN ('confirmed','pending')) AS revenue
-     FROM bookings
-     WHERE created_at >= NOW() - INTERVAL '7 days'
-     ${from_date && to_date ? "AND created_at BETWEEN $1 AND $2" : ""}
-     GROUP BY DATE(created_at)
-     ORDER BY date DESC`,
-    dateValues
-  );
-
-  // 3. Top 5 chuyến bay phổ biến nhất
-  // ✅ Có JOIN → dùng alias b → bDateFilter (có b.)
-  const popularFlights = await pool.query(
-    `SELECT f.flight_number,
-            al.name AS airline,
-            dep.city AS from_city, arr.city AS to_city,
-            COUNT(b.id) AS total_bookings,
-            SUM(b.total_adults + b.total_children + b.total_infants) AS total_passengers
-     FROM bookings b
-     JOIN flights  f   ON f.id   = b.outbound_flight_id
-     JOIN airlines al  ON al.id  = f.airline_id
-     JOIN airports dep ON dep.id = f.departure_airport_id
-     JOIN airports arr ON arr.id = f.arrival_airport_id
-     WHERE b.status IN ('confirmed','pending') ${bDateFilter}
-     GROUP BY f.id, f.flight_number, al.name, dep.city, arr.city
-     ORDER BY total_bookings DESC
-     LIMIT 5`,
-    dateValues
-  );
-
-  // 4. Tổng quan
-  // ✅ Không có alias → dùng dateFilter (không có b.)
-  const overview = await pool.query(
-    `SELECT
-       COUNT(*) FILTER (WHERE status IN ('confirmed','pending'))          AS total_bookings,
-       SUM(total_price) FILTER (WHERE status IN ('confirmed','pending'))  AS total_revenue,
-       COUNT(*) FILTER (WHERE status = 'confirmed')                       AS confirmed,
-       COUNT(*) FILTER (WHERE status = 'pending')                         AS pending,
-       COUNT(*) FILTER (WHERE status = 'cancelled')                       AS cancelled,
-       COUNT(*) FILTER (WHERE status = 'expired')                         AS expired,
-       SUM(total_adults + total_children + total_infants)
-         FILTER (WHERE status IN ('confirmed','pending'))                  AS total_passengers
-     FROM bookings
-     WHERE 1=1 ${dateFilter}`,
-    dateValues
-  );
+  const bookingSummary = await pool.query(QB.STATS_BOOKING_SUMMARY(dateFilter),  dateValues);
+  const dailyRevenue   = await pool.query(QB.STATS_DAILY_REVENUE(dateFilter),    dateValues);
+  const popularFlights = await pool.query(QB.STATS_POPULAR_FLIGHTS(bDateFilter), dateValues);
+  const overview       = await pool.query(QB.STATS_OVERVIEW(dateFilter),         dateValues);
 
   return {
     overview:        overview.rows[0],

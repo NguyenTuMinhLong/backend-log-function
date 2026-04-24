@@ -1,4 +1,5 @@
 const pool = require("../config/db");
+const Q    = require("../queries/airline.queries");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -43,17 +44,11 @@ const getAirlines = async (params) => {
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  const countResult = await pool.query(
-    `SELECT COUNT(*) FROM airlines ${whereClause}`, values
-  );
-  const total = parseInt(countResult.rows[0].count);
+  const countResult = await pool.query(Q.COUNT_AIRLINES(whereClause), values);
+  const total       = parseInt(countResult.rows[0].count);
 
   const dataResult = await pool.query(
-    `SELECT id, code, name, logo_url, is_active, created_at
-     FROM airlines
-     ${whereClause}
-     ORDER BY name ASC
-     LIMIT $${idx++} OFFSET $${idx++}`,
+    Q.SELECT_AIRLINES(whereClause, idx, idx + 1),
     [...values, parseInt(limit), offset]
   );
 
@@ -76,21 +71,12 @@ const createAirline = async (data) => {
 
   const { code, name, logo_url } = data;
 
-  // Kiểm tra code đã tồn tại chưa
-  const existing = await pool.query(
-    "SELECT id FROM airlines WHERE UPPER(code) = UPPER($1)", [code]
-  );
+  const existing = await pool.query(Q.FIND_AIRLINE_BY_CODE, [code]);
   if (existing.rows.length > 0) {
     throw new Error(`Hãng bay với code "${code.toUpperCase()}" đã tồn tại`);
   }
 
-  const result = await pool.query(
-    `INSERT INTO airlines (code, name, logo_url)
-     VALUES (UPPER($1), $2, $3)
-     RETURNING *`,
-    [code, name, logo_url || null]
-  );
-
+  const result = await pool.query(Q.INSERT_AIRLINE, [code, name, logo_url || null]);
   return result.rows[0];
 };
 
@@ -100,9 +86,7 @@ const createAirline = async (data) => {
 const updateAirline = async (airlineId, data) => {
   validateAirlineInput(data, true);
 
-  const existing = await pool.query(
-    "SELECT id FROM airlines WHERE id=$1", [airlineId]
-  );
+  const existing = await pool.query(Q.FIND_AIRLINE_BY_ID, [airlineId]);
   if (existing.rows.length === 0) throw new Error("Không tìm thấy hãng hàng không");
 
   const { name, logo_url } = data;
@@ -117,11 +101,7 @@ const updateAirline = async (airlineId, data) => {
   if (fields.length === 0) throw new Error("Không có thông tin nào để cập nhật");
 
   values.push(airlineId);
-  const result = await pool.query(
-    `UPDATE airlines SET ${fields.join(", ")} WHERE id=$${idx} RETURNING *`,
-    values
-  );
-
+  const result = await pool.query(Q.UPDATE_AIRLINE_FIELDS(fields, idx), values);
   return result.rows[0];
 };
 
@@ -135,11 +115,7 @@ const updateAirlineStatus = async (airlineId, is_active) => {
 
   const status = is_active === true || is_active === "true";
 
-  const result = await pool.query(
-    `UPDATE airlines SET is_active=$1 WHERE id=$2
-     RETURNING id, code, name, is_active`,
-    [status, airlineId]
-  );
+  const result = await pool.query(Q.UPDATE_AIRLINE_STATUS, [status, airlineId]);
 
   if (result.rows.length === 0) throw new Error("Không tìm thấy hãng hàng không");
 
