@@ -7,10 +7,10 @@
 
 // ── Select ─────────────────────────────────────────────────────────────────────
 
-const COUNT_USERS = (whereClause) =>
-  `SELECT COUNT(*) AS total FROM users u ${whereClause}`;
+const COUNT_USERS = (dk) =>
+  `SELECT COUNT(*) AS total FROM users u ${dk}`;
 
-const SELECT_USERS = (whereClause, orderBy, orderDirection, limitIdx, offsetIdx) =>
+const SELECT_USERS = (dk, sapXep, chieuSapXep, gioiHan, viTri) =>
   `SELECT
      u.id, u.full_name, u.email, u.phone,
      u.role, u.status,
@@ -22,9 +22,9 @@ const SELECT_USERS = (whereClause, orderBy, orderDirection, limitIdx, offsetIdx)
        ELSE FALSE
      END AS is_temporarily_locked
    FROM users u
-   ${whereClause}
-   ORDER BY ${orderBy} ${orderDirection}
-   LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
+   ${dk}
+   ORDER BY ${sapXep} ${chieuSapXep}
+   LIMIT $${gioiHan} OFFSET $${viTri}`;
 
 const SELECT_USER_BY_ID =
   `SELECT
@@ -163,6 +163,59 @@ const RESET_LOGIN_STATE =
 const VERIFY_USER_EMAIL =
   `UPDATE users SET email_verified = true WHERE id = $1`;
 
+// ── Middleware auth ────────────────────────────────────────────────────────────
+
+const SELECT_USER_FOR_AUTH =
+  `SELECT id, full_name, email, phone, role, status, email_verified
+   FROM users
+   WHERE id = $1
+   LIMIT 1`;
+
+// ── Supabase social auth ───────────────────────────────────────────────────────
+
+const SOCIAL_USER_FIELDS =
+  `id, full_name, email, phone, role, status,
+   email_verified, supabase_user_id, auth_provider, avatar_url`;
+
+const SELECT_USER_BY_SUPABASE_ID =
+  `SELECT id, full_name, email, phone, role, status,
+          email_verified, supabase_user_id, auth_provider, avatar_url
+   FROM users
+   WHERE supabase_user_id = $1
+   LIMIT 1`;
+
+const SELECT_USER_BY_EMAIL_SOCIAL =
+  `SELECT id, full_name, email, phone, role, status,
+          email_verified, supabase_user_id, auth_provider, avatar_url
+   FROM users
+   WHERE LOWER(email) = LOWER($1)
+   LIMIT 1`;
+
+const INSERT_SOCIAL_USER =
+  `INSERT INTO users (
+     supabase_user_id, full_name, email,
+     password_hash, role, status,
+     email_verified, auth_provider, avatar_url
+   )
+   VALUES ($1, $2, $3, NULL, 'customer', 'active', true, $4, $5)
+   RETURNING id, full_name, email, phone, role, status,
+             email_verified, supabase_user_id, auth_provider, avatar_url`;
+
+const UPDATE_SOCIAL_USER =
+  `UPDATE users
+   SET
+     supabase_user_id = COALESCE(supabase_user_id, $1),
+     auth_provider    = CASE
+                          WHEN supabase_user_id IS NULL AND password_hash IS NULL THEN $2
+                          ELSE auth_provider
+                        END,
+     avatar_url       = COALESCE(avatar_url, $3),
+     email_verified   = true,
+     updated_at       = NOW()
+   WHERE id = $4
+   RETURNING id, full_name, email, phone, role, status,
+             email_verified, supabase_user_id, auth_provider, avatar_url`;
+
 module.exports = {
   COUNT_USERS,
   SELECT_USERS,
@@ -184,4 +237,9 @@ module.exports = {
   UPDATE_FAILED_ATTEMPTS,
   RESET_LOGIN_STATE,
   VERIFY_USER_EMAIL,
+  SELECT_USER_FOR_AUTH,
+  SELECT_USER_BY_SUPABASE_ID,
+  SELECT_USER_BY_EMAIL_SOCIAL,
+  INSERT_SOCIAL_USER,
+  UPDATE_SOCIAL_USER,
 };

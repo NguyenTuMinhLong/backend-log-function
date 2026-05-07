@@ -175,21 +175,21 @@ const getCoupons = async (params) => {
     conditions.push(`(v.expiry_at IS NULL OR v.expiry_at >= NOW())`);
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const dk = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const allowedSortFields = {
     code: "v.code", type: "v.type", value: "v.value",
     min_order: "v.min_order", expiry_at: "v.expiry_at",
     used_count: "v.used_count", created_at: "v.created_at", updated_at: "v.updated_at",
   };
-  const orderBy        = allowedSortFields[sort_by] || "v.created_at";
-  const orderDirection = String(sort_order).toLowerCase() === "asc" ? "ASC" : "DESC";
+  const sapXep        = allowedSortFields[sort_by] || "v.created_at";
+  const chieuSapXep   = String(sort_order).toLowerCase() === "asc" ? "ASC" : "DESC";
 
-  const countResult = await pool.query(Q.COUNT_COUPONS(whereClause), values);
+  const countResult = await pool.query(Q.COUNT_COUPONS(dk), values);
   const total       = parseInt(countResult.rows[0].total, 10);
 
   const dataResult = await pool.query(
-    Q.SELECT_COUPONS(whereClause, orderBy, orderDirection, idx, idx + 1),
+    Q.SELECT_COUPONS(dk, sapXep, chieuSapXep, idx, idx + 1),
     [...values, limitNum, offset]
   );
 

@@ -68,7 +68,7 @@ const getUsers = async (params) => {
     idx++;
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const dk = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const allowedSortFields = {
     id: "u.id", full_name: "u.full_name", email: "u.email",
@@ -76,14 +76,14 @@ const getUsers = async (params) => {
     created_at: "u.created_at", updated_at: "u.updated_at", last_login_at: "u.last_login_at",
   };
 
-  const orderBy        = allowedSortFields[sort_by] || "u.created_at";
-  const orderDirection = String(sort_order).toLowerCase() === "asc" ? "ASC" : "DESC";
+  const sapXep        = allowedSortFields[sort_by] || "u.created_at";
+  const chieuSapXep   = String(sort_order).toLowerCase() === "asc" ? "ASC" : "DESC";
 
-  const countResult = await pool.query(Q.COUNT_USERS(whereClause), values);
+  const countResult = await pool.query(Q.COUNT_USERS(dk), values);
   const total       = parseInt(countResult.rows[0].total, 10);
 
   const dataResult = await pool.query(
-    Q.SELECT_USERS(whereClause, orderBy, orderDirection, idx, idx + 1),
+    Q.SELECT_USERS(dk, sapXep, chieuSapXep, idx, idx + 1),
     [...values, limitNum, offset]
   );
 

@@ -52,7 +52,7 @@ const SELECT_BOOKING_DETAIL =
    LEFT JOIN airports arr_ret ON arr_ret.id = f_ret.arrival_airport_id
    WHERE b.booking_code = $1`;
 
-const SELECT_MY_BOOKINGS = (filterCondition) =>
+const SELECT_MY_BOOKINGS = (dk) =>
   `SELECT
      b.id,
      b.booking_code,
@@ -90,7 +90,7 @@ const SELECT_MY_BOOKINGS = (filterCondition) =>
    JOIN airlines al  ON al.id  = f.airline_id
    LEFT JOIN passengers p ON p.booking_id = b.id
    WHERE b.user_id = $1
-   ${filterCondition}
+   ${dk}
    GROUP BY b.id, f.id, dep.id, arr.id, al.id
    ORDER BY b.created_at DESC`;
 
@@ -131,10 +131,10 @@ const UPDATE_BOOKING_STATUS =
 
 // ── Admin: Bookings ────────────────────────────────────────────────────────────
 
-const COUNT_BOOKINGS = (whereClause) =>
-  `SELECT COUNT(*) FROM bookings b ${whereClause}`;
+const COUNT_BOOKINGS = (dk) =>
+  `SELECT COUNT(*) FROM bookings b ${dk}`;
 
-const SELECT_BOOKINGS_ADMIN = (whereClause, limitIdx, offsetIdx) =>
+const SELECT_BOOKINGS_ADMIN = (dk, gioiHan, viTri) =>
   `SELECT b.id, b.booking_code, b.status, b.trip_type,
      b.total_adults, b.total_children, b.total_infants,
      b.total_price, b.held_until, b.created_at,
@@ -148,9 +148,9 @@ const SELECT_BOOKINGS_ADMIN = (whereClause, limitIdx, offsetIdx) =>
    JOIN flights  f_out   ON f_out.id   = b.outbound_flight_id
    JOIN airports dep_out ON dep_out.id = f_out.departure_airport_id
    JOIN airports arr_out ON arr_out.id = f_out.arrival_airport_id
-   ${whereClause}
+   ${dk}
    ORDER BY b.created_at DESC
-   LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
+   LIMIT $${gioiHan} OFFSET $${viTri}`;
 
 const SELECT_BOOKING_DETAIL_ADMIN =
   `SELECT b.*,
@@ -207,23 +207,23 @@ const EXPIRE_SEAT_ASSIGNMENTS =
 
 // ── Statistics ─────────────────────────────────────────────────────────────────
 
-const STATS_BOOKING_SUMMARY = (dateFilter) =>
+const STATS_BOOKING_SUMMARY = (locNgay) =>
   `SELECT status, COUNT(*) AS count, SUM(total_price) AS revenue
    FROM bookings
-   WHERE 1=1 ${dateFilter}
+   WHERE 1=1 ${locNgay}
    GROUP BY status ORDER BY status`;
 
-const STATS_DAILY_REVENUE = (dateFilter) =>
+const STATS_DAILY_REVENUE = (locNgay) =>
   `SELECT DATE(created_at) AS date,
           COUNT(*) AS bookings,
           SUM(total_price) FILTER (WHERE status IN ('confirmed','pending')) AS revenue
    FROM bookings
    WHERE created_at >= NOW() - INTERVAL '7 days'
-   ${dateFilter ? `AND created_at BETWEEN $1 AND $2` : ""}
+   ${locNgay ? `AND created_at BETWEEN $1 AND $2` : ""}
    GROUP BY DATE(created_at)
    ORDER BY date DESC`;
 
-const STATS_POPULAR_FLIGHTS = (bDateFilter) =>
+const STATS_POPULAR_FLIGHTS = (locNgayDat) =>
   `SELECT f.flight_number,
           al.name AS airline,
           dep.city AS from_city, arr.city AS to_city,
@@ -234,12 +234,12 @@ const STATS_POPULAR_FLIGHTS = (bDateFilter) =>
    JOIN airlines al  ON al.id  = f.airline_id
    JOIN airports dep ON dep.id = f.departure_airport_id
    JOIN airports arr ON arr.id = f.arrival_airport_id
-   WHERE b.status IN ('confirmed','pending') ${bDateFilter}
+   WHERE b.status IN ('confirmed','pending') ${locNgayDat}
    GROUP BY f.id, f.flight_number, al.name, dep.city, arr.city
    ORDER BY total_bookings DESC
    LIMIT 5`;
 
-const STATS_OVERVIEW = (dateFilter) =>
+const STATS_OVERVIEW = (locNgay) =>
   `SELECT
      COUNT(*) FILTER (WHERE status IN ('confirmed','pending'))         AS total_bookings,
      SUM(total_price) FILTER (WHERE status IN ('confirmed','pending')) AS total_revenue,
@@ -250,7 +250,7 @@ const STATS_OVERVIEW = (dateFilter) =>
      SUM(total_adults + total_children + total_infants)
        FILTER (WHERE status IN ('confirmed','pending'))                 AS total_passengers
    FROM bookings
-   WHERE 1=1 ${dateFilter}`;
+   WHERE 1=1 ${locNgay}`;
 
 module.exports = {
   CHECK_BOOKING_CODE_EXISTS,

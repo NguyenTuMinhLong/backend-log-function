@@ -7,7 +7,7 @@
 
 // ── Conversations ──────────────────────────────────────────────────────────────
 
-const SELECT_CONVERSATION_DETAIL = (readColumn, unreadRole) =>
+const SELECT_CONVERSATION_DETAIL = (cot, vai) =>
   `SELECT
      c.id,
      c.user_id, c.guest_session_id, c.guest_name,
@@ -24,8 +24,8 @@ const SELECT_CONVERSATION_DETAIL = (readColumn, unreadRole) =>
        SELECT COUNT(*)
        FROM chat_messages m
        WHERE m.conversation_id = c.id
-         AND m.sender_role = '${unreadRole}'
-         AND m.created_at > COALESCE(c.${readColumn}, TO_TIMESTAMP(0))
+         AND m.sender_role = '${vai}'
+         AND m.created_at > COALESCE(c.${cot}, TO_TIMESTAMP(0))
      ), 0) AS unread_count
    FROM chat_conversations c
    LEFT JOIN users u       ON u.id = c.user_id
@@ -33,9 +33,9 @@ const SELECT_CONVERSATION_DETAIL = (readColumn, unreadRole) =>
    WHERE c.id = $1
    LIMIT 1`;
 
-const SELECT_CONVERSATION_ID_BY_ACTOR = (lookupClause, typeIdx) =>
+const SELECT_CONVERSATION_ID_BY_ACTOR = (timKiem, loai) =>
   `SELECT id FROM chat_conversations
-   WHERE ${lookupClause} AND type = $${typeIdx}
+   WHERE ${timKiem} AND type = $${loai}
    LIMIT 1`;
 
 const INSERT_CONVERSATION_USER =
@@ -56,9 +56,9 @@ const INSERT_CONVERSATION_GUEST =
      guest_name = COALESCE(EXCLUDED.guest_name, chat_conversations.guest_name)
    RETURNING id`;
 
-const UPDATE_CONVERSATION = (assignments, idx) =>
-  `UPDATE chat_conversations SET ${assignments.join(", ")}, updated_at = NOW()
-   WHERE id = $${idx}
+const UPDATE_CONVERSATION = (capNhat, stt) =>
+  `UPDATE chat_conversations SET ${capNhat.join(", ")}, updated_at = NOW()
+   WHERE id = $${stt}
    RETURNING id`;
 
 // ── Messages ───────────────────────────────────────────────────────────────────
@@ -103,13 +103,13 @@ const SELECT_AI_HISTORY =
 
 // ── Admin: List support conversations ─────────────────────────────────────────
 
-const COUNT_SUPPORT_CONVERSATIONS = (whereClause) =>
+const COUNT_SUPPORT_CONVERSATIONS = (dk) =>
   `SELECT COUNT(*) AS total
    FROM chat_conversations c
    LEFT JOIN users u ON u.id = c.user_id
-   ${whereClause}`;
+   ${dk}`;
 
-const SELECT_SUPPORT_CONVERSATIONS = (whereClause, limitIdx, offsetIdx) =>
+const SELECT_SUPPORT_CONVERSATIONS = (dk, gioiHan, viTri) =>
   `SELECT
      c.id, c.user_id, c.guest_session_id, c.guest_name,
      c.type, c.status, c.assigned_admin_id,
@@ -131,9 +131,9 @@ const SELECT_SUPPORT_CONVERSATIONS = (whereClause, limitIdx, offsetIdx) =>
    FROM chat_conversations c
    LEFT JOIN users u       ON u.id = c.user_id
    LEFT JOIN users admin_u ON admin_u.id = c.assigned_admin_id
-   ${whereClause}
+   ${dk}
    ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC
-   LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
+   LIMIT $${gioiHan} OFFSET $${viTri}`;
 
 module.exports = {
   SELECT_CONVERSATION_DETAIL,

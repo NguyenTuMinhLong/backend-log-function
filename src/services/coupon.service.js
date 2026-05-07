@@ -70,9 +70,9 @@ const getPublicCoupons = async (params = {}, availableOnly = false) => {
     conditions.push(`(v.usage_limit IS NULL OR v.used_count < v.usage_limit)`);
   }
 
-  const whereClause = `WHERE ${conditions.join(" AND ")}`;
+  const dk = `WHERE ${conditions.join(" AND ")}`;
 
-  const result = await pool.query(Q.SELECT_PUBLIC_COUPONS(whereClause, idx), [...values, limitNum]);
+  const result = await pool.query(Q.SELECT_PUBLIC_COUPONS(dk, idx), [...values, limitNum]);
   return result.rows.map(sanitizeCoupon);
 };
 

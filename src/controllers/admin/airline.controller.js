@@ -1,4 +1,4 @@
-const adminAirlineService = require("../services/admin.airline.service");
+const adminAirlineService = require("../../services/admin/airline.service");
 
 /** GET /api/admin/airlines */
 const getAirlines = async (req, res) => {

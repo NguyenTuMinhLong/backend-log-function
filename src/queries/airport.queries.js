@@ -5,19 +5,19 @@
  * Được dùng bởi: admin.airport.service.js, admin.flight.service.js, flight.service.js
  */
 
-const COUNT_AIRPORTS = (whereClause) =>
-  `SELECT COUNT(*) FROM airports ${whereClause}`;
+const COUNT_AIRPORTS = (dk) =>
+  `SELECT COUNT(*) FROM airports ${dk}`;
 
-const SELECT_AIRPORTS = (whereClause, limitIdx, offsetIdx) =>
+const SELECT_AIRPORTS = (dk, gioiHan, viTri) =>
   `SELECT id, code, name, city, country, timezone, is_active, created_at
    FROM airports
-   ${whereClause}
+   ${dk}
    ORDER BY country ASC, city ASC
-   LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
+   LIMIT $${gioiHan} OFFSET $${viTri}`;
 
 // Dùng bởi admin.flight.service.js (SELECT *)
-const SELECT_AIRPORTS_ALL = (whereClause, limitIdx, offsetIdx) =>
-  `SELECT * FROM airports ${whereClause} ORDER BY country, city LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
+const SELECT_AIRPORTS_ALL = (dk, gioiHan, viTri) =>
+  `SELECT * FROM airports ${dk} ORDER BY country, city LIMIT $${gioiHan} OFFSET $${viTri}`;
 
 const FIND_AIRPORT_BY_CODE =
   `SELECT id FROM airports WHERE UPPER(code) = UPPER($1)`;
@@ -33,8 +33,8 @@ const INSERT_AIRPORT =
    VALUES (UPPER($1), $2, $3, $4, $5)
    RETURNING *`;
 
-const UPDATE_AIRPORT_FIELDS = (fields, idx) =>
-  `UPDATE airports SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`;
+const UPDATE_AIRPORT_FIELDS = (truong, stt) =>
+  `UPDATE airports SET ${truong.join(", ")} WHERE id = $${stt} RETURNING *`;
 
 const UPDATE_AIRPORT_STATUS =
   `UPDATE airports SET is_active = $1 WHERE id = $2

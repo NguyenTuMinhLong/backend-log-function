@@ -3,13 +3,13 @@ const router = express.Router();
 
 const { authenticate, authorize } = require("../middlewares/auth.middleware");
 
-const adminFlightController = require("../controllers/admin.flight.controller");
-const adminAirportController = require("../controllers/admin.airport.controller");
-const adminAirlineController = require("../controllers/admin.airline.controller");
-const adminCouponController = require("../controllers/admin.coupon.controller");
+const adminFlightController = require("../controllers/admin/flight.controller");
+const adminAirportController = require("../controllers/admin/airport.controller");
+const adminAirlineController = require("../controllers/admin/airline.controller");
+const adminCouponController = require("../controllers/admin/coupon.controller");
 
-const adminUserController = require("../controllers/admin.user.controller");
-const adminChatController = require("../controllers/admin.chat.controller");
+const adminUserController = require("../controllers/admin/user.controller");
+const adminChatController = require("../controllers/admin/chat.controller");
 
 // Tất cả routes admin: phải đăng nhập + role = 'admin'
 router.use(authenticate, authorize("admin"));

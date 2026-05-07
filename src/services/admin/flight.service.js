@@ -93,13 +93,13 @@ const getFlights = async (params) => {
     conditions.push(`f.is_active = TRUE`);
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const dk = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  const countResult = await pool.query(QF.COUNT_FLIGHTS(whereClause), values);
+  const countResult = await pool.query(QF.COUNT_FLIGHTS(dk), values);
   const total       = parseInt(countResult.rows[0].count);
 
   const dataResult = await pool.query(
-    QF.SELECT_FLIGHTS(whereClause, idx, idx + 1),
+    QF.SELECT_FLIGHTS(dk, idx, idx + 1),
     [...values, parseInt(limit), offset]
   );
 
@@ -322,13 +322,13 @@ const getAirports = async (params) => {
   if (city)      { conditions.push(`LOWER(city) LIKE LOWER($${idx++})`);    values.push(`%${city}%`); }
   if (is_active !== undefined) { conditions.push(`is_active = $${idx++}`);   values.push(is_active === "true"); }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const dk = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  const countRes = await pool.query(QAP.COUNT_AIRPORTS(whereClause), values);
+  const countRes = await pool.query(QAP.COUNT_AIRPORTS(dk), values);
   const total    = parseInt(countRes.rows[0].count);
 
   const dataRes = await pool.query(
-    QAP.SELECT_AIRPORTS_ALL(whereClause, idx, idx + 1),
+    QAP.SELECT_AIRPORTS_ALL(dk, idx, idx + 1),
     [...values, parseInt(limit), offset]
   );
 
@@ -378,13 +378,13 @@ const getAirlinesAdmin = async (params) => {
 
   if (is_active !== undefined) { conditions.push(`is_active = $${idx++}`); values.push(is_active === "true"); }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const dk = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  const countRes = await pool.query(QA.COUNT_AIRLINES(whereClause), values);
+  const countRes = await pool.query(QA.COUNT_AIRLINES(dk), values);
   const total    = parseInt(countRes.rows[0].count);
 
   const dataRes = await pool.query(
-    QA.SELECT_AIRLINES_ALL(whereClause, idx, idx + 1),
+    QA.SELECT_AIRLINES_ALL(dk, idx, idx + 1),
     [...values, parseInt(limit), offset]
   );
 
@@ -438,13 +438,13 @@ const getBookings = async (params) => {
     values.push(`%${search}%`);
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const dk = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  const countRes = await pool.query(QB.COUNT_BOOKINGS(whereClause), values);
+  const countRes = await pool.query(QB.COUNT_BOOKINGS(dk), values);
   const total    = parseInt(countRes.rows[0].count);
 
   const dataRes = await pool.query(
-    QB.SELECT_BOOKINGS_ADMIN(whereClause, idx, idx + 1),
+    QB.SELECT_BOOKINGS_ADMIN(dk, idx, idx + 1),
     [...values, parseInt(limit), offset]
   );
 

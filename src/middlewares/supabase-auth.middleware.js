@@ -1,5 +1,6 @@
 const supabase = require("../config/supabase");
-const pool = require("../config/db");
+const pool     = require("../config/db");
+const QU       = require("../queries/user.queries");
 
 const authenticateSupabase = async (req, res, next) => {
   try {
@@ -36,41 +37,17 @@ const authenticateSupabase = async (req, res, next) => {
       sbUser.user_metadata?.picture ||
       null;
 
-    let result = await pool.query(
-      `SELECT id, full_name, email, phone, role, status, email_verified, supabase_user_id, auth_provider, avatar_url
-       FROM users
-       WHERE supabase_user_id = $1
-       LIMIT 1`,
-      [sbUser.id]
-    );
+    let result = await pool.query(QU.SELECT_USER_BY_SUPABASE_ID, [sbUser.id]);
 
     if (result.rows.length === 0 && email) {
-      result = await pool.query(
-        `SELECT id, full_name, email, phone, role, status, email_verified, supabase_user_id, auth_provider, avatar_url
-         FROM users
-         WHERE LOWER(email) = LOWER($1)
-         LIMIT 1`,
-        [email]
-      );
+      result = await pool.query(QU.SELECT_USER_BY_EMAIL_SOCIAL, [email]);
     }
 
     let user;
 
     if (result.rows.length === 0) {
       const inserted = await pool.query(
-        `INSERT INTO users (
-          supabase_user_id,
-          full_name,
-          email,
-          password_hash,
-          role,
-          status,
-          email_verified,
-          auth_provider,
-          avatar_url
-        )
-        VALUES ($1, $2, $3, NULL, 'customer', 'active', true, $4, $5)
-        RETURNING id, full_name, email, phone, role, status, email_verified, supabase_user_id, auth_provider, avatar_url`,
+        QU.INSERT_SOCIAL_USER,
         [sbUser.id, fullName, email, provider, avatarUrl]
       );
 
@@ -91,21 +68,7 @@ const authenticateSupabase = async (req, res, next) => {
       // - avatar_url: chỉ set nếu chưa có
       // - email_verified: luôn set true (đăng nhập qua Google/Facebook = email đã xác thực)
       const updated = await pool.query(
-        `UPDATE users
-         SET
-           supabase_user_id = COALESCE(supabase_user_id, $1),
-           auth_provider    = CASE
-                                -- Chỉ cập nhật provider nếu:
-                                -- 1. Chưa có supabase_user_id (lần đầu link social) VÀ
-                                -- 2. Chưa có password (tài khoản thuần social, không phải merge)
-                                WHEN supabase_user_id IS NULL AND password_hash IS NULL THEN $2
-                                ELSE auth_provider
-                              END,
-           avatar_url       = COALESCE(avatar_url, $3),
-           email_verified   = true,
-           updated_at       = NOW()
-         WHERE id = $4
-         RETURNING id, full_name, email, phone, role, status, email_verified, supabase_user_id, auth_provider, avatar_url`,
+        QU.UPDATE_SOCIAL_USER,
         [sbUser.id, provider, avatarUrl, currentUser.id]
       );
 

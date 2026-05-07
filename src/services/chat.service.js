@@ -1,5 +1,5 @@
 const pool = require("../config/db");
-const assistantChatService = require("./admin.chat.service");
+const assistantChatService = require("./admin/chat.service");
 const {
   emitAiConversationChanged,
   emitSupportConversationChanged,
@@ -144,11 +144,11 @@ const getConversationLookupClause = (actor = {}, startIndex = 1) => {
 };
 
 const getConversationDetailById = async (client, conversationId, unreadFor = "user") => {
-  const unreadRole = unreadFor === "admin" ? "user" : "admin";
-  const readColumn = unreadFor === "admin" ? "last_admin_read_at" : "last_user_read_at";
+  const vai = unreadFor === "admin" ? "user" : "admin";
+  const cot = unreadFor === "admin" ? "last_admin_read_at" : "last_user_read_at";
 
   const result = await client.query(
-    Q.SELECT_CONVERSATION_DETAIL(readColumn, unreadRole),
+    Q.SELECT_CONVERSATION_DETAIL(cot, vai),
     [conversationId]
   );
   return result.rows[0] || null;
@@ -159,7 +159,7 @@ const getConversationByActorAndType = async (client, actor, type, unreadFor = "u
 
   const lookup = getConversationLookupClause(actor, 1);
   const result = await client.query(
-    Q.SELECT_CONVERSATION_ID_BY_ACTOR(lookup.clause, lookup.values.length + 1),
+    Q.SELECT_CONVERSATION_ID_BY_ACTOR(lookup.clause, lookup.values.length + 1),  // lookup.clause là điều kiện WHERE động
     [...lookup.values, type]
   );
 
@@ -180,19 +180,19 @@ const createOrGetConversation = async (client, actor, type) => {
 };
 
 const updateConversation = async (client, conversationId, updates = {}) => {
-  const assignments = [];
-  const values      = [];
-  let   index       = 1;
+  const capNhat = [];
+  const values  = [];
+  let   index   = 1;
 
   Object.entries(updates).forEach(([column, value]) => {
     if (value === undefined) return;
-    assignments.push(`${column} = $${index}`);
+    capNhat.push(`${column} = $${index}`);
     values.push(value);
     index += 1;
   });
 
   values.push(conversationId);
-  const result = await client.query(Q.UPDATE_CONVERSATION(assignments, index), values);
+  const result = await client.query(Q.UPDATE_CONVERSATION(capNhat, index), values);
   return result.rows[0] || null;
 };
 
@@ -427,11 +427,11 @@ const listSupportConversations = async (params = {}) => {
     index += 1;
   }
 
-  const whereClause = `WHERE ${conditions.join(" AND ")}`;
+  const dk = `WHERE ${conditions.join(" AND ")}`;
 
-  const countResult = await pool.query(Q.COUNT_SUPPORT_CONVERSATIONS(whereClause), values);
+  const countResult = await pool.query(Q.COUNT_SUPPORT_CONVERSATIONS(dk), values);
   const dataResult  = await pool.query(
-    Q.SELECT_SUPPORT_CONVERSATIONS(whereClause, index, index + 1),
+    Q.SELECT_SUPPORT_CONVERSATIONS(dk, index, index + 1),
     [...values, limitNum, offset]
   );
 
