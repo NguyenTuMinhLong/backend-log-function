@@ -1,5 +1,5 @@
-const pool = require("../config/db");
-const Q    = require("../queries/airport.queries");
+const pool = require("../../config/db");
+const Q    = require("../../queries/airport.queries");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

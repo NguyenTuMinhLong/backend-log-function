@@ -1,5 +1,5 @@
-const pool = require("../config/db");
-const Q    = require("../queries/user.queries");
+const pool = require("../../config/db");
+const Q    = require("../../queries/user.queries");
 
 const VALID_ROLES    = ["customer", "staff", "admin"];
 const VALID_STATUSES = ["active", "inactive", "blocked"];

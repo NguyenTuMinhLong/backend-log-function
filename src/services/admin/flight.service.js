@@ -1,8 +1,8 @@
-const pool = require("../config/db");
-const QA   = require("../queries/airline.queries");
-const QAP  = require("../queries/airport.queries");
-const QF   = require("../queries/flight.queries");
-const QB   = require("../queries/booking.queries");
+const pool = require("../../config/db");
+const QA   = require("../../queries/airline.queries");
+const QAP  = require("../../queries/airport.queries");
+const QF   = require("../../queries/flight.queries");
+const QB   = require("../../queries/booking.queries");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

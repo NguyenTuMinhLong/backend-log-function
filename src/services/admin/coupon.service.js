@@ -1,5 +1,5 @@
-const pool = require("../config/db");
-const Q    = require("../queries/coupon.queries");
+const pool = require("../../config/db");
+const Q    = require("../../queries/coupon.queries");
 
 const VALID_TYPES = ["fixed", "percent"];
 
