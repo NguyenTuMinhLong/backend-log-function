@@ -1,3 +1,5 @@
+const QS = require("../queries/seat.queries");
+
 /**
  * Tự động sinh số ghế cho hành khách
  * Format: <row><col> — VD: 1A, 12C, 33F
@@ -44,11 +46,7 @@ const generateAllSeats = (seatClass, totalSeats) => {
  */
 const getNextAvailableSeat = async (client, flightId, seatClass, totalSeats) => {
   // Lấy danh sách ghế đã bị chiếm
-  const occupied = await client.query(
-    `SELECT seat_number FROM flight_seat_assignments
-     WHERE flight_id = $1 AND class = $2`,
-    [flightId, seatClass]
-  );
+  const occupied = await client.query(QS.SELECT_OCCUPIED_SEATS, [flightId, seatClass]);
 
   const occupiedSet = new Set(occupied.rows.map(r => r.seat_number));
   const allSeats    = generateAllSeats(seatClass, totalSeats);
@@ -77,18 +75,10 @@ const assignSeat = async (client, flightId, seatClass, totalSeats, passengerId, 
   if (!seatNumber) throw new Error(`Không còn ghế trống hạng ${seatClass} cho chuyến bay ID ${flightId}`);
 
   // Lưu vào bảng flight_seat_assignments
-  await client.query(
-    `INSERT INTO flight_seat_assignments (flight_id, seat_number, class, status, passenger_id, booking_id)
-     VALUES ($1, $2, $3, 'occupied', $4, $5)
-     ON CONFLICT (flight_id, seat_number) DO NOTHING`,
-    [flightId, seatNumber, seatClass, passengerId, bookingId]
-  );
+  await client.query(QS.INSERT_SEAT_ASSIGNMENT, [flightId, seatNumber, seatClass, passengerId, bookingId]);
 
   // Cập nhật seat_number vào passengers
-  await client.query(
-    `UPDATE passengers SET seat_number = $1 WHERE id = $2`,
-    [seatNumber, passengerId]
-  );
+  await client.query(QS.UPDATE_PASSENGER_SEAT, [seatNumber, passengerId]);
 
   return seatNumber;
 };

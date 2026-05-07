@@ -7,14 +7,14 @@
 
 // ── Admin: Flights ─────────────────────────────────────────────────────────────
 
-const COUNT_FLIGHTS = (whereClause) =>
+const COUNT_FLIGHTS = (dk) =>
   `SELECT COUNT(*) FROM flights f
    JOIN airlines al  ON al.id  = f.airline_id
    JOIN airports dep ON dep.id = f.departure_airport_id
    JOIN airports arr ON arr.id = f.arrival_airport_id
-   ${whereClause}`;
+   ${dk}`;
 
-const SELECT_FLIGHTS = (whereClause, limitIdx, offsetIdx) =>
+const SELECT_FLIGHTS = (dk, gioiHan, viTri) =>
   `SELECT
      f.id, f.flight_number, f.departure_time, f.arrival_time,
      f.duration_minutes, f.status, f.is_active, f.created_at, f.updated_at,
@@ -34,12 +34,12 @@ const SELECT_FLIGHTS = (whereClause, limitIdx, offsetIdx) =>
    JOIN airports     dep ON dep.id = f.departure_airport_id
    JOIN airports     arr ON arr.id = f.arrival_airport_id
    LEFT JOIN flight_seats fs ON fs.flight_id = f.id
-   ${whereClause}
+   ${dk}
    GROUP BY f.id, al.id, al.code, al.name,
             dep.id, dep.code, dep.city,
             arr.id, arr.code, arr.city
    ORDER BY f.departure_time ASC
-   LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
+   LIMIT $${gioiHan} OFFSET $${viTri}`;
 
 const FIND_FLIGHT_BY_ID =
   `SELECT * FROM flights WHERE id = $1`;
@@ -59,15 +59,15 @@ const INSERT_FLIGHT_SEAT =
      baggage_included_kg, carry_on_kg, extra_baggage_price
    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`;
 
-const UPDATE_FLIGHT_FIELDS = (fields, idx) =>
-  `UPDATE flights SET ${fields.join(", ")} WHERE id = $${idx}`;
+const UPDATE_FLIGHT_FIELDS = (truong, stt) =>
+  `UPDATE flights SET ${truong.join(", ")} WHERE id = $${stt}`;
 
 const FIND_FLIGHT_SEAT =
   `SELECT id FROM flight_seats WHERE flight_id = $1 AND class = $2`;
 
-const UPDATE_FLIGHT_SEAT_FIELDS = (seatFields, sidx) =>
-  `UPDATE flight_seats SET ${seatFields.join(", ")}
-   WHERE flight_id = $${sidx} AND class = $${sidx + 1}`;
+const UPDATE_FLIGHT_SEAT_FIELDS = (truongGhe, sttGhe) =>
+  `UPDATE flight_seats SET ${truongGhe.join(", ")}
+   WHERE flight_id = $${sttGhe} AND class = $${sttGhe + 1}`;
 
 // Dùng khi INSERT seat trong updateFlight (available_seats = total_seats)
 const INSERT_FLIGHT_SEAT_UPSERT =
@@ -88,7 +88,7 @@ const SET_FLIGHT_VISIBILITY =
 
 // ── Public: Search Flights ─────────────────────────────────────────────────────
 
-const SEARCH_FLIGHTS = (whereClause, orderBy) =>
+const SEARCH_FLIGHTS = (dk, sapXep) =>
   `SELECT
      f.id                    AS flight_id,
      f.flight_number,
@@ -120,8 +120,8 @@ const SEARCH_FLIGHTS = (whereClause, orderBy) =>
    JOIN airports     dep_ap ON dep_ap.id = f.departure_airport_id
    JOIN airports     arr_ap ON arr_ap.id = f.arrival_airport_id
    JOIN flight_seats fs     ON fs.flight_id = f.id
-   WHERE ${whereClause}
-   ORDER BY ${orderBy}`;
+   WHERE ${dk}
+   ORDER BY ${sapXep}`;
 
 const SELECT_FLIGHT_BY_ID =
   `SELECT

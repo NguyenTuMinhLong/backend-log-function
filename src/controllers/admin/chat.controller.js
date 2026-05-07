@@ -1,4 +1,4 @@
-const adminChatService = require("../services/admin.chat.service");
+const adminChatService = require("../../services/admin/chat.service");
 const chatService = require("../services/chat.service");
 
 const getChatConfig = async (_req, res) => {

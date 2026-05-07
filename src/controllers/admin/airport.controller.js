@@ -1,4 +1,4 @@
-const adminAirportService = require("../services/admin.airport.service");
+const adminAirportService = require("../../services/admin/airport.service");
 
 /** GET /api/admin/airports */
 const getAirports = async (req, res) => {

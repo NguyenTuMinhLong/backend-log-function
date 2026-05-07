@@ -1,14 +1,9 @@
-const jwt = require("jsonwebtoken");
+const jwt  = require("jsonwebtoken");
 const pool = require("../config/db");
+const QU   = require("../queries/user.queries");
 
 const loadUserAuthState = async (userId) => {
-  const result = await pool.query(
-    `SELECT id, full_name, email, phone, role, status, email_verified
-     FROM users
-     WHERE id = $1
-     LIMIT 1`,
-    [userId]
-  );
+  const result = await pool.query(QU.SELECT_USER_FOR_AUTH, [userId]);
 
   if (result.rows.length === 0) {
     return { user: null, reason: "USER_NOT_FOUND" };

@@ -1,4 +1,4 @@
-const adminFlightService = require("../services/admin.flight.service");
+const adminFlightService = require("../../services/admin/flight.service");
 
 /**
  * GET /api/admin/flights

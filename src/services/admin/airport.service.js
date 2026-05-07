@@ -45,13 +45,13 @@ const getAirports = async (params) => {
     values.push(is_active === "true" || is_active === true);
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const dk = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  const countResult = await pool.query(Q.COUNT_AIRPORTS(whereClause), values);
+  const countResult = await pool.query(Q.COUNT_AIRPORTS(dk), values);
   const total       = parseInt(countResult.rows[0].count);
 
   const dataResult = await pool.query(
-    Q.SELECT_AIRPORTS(whereClause, idx, idx + 1),
+    Q.SELECT_AIRPORTS(dk, idx, idx + 1),
     [...values, parseInt(limit), offset]
   );
 

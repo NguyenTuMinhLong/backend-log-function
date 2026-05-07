@@ -57,27 +57,35 @@ const EXPIRE_PENDING_PAYMENT =
 const UPDATE_PAYMENT_AFTER_CANCEL = (newStatus) =>
   `UPDATE payments SET status = '${newStatus}', cancelled_at = NOW(), updated_at = NOW() WHERE id = $1`;
 
+// status = $1, id = $2  (dùng khi status là biến động — tránh string interpolation)
+const UPDATE_PAYMENT_STATUS_BY_ID =
+  `UPDATE payments
+   SET status = $1, cancelled_at = NOW(), updated_at = NOW()
+   WHERE id = $2`;
+
 const SELECT_MY_PAYMENTS =
   `SELECT
      p.id, p.payment_code, p.booking_id, p.payment_method,
      p.amount, p.discount_amount, p.final_amount,
      p.voucher_code, p.status,
      p.expires_at, p.paid_at, p.created_at,
-     b.booking_code,
+     b.booking_code, b.trip_type,
      f.flight_number,
-     dep.code AS from_code, dep.city AS from_city,
-     arr.code AS to_code,   arr.city AS to_city,
+     dep.code AS dep_code, dep.city AS dep_city,
+     arr.code AS arr_code, arr.city AS arr_city,
      f.departure_time
    FROM payments p
-   JOIN bookings b ON b.id = p.booking_id
-   JOIN flights  f ON f.id = b.outbound_flight_id
+   JOIN bookings b  ON b.id  = p.booking_id
+   JOIN flights  f  ON f.id  = b.outbound_flight_id
    JOIN airports dep ON dep.id = f.departure_airport_id
    JOIN airports arr ON arr.id = f.arrival_airport_id
-   WHERE p.user_id = $1
-   ORDER BY p.created_at DESC`;
+   WHERE b.user_id = $1
+   ORDER BY p.created_at DESC
+   LIMIT 100`;
 
 module.exports = {
   SELECT_BOOKING_FOR_PAYMENT,
+  UPDATE_PAYMENT_STATUS_BY_ID,
   FIND_SUCCESS_PAYMENT_BY_BOOKING,
   CANCEL_PENDING_PAYMENTS,
   INSERT_PAYMENT,

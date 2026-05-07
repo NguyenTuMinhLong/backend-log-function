@@ -3,6 +3,7 @@ const { assignSeat } = require("../utils/seat");
 const { rollbackReservedVoucherUsageForBooking } = require("./payment.service");
 const QB = require("../queries/booking.queries");
 const QF = require("../queries/flight.queries");
+const QP = require("../queries/payment.queries");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -306,13 +307,13 @@ const getMyBookings = async (userId, filter = "all") => {
   const validFilters = ["all", "upcoming", "completed", "cancelled", "expired"];
   if (!validFilters.includes(filter)) throw new Error("filter không hợp lệ");
 
-  let filterCondition = "";
-  if (filter === "upcoming")  filterCondition = `AND b.status = 'pending'`;
-  if (filter === "completed") filterCondition = `AND b.status = 'confirmed'`;
-  if (filter === "cancelled") filterCondition = `AND b.status IN ('cancelled', 'expired')`;
-  if (filter === "expired")   filterCondition = `AND b.status = 'expired'`;
+  let dk = "";
+  if (filter === "upcoming")  dk = `AND b.status = 'pending'`;
+  if (filter === "completed") dk = `AND b.status = 'confirmed'`;
+  if (filter === "cancelled") dk = `AND b.status IN ('cancelled', 'expired')`;
+  if (filter === "expired")   dk = `AND b.status = 'expired'`;
 
-  const result = await pool.query(QB.SELECT_MY_BOOKINGS(filterCondition), [userId]);
+  const result = await pool.query(QB.SELECT_MY_BOOKINGS(dk), [userId]);
 
   return result.rows.map((row) => ({
     booking_id:   row.id,
@@ -402,10 +403,7 @@ const cancelBooking = async (userId, bookingCode) => {
         } else {
           paymentStatusAfterCancel = "cancelled";
         }
-        await client.query(
-          `UPDATE payments SET status = $1, cancelled_at = NOW(), updated_at = NOW() WHERE id = $2`,
-          [paymentStatusAfterCancel, payment.id]
-        );
+        await client.query(QP.UPDATE_PAYMENT_STATUS_BY_ID, [paymentStatusAfterCancel, payment.id]);
       } catch (_) {}
     }
 
@@ -452,11 +450,7 @@ const expireHeldBookings = async () => {
 
       await client.query(QB.EXPIRE_SEAT_ASSIGNMENTS, [booking.id]);
       await rollbackReservedVoucherUsageForBooking(client, booking.id);
-      await client.query(
-        `UPDATE payments SET status='EXPIRED', expired_at=NOW(), updated_at=NOW()
-         WHERE booking_id=$1 AND status='PENDING'`,
-        [booking.id]
-      );
+      await client.query(QP.EXPIRE_PENDING_PAYMENT, [booking.id]);
       await client.query(QB.EXPIRE_BOOKING, [booking.id]);
     }
 

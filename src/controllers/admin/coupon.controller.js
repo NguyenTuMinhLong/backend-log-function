@@ -1,4 +1,4 @@
-const adminCouponService = require("../services/admin.coupon.service");
+const adminCouponService = require("../../services/admin/coupon.service");
 
 const getCoupons = async (req, res) => {
   try {

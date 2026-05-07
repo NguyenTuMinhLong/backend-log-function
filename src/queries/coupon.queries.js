@@ -7,10 +7,10 @@
 
 // ── Select ─────────────────────────────────────────────────────────────────────
 
-const COUNT_COUPONS = (whereClause) =>
-  `SELECT COUNT(*) AS total FROM vouchers v ${whereClause}`;
+const COUNT_COUPONS = (dk) =>
+  `SELECT COUNT(*) AS total FROM vouchers v ${dk}`;
 
-const SELECT_COUPONS = (whereClause, orderBy, orderDirection, limitIdx, offsetIdx) =>
+const SELECT_COUPONS = (dk, sapXep, chieuSapXep, gioiHan, viTri) =>
   `SELECT
      v.id, v.airline_id,
      a.code AS airline_code, a.name AS airline_name,
@@ -28,10 +28,10 @@ const SELECT_COUPONS = (whereClause, orderBy, orderDirection, limitIdx, offsetId
    FROM vouchers v
    LEFT JOIN airlines a ON a.id = v.airline_id
    LEFT JOIN coupon_usages cu ON cu.coupon_id = v.id
-   ${whereClause}
+   ${dk}
    GROUP BY v.id, a.code, a.name
-   ORDER BY ${orderBy} ${orderDirection}, v.code ASC
-   LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
+   ORDER BY ${sapXep} ${chieuSapXep}, v.code ASC
+   LIMIT $${gioiHan} OFFSET $${viTri}`;
 
 const SELECT_COUPON_BY_ID =
   `SELECT
@@ -71,7 +71,7 @@ const SELECT_COUPON_USAGE_INFO =
   `SELECT id, code, used_count FROM vouchers WHERE id = $1`;
 
 // Public coupon query
-const SELECT_PUBLIC_COUPONS = (whereClause, limitIdx) =>
+const SELECT_PUBLIC_COUPONS = (dk, gioiHan) =>
   `SELECT
      v.id, v.airline_id,
      a.code AS airline_code, a.name AS airline_name,
@@ -91,9 +91,9 @@ const SELECT_PUBLIC_COUPONS = (whereClause, limitIdx) =>
      END AS is_available_now
    FROM vouchers v
    LEFT JOIN airlines a ON a.id = v.airline_id
-   ${whereClause}
+   ${dk}
    ORDER BY v.updated_at DESC, v.created_at DESC, v.code ASC
-   LIMIT $${limitIdx}`;
+   LIMIT $${gioiHan}`;
 
 // ── Insert / Update / Delete ───────────────────────────────────────────────────
 
@@ -110,8 +110,8 @@ const INSERT_COUPON =
            COALESCE($11, FALSE), COALESCE($12, TRUE), $13, $14)
    RETURNING id`;
 
-const UPDATE_COUPON_FIELDS = (fields, idx) =>
-  `UPDATE vouchers SET ${fields.join(", ")} WHERE id = $${idx}`;
+const UPDATE_COUPON_FIELDS = (truong, stt) =>
+  `UPDATE vouchers SET ${truong.join(", ")} WHERE id = $${stt}`;
 
 const UPDATE_COUPON_STATUS =
   `UPDATE vouchers SET is_active = $1, updated_at = NOW() WHERE id = $2 RETURNING id`;
