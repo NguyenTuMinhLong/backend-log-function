@@ -17,7 +17,7 @@ const buildAttachmentPreview = (attachments = []) => {
   if (!Array.isArray(attachments) || !attachments.length) return "";
   if (attachments.length === 1) {
     const [a] = attachments;
-    if (a.type === "sticker") return "[Sticker]";
+    if (a.type === "sticker" || a.type === "icon") return "[Icon]";
     if (a.type === "image")   return `[Hinh anh] ${a.name || ""}`.trim();
     return `[File] ${a.name || ""}`.trim();
   }
@@ -37,14 +37,33 @@ const sanitizeAttachments = (raw) => {
       size:       Number(a.size)     || 0,
       data_url:   String(a.data_url  || ""),
       sticker_id: a.sticker_id ? String(a.sticker_id) : null,
+      icon_id:    a.icon_id ? String(a.icon_id) : null,
       label:      a.label ? String(a.label).slice(0, 100) : "",
     }));
 };
 
+const parseOutgoingMessage = (payload = {}, options = {}) => {
+  const { allowAttachments = true } = options;
+  const message = String(payload.message || "").trim();
+  const attachments = sanitizeAttachments(payload.attachments);
+
+  if (!allowAttachments && attachments.length > 0) {
+    throw new Error("Kenh nay chi ho tro gui tin nhan van ban");
+  }
+
+  if (!message && !attachments.length) {
+    throw new Error("Tin nhan hoac tep dinh kem la bat buoc");
+  }
+
+  return {
+    message,
+    attachments,
+    preview: buildPreview(message) || buildAttachmentPreview(attachments),
+  };
+};
+
 const requireMessage = (payload = {}) => {
-  const message      = String(payload.message || "").trim();
-  const attachments  = sanitizeAttachments(payload.attachments);
-  if (!message && !attachments.length) throw new Error("Tin nhan hoac tep dinh kem la bat buoc");
+  const { message, attachments } = parseOutgoingMessage(payload, { allowAttachments: true });
   return { message, attachments };
 };
 
@@ -238,14 +257,14 @@ const getConversationByType = async (user, type, options = {}) => {
       await updateConversation(client, conversation.id, { last_user_read_at: new Date() });
     }
 
-    return getConversationPayload(client, conversation.id, "user");
+    return await getConversationPayload(client, conversation.id, "user");
   } finally {
     client.release();
   }
 };
 
 const sendAiMessage = async (user, payload = {}, options = {}) => {
-  const { message } = requireMessage(payload);
+  const { message } = parseOutgoingMessage(payload, { allowAttachments: false });
   const actor   = resolveActor(user, payload, options);
   const client  = await pool.connect();
 
@@ -537,4 +556,8 @@ module.exports = {
   getSupportConversationForAdmin,
   replySupportConversation,
   updateSupportConversationStatus,
+  __test: {
+    parseOutgoingMessage,
+    buildAttachmentPreview,
+  },
 };
