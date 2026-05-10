@@ -6,10 +6,10 @@ const flightRoutes  = require("./routes/flight.routes");
 const bookingRoutes = require("./routes/booking.routes");
 const adminRoutes   = require("./routes/admin.routes");
 const chatRoutes    = require("./routes/chat.routes");
-const paymentRoutes = require("./routes/payment.routes");
-const publicRoutes  = require("./routes/public.routes");
+const paymentRoutes  = require("./routes/payment.routes");
+const publicRoutes   = require("./routes/public.routes");
 
-const { expireHeldBookings } = require("./services/booking.service");
+const { expireHeldBookings }   = require("./services/booking.service");
 
 const app = express();
 
