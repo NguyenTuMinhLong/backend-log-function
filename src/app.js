@@ -8,6 +8,7 @@ const adminRoutes   = require("./routes/admin.routes");
 const chatRoutes    = require("./routes/chat.routes");
 const paymentRoutes  = require("./routes/payment.routes");
 const publicRoutes   = require("./routes/public.routes");
+const wishlistRoutes = require("./routes/wishlist.routes");
 
 const { expireHeldBookings }   = require("./services/booking.service");
 
@@ -23,6 +24,7 @@ app.use("/api/bookings", bookingRoutes);
 app.use("/api/chat",     chatRoutes);
 app.use("/api/admin",    adminRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/wishlist", wishlistRoutes);
 
 // Mỗi 1 phút sẽ chạy 1 lần để kiểm tra toàn bộ danh sách booking nhằm tự động hủy booking đã hết hạn giữ ghế
 // 5. Thời gian giữ ghế (30 phút) nằm bên service dòng 192
