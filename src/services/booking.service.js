@@ -303,17 +303,27 @@ const getBookingDetail = async (bookingCode, userId = null) => {
 
 // ─── getMyBookings ────────────────────────────────────────────────────────────
 
-const getMyBookings = async (userId, filter = "all") => {
+const getMyBookings = async (userId, filter = "all", from_date, to_date) => {
   const validFilters = ["all", "upcoming", "completed", "cancelled", "expired"];
   if (!validFilters.includes(filter)) throw new Error("filter không hợp lệ");
 
-  let dk = "";
-  if (filter === "upcoming")  dk = `AND b.status = 'pending'`;
-  if (filter === "completed") dk = `AND b.status = 'confirmed'`;
-  if (filter === "cancelled") dk = `AND b.status IN ('cancelled', 'expired')`;
-  if (filter === "expired")   dk = `AND b.status = 'expired'`;
+  if (from_date && !/^\d{4}-\d{2}-\d{2}$/.test(from_date)) throw new Error("from_date phải có định dạng YYYY-MM-DD");
+  if (to_date   && !/^\d{4}-\d{2}-\d{2}$/.test(to_date))   throw new Error("to_date phải có định dạng YYYY-MM-DD");
+  if (from_date && to_date && new Date(from_date) > new Date(to_date)) throw new Error("from_date không được sau to_date");
 
-  const result = await pool.query(QB.SELECT_MY_BOOKINGS(dk), [userId]);
+  const values = [userId];
+  let   dk     = "";
+  let   idx    = 2; // $1 = userId
+
+  if (filter === "upcoming")  dk += ` AND b.status = 'pending'`;
+  if (filter === "completed") dk += ` AND b.status = 'confirmed'`;
+  if (filter === "cancelled") dk += ` AND b.status IN ('cancelled', 'expired')`;
+  if (filter === "expired")   dk += ` AND b.status = 'expired'`;
+
+  if (from_date) { dk += ` AND DATE(b.created_at) >= $${idx++}`; values.push(from_date); }
+  if (to_date)   { dk += ` AND DATE(b.created_at) <= $${idx++}`; values.push(to_date); }
+
+  const result = await pool.query(QB.SELECT_MY_BOOKINGS(dk), values);
 
   return result.rows.map((row) => ({
     booking_id:   row.id,

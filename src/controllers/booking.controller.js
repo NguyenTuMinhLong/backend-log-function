@@ -47,8 +47,8 @@ const getBookingDetail = async (req, res) => {
  */
 const getMyBookings = async (req, res) => {
   try {
-    const filter = req.query.filter || "all";
-    const data = await bookingService.getMyBookings(req.user.id, filter);
+    const { filter = "all", from_date, to_date } = req.query;
+    const data = await bookingService.getMyBookings(req.user.id, filter, from_date, to_date);
 
     res.json({
       message: "Lấy lịch sử chuyến bay thành công",
