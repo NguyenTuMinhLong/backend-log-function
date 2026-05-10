@@ -95,31 +95,40 @@ const getSeatMap = async (req, res) => {
 
 const getFlightRecommendations = async (req, res) => {
   try {
-    const { from, to, user_id, limit = 10 } = req.query;
+    const { from, to, limit = 10 } = req.query;
 
-    // Validation
     if (!from || !to) {
-      return res.status(400).json({ 
-        error: "Thiếu tham số 'from' hoặc 'to' (mã sân bay)" 
+      return res.status(400).json({
+        success: false,
+        message: "Thiếu tham số 'from' hoặc 'to' (mã sân bay)"
       });
     }
 
     const recommendations = await flightService.recommendFlights({
-      userId: user_id || null,
-      fromAirport: from.toUpperCase(),
-      toAirport: to.toUpperCase(),
+      userId: req.user?.id || null,
+      fromAirport: from.toUpperCase().trim(),
+      toAirport: to.toUpperCase().trim(),
       limit: parseInt(limit) || 10
     });
 
-    res.json({ 
-      message: "Lấy gợi ý chuyến bay thành công", 
-      data: recommendations 
+    res.status(200).json({
+      success: true,
+      message: "Lấy gợi ý chuyến bay thành công",
+      data: recommendations
     });
 
   } catch (err) {
     console.error("❌ [Flight Recommendation] Error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({
+      success: false,
+      message: "Lỗi server khi lấy gợi ý chuyến bay"
+    });
   }
+};
+
+module.exports = { 
+  // các hàm khác giữ nguyên...
+  getFlightRecommendations 
 };
 
 module.exports = { searchFlights, getAirports, getAirlines, getFlightById, getAlternativeFlights, getPriceCalendar, getSeatMap, getFlightRecommendations };

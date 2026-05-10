@@ -8,24 +8,19 @@ const flightController = require("../controllers/flight.controller");
 // Middlewares
 const { authenticate, authenticateOptional } = require("../middlewares/auth.middleware");
 
-// ==================== STATIC ROUTES (phải để trước) ====================
+// ==================== STATIC ROUTES ====================
 
-// Lịch sử booking của tôi
 router.get("/my", authenticate, bookingController.getMyBookings);
 
-
-// Flight Recommendation (mới)
-router.get("/recommendations", flightController.getFlightRecommendations);
+// Flight Recommendation - SỬA THÀNH authenticateOptional
+router.get("/recommendations", authenticateOptional, flightController.getFlightRecommendations);   // ← SỬA Ở ĐÂY
 
 // Tạo booking
 router.post("/", authenticateOptional, bookingController.createBooking);
 
-// ==================== DYNAMIC ROUTES (phải để sau) ====================
+// ==================== DYNAMIC ROUTES ====================
 
-// Xem chi tiết booking (dynamic)
 router.get("/:bookingCode", authenticateOptional, bookingController.getBookingDetail);
-
-// Hủy booking (dynamic)
 router.post("/:bookingCode/cancel", authenticate, bookingController.cancelBooking);
 
 module.exports = router;
