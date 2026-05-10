@@ -49,6 +49,11 @@ const SELECT_ACTIVE_AIRPORTS =
   `SELECT id, code, name, city, country
    FROM airports WHERE is_active = TRUE ORDER BY city ASC`;
 
+const SELECT_AIRPORTS_COORDS_BY_CODES =
+  `SELECT code, name, city, lat, lng
+   FROM airports
+   WHERE UPPER(code) = ANY($1::text[])`;
+
 module.exports = {
   COUNT_AIRPORTS,
   SELECT_AIRPORTS,
@@ -61,4 +66,5 @@ module.exports = {
   UPDATE_AIRPORT_STATUS,
   TOGGLE_AIRPORT_STATUS,
   SELECT_ACTIVE_AIRPORTS,
+  SELECT_AIRPORTS_COORDS_BY_CODES,
 };

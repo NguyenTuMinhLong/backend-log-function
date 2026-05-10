@@ -93,4 +93,30 @@ const getSeatMap = async (req, res) => {
   }
 };
 
-module.exports = { searchFlights, getAirports, getAirlines, getFlightById, getAlternativeFlights, getPriceCalendar, getSeatMap };
+
+/**
+ * GET /api/flights/:id/position
+ * Trả về vị trí hiện tại của máy bay theo flight ID
+ */
+const getFlightPosition = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Kiểm tra id có phải số không
+    if (!id || isNaN(Number(id))) {
+      return res.status(400).json({ error: "Flight ID không hợp lệ" });
+    }
+
+    const data = await flightService.getFlightPosition(Number(id));
+    return res.json({ data });
+
+  } catch (err) {
+    if (err.message === "Không tìm thấy chuyến bay") {
+      return res.status(404).json({ error: err.message });
+    }
+    console.error("[getFlightPosition]", err.message);
+    return res.status(500).json({ error: "Lỗi server" });
+  }
+};
+
+module.exports = { searchFlights, getAirports, getAirlines, getFlightById, getAlternativeFlights, getPriceCalendar, getSeatMap, getFlightPosition, };

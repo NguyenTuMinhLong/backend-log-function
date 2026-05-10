@@ -638,6 +638,98 @@ const getSeatMap = async (flightId, params = {}) => {
   };
 };
 
+
+/**
+ * Tính vị trí máy bay hiện tại theo thời gian thực
+ * Dùng cho Flight Tracker
+ * Logic: lerp(dep_coords, arr_coords, progress)
+ */
+const getFlightPosition = async (flightId) => {
+  // 1. Lấy thông tin chuyến bay + tọa độ 2 sân bay
+  const result = await pool.query(
+    `SELECT
+       f.id,
+       f.flight_number,
+       f.departure_time,
+       f.duration_minutes,
+       f.status,
+       dep.code AS dep_code,
+       dep.city AS dep_city,
+       dep.lat  AS dep_lat,
+       dep.lng  AS dep_lng,
+       arr.code AS arr_code,
+       arr.city AS arr_city,
+       arr.lat  AS arr_lat,
+       arr.lng  AS arr_lng
+     FROM flights f
+     JOIN airports dep ON dep.id = f.departure_airport_id
+     JOIN airports arr ON arr.id = f.arrival_airport_id
+     WHERE f.id = $1`,
+    [flightId]
+  );
+
+  if (!result.rows.length) {
+    throw new Error("Không tìm thấy chuyến bay");
+  }
+
+  const f = result.rows[0];
+
+  // 2. Tính thời gian
+  const now        = Date.now();
+  const depTime    = new Date(f.departure_time).getTime();
+  const durationMs = f.duration_minutes * 60 * 1000;
+  const arrTime    = depTime + durationMs;
+
+  // 3. Tính progress (0.0 → 1.0)
+  let progress = 0;
+  if (now >= depTime) {
+    progress = Math.min(1, (now - depTime) / durationMs);
+  }
+
+  // 4. Nội suy tuyến tính vị trí (lerp)
+  const lat = parseFloat(f.dep_lat) +
+    (parseFloat(f.arr_lat) - parseFloat(f.dep_lat)) * progress;
+  const lng = parseFloat(f.dep_lng) +
+    (parseFloat(f.arr_lng) - parseFloat(f.dep_lng)) * progress;
+
+  // 5. Tính góc xoay icon máy bay
+  const dLat   = parseFloat(f.arr_lat) - parseFloat(f.dep_lat);
+  const dLng   = parseFloat(f.arr_lng) - parseFloat(f.dep_lng);
+  const heading = Math.atan2(dLng, dLat) * (180 / Math.PI);
+
+  // 6. Xác định trạng thái
+  let trackStatus = "scheduled";
+  if (now >= depTime && now < arrTime) trackStatus = "airborne";
+  if (now >= arrTime)                  trackStatus = "landed";
+
+  return {
+    flightId:      f.id,
+    flightNumber:  f.flight_number,
+    status:        trackStatus,
+    progress:      parseFloat(progress.toFixed(4)),
+    timeRemaining: Math.max(0, arrTime - now), // milliseconds
+    position: {
+      lat:     parseFloat(lat.toFixed(6)),
+      lng:     parseFloat(lng.toFixed(6)),
+      heading: parseFloat(heading.toFixed(2)),
+    },
+    departure: {
+      code: f.dep_code,
+      city: f.dep_city,
+      lat:  parseFloat(f.dep_lat),
+      lng:  parseFloat(f.dep_lng),
+      time: f.departure_time,
+    },
+    arrival: {
+      code: f.arr_code,
+      city: f.arr_city,
+      lat:  parseFloat(f.arr_lat),
+      lng:  parseFloat(f.arr_lng),
+      time: new Date(arrTime).toISOString(),
+    },
+  };
+};
+
 module.exports = {
   searchFlights,
   getAirports,
@@ -646,4 +738,5 @@ module.exports = {
   getAlternativeFlights,
   getPriceCalendar,
   getSeatMap,
+  getFlightPosition,
 };
