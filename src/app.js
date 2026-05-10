@@ -9,7 +9,7 @@ const chatRoutes    = require("./routes/chat.routes");
 const paymentRoutes = require("./routes/payment.routes");
 const publicRoutes  = require("./routes/public.routes");
 
-const { expireHeldBookings } = require("./services/booking.service");
+const { expireHeldBookings }   = require("./services/booking.service");
 
 const app = express();
 
