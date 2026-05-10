@@ -269,6 +269,7 @@ const getBookingDetail = async (bookingCode, userId = null) => {
     created_at:   b.created_at,
     contact: { name: b.contact_name, email: b.contact_email, phone: b.contact_phone },
     outbound_flight: {
+      flight_id:        b.outbound_flight_id,
       flight_number:    b.outbound_flight_number,
       seat_class:       b.outbound_seat_class,
       airline:   { code: b.outbound_airline_code, name: b.outbound_airline_name },
@@ -278,6 +279,7 @@ const getBookingDetail = async (bookingCode, userId = null) => {
     },
     return_flight: b.return_flight_id
       ? {
+          flight_id:        b.return_flight_id,
           flight_number:    b.return_flight_number,
           seat_class:       b.return_seat_class,
           airline:   { code: b.return_airline_code, name: b.return_airline_name },
@@ -303,17 +305,27 @@ const getBookingDetail = async (bookingCode, userId = null) => {
 
 // ─── getMyBookings ────────────────────────────────────────────────────────────
 
-const getMyBookings = async (userId, filter = "all") => {
+const getMyBookings = async (userId, filter = "all", from_date, to_date) => {
   const validFilters = ["all", "upcoming", "completed", "cancelled", "expired"];
   if (!validFilters.includes(filter)) throw new Error("filter không hợp lệ");
 
-  let dk = "";
-  if (filter === "upcoming")  dk = `AND b.status = 'pending'`;
-  if (filter === "completed") dk = `AND b.status = 'confirmed'`;
-  if (filter === "cancelled") dk = `AND b.status IN ('cancelled', 'expired')`;
-  if (filter === "expired")   dk = `AND b.status = 'expired'`;
+  if (from_date && !/^\d{4}-\d{2}-\d{2}$/.test(from_date)) throw new Error("from_date phải có định dạng YYYY-MM-DD");
+  if (to_date   && !/^\d{4}-\d{2}-\d{2}$/.test(to_date))   throw new Error("to_date phải có định dạng YYYY-MM-DD");
+  if (from_date && to_date && new Date(from_date) > new Date(to_date)) throw new Error("from_date không được sau to_date");
 
-  const result = await pool.query(QB.SELECT_MY_BOOKINGS(dk), [userId]);
+  const values = [userId];
+  let   dk     = "";
+  let   idx    = 2; // $1 = userId
+
+  if (filter === "upcoming")  dk += ` AND b.status = 'pending'`;
+  if (filter === "completed") dk += ` AND b.status = 'confirmed'`;
+  if (filter === "cancelled") dk += ` AND b.status IN ('cancelled', 'expired')`;
+  if (filter === "expired")   dk += ` AND b.status = 'expired'`;
+
+  if (from_date) { dk += ` AND DATE(b.created_at) >= $${idx++}`; values.push(from_date); }
+  if (to_date)   { dk += ` AND DATE(b.created_at) <= $${idx++}`; values.push(to_date); }
+
+  const result = await pool.query(QB.SELECT_MY_BOOKINGS(dk), values);
 
   return result.rows.map((row) => ({
     booking_id:   row.id,

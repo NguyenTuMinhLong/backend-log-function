@@ -8,11 +8,9 @@ const flightController = require("../controllers/flight.controller");
 // Middlewares
 const { authenticate, authenticateOptional } = require("../middlewares/auth.middleware");
 
-// ==================== STATIC ROUTES (phải để trước) ====================
-
-// Lịch sử booking của tôi
+// Lịch sử booking của tôi: phải đăng nhập
 router.get("/my", authenticate, bookingController.getMyBookings);
-
+// http://localhost:3000/api/bookings/my?filter=all|upcoming|completed|cancelled|expired&from_date=YYYY-MM-DD&to_date=YYYY-MM-DD
 
 // Flight Recommendation (mới)
 router.get("/recommendations", flightController.getFlightRecommendations);
