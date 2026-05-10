@@ -1,5 +1,48 @@
 // src/services/flight.service.js
 const pool = require('../config/db');
+const QF   = require('../queries/flight.queries');
+const QAL  = require('../queries/airline.queries');
+const QAP  = require('../queries/airport.queries');
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const validateSearchParams = ({
+  departure_code, arrival_code, departure_date,
+  adults, children, infants, seat_class, return_date,
+}) => {
+  if (!departure_code || !arrival_code || !departure_date || !seat_class) {
+    throw new Error("departure_code, arrival_code, departure_date và seat_class là bắt buộc");
+  }
+  if (departure_code.toUpperCase() === arrival_code.toUpperCase()) {
+    throw new Error("Điểm đi và điểm đến không được trùng nhau");
+  }
+
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(departure_date)) throw new Error("departure_date phải có định dạng YYYY-MM-DD");
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (new Date(departure_date) < today) throw new Error("Ngày đi không được là ngày trong quá khứ");
+
+  if (return_date) {
+    if (!dateRegex.test(return_date)) throw new Error("return_date phải có định dạng YYYY-MM-DD");
+    if (new Date(return_date) <= new Date(departure_date)) throw new Error("Ngày về phải sau ngày đi");
+  }
+
+  const validClasses = ["economy", "business", "first"];
+  if (!validClasses.includes(seat_class.toLowerCase())) {
+    throw new Error("seat_class phải là một trong: economy, business, first");
+  }
+
+  const a = parseInt(adults) || 1;
+  const c = parseInt(children) || 0;
+  const i = parseInt(infants) || 0;
+
+  if (a < 1)           throw new Error("Phải có ít nhất 1 người lớn");
+  if (c < 0 || i < 0) throw new Error("Số trẻ em / em bé không hợp lệ");
+  if (a + c > 9)       throw new Error("Tổng số hành khách (người lớn + trẻ em) không được quá 9");
+  if (i > a)           throw new Error("Số em bé không được nhiều hơn số người lớn");
+};
 
 const recommendFlights = async ({ userId, fromAirport, toAirport, limit = 15 }) => {
     console.log(`🔍 [Recommendation TEST] Lấy tất cả chuyến bay scheduled (bỏ filter from/to)`);
