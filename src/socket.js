@@ -3,6 +3,9 @@ const jwt = require("jsonwebtoken");
 
 const { loadUserAuthState } = require("./middlewares/auth.middleware");
 
+// THÊM MỚI: import hàm tính vị trí máy bay
+const { getFlightPosition } = require("./services/flight.service");
+
 let io = null;
 
 const sanitizeGuestSessionId = (value) => {
@@ -64,7 +67,8 @@ const initSocketServer = (server) => {
       }
 
       const guestSessionId = sanitizeGuestSessionId(
-        socket.handshake.auth?.guestSessionId || socket.handshake.query?.guestSessionId
+        socket.handshake.auth?.guestSessionId ||
+          socket.handshake.query?.guestSessionId
       );
 
       if (!guestSessionId) {
@@ -89,7 +93,64 @@ const initSocketServer = (server) => {
     if (socket.user?.role === "admin") {
       socket.join("admins");
     }
+
+    // THÊM MỚI: Flight Tracker events
+    // Khi user mở trang FlightTracker → frontend gửi event "flight:join"
+    // Server sẽ cho socket join vào room riêng "flight:{id}"
+    // Mục đích: nhiều user cùng xem 1 chuyến bay → server broadcast 1 lần cho cả room
+    socket.on("flight:join", async ({ flightId }) => {
+      // Bỏ qua nếu flightId không hợp lệ
+      if (!flightId || isNaN(Number(flightId))) return;
+
+      // Join vào room riêng của chuyến bay này
+      // VD: "flight:76" — tất cả user xem flight 76 đều ở room này
+      socket.join(`flight:${flightId}`);
+
+      // Gửi vị trí hiện tại ngay lập tức khi user vừa vào
+      // Để user thấy vị trí máy bay ngay, không cần chờ 30 giây
+      try {
+        const position = await getFlightPosition(Number(flightId));
+        socket.emit("flight:updated", position);
+      } catch (err) {
+        socket.emit("flight:error", { message: err.message });
+      }
+    });
+
+    // THÊM MỚI: Khi user rời trang FlightTracker
+    // Frontend gửi event "flight:leave" → server cho socket rời room
+    // Mục đích: tránh broadcast cho socket đã không còn xem nữa
+    socket.on("flight:leave", ({ flightId }) => {
+      socket.leave(`flight:${flightId}`);
+    });
   });
+
+  // THÊM MỚI: Broadcast vị trí máy bay mỗi 30 giây
+  // Chạy liên tục — duyệt qua tất cả room đang có người xem
+  // Chỉ broadcast room nào có tên bắt đầu bằng "flight:"
+  setInterval(async () => {
+    const rooms = io.sockets.adapter.rooms;
+
+    for (const [roomName] of rooms) {
+      // Bỏ qua các room không phải flight tracker
+      // VD: "user:1", "admins", "guest:abc" → bỏ qua
+      if (!roomName.startsWith("flight:")) continue;
+
+      // Lấy flight ID từ tên room. VD: "flight:76" → 76
+      const flightId = roomName.split(":")[1];
+
+      // Chỉ broadcast nếu room có ít nhất 1 người đang xem
+      const roomSize = rooms.get(roomName)?.size || 0;
+      if (roomSize === 0) continue;
+
+      try {
+        // Tính vị trí mới và broadcast cho tất cả user trong room
+        const position = await getFlightPosition(Number(flightId));
+        io.to(roomName).emit("flight:updated", position);
+      } catch (err) {
+        console.error(`[FlightTracker] ${roomName}:`, err.message);
+      }
+    }
+  }, 30 * 1000); // 30 giây
 
   return io;
 };
@@ -126,4 +187,16 @@ module.exports = {
   getIO,
   emitAiConversationChanged,
   emitSupportConversationChanged,
+
+  // THÊM MỚI: Hàm broadcast thủ công cho 1 chuyến bay cụ thể
+  // Dùng khi admin cập nhật status chuyến bay → push realtime cho user đang xem
+  broadcastFlightPosition: async (flightId) => {
+    if (!io) return;
+    try {
+      const position = await getFlightPosition(Number(flightId));
+      io.to(`flight:${flightId}`).emit("flight:updated", position);
+    } catch (err) {
+      console.error("[broadcastFlightPosition]", err.message);
+    }
+  },
 };
