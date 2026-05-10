@@ -93,4 +93,33 @@ const getSeatMap = async (req, res) => {
   }
 };
 
-module.exports = { searchFlights, getAirports, getAirlines, getFlightById, getAlternativeFlights, getPriceCalendar, getSeatMap };
+const getFlightRecommendations = async (req, res) => {
+  try {
+    const { from, to, user_id, limit = 10 } = req.query;
+
+    // Validation
+    if (!from || !to) {
+      return res.status(400).json({ 
+        error: "Thiếu tham số 'from' hoặc 'to' (mã sân bay)" 
+      });
+    }
+
+    const recommendations = await flightService.recommendFlights({
+      userId: user_id || null,
+      fromAirport: from.toUpperCase(),
+      toAirport: to.toUpperCase(),
+      limit: parseInt(limit) || 10
+    });
+
+    res.json({ 
+      message: "Lấy gợi ý chuyến bay thành công", 
+      data: recommendations 
+    });
+
+  } catch (err) {
+    console.error("❌ [Flight Recommendation] Error:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+module.exports = { searchFlights, getAirports, getAirlines, getFlightById, getAlternativeFlights, getPriceCalendar, getSeatMap, getFlightRecommendations };

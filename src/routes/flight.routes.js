@@ -9,5 +9,6 @@ router.get("/alternatives",    flightController.getAlternativeFlights);
 router.get("/price-calendar",  flightController.getPriceCalendar);
 router.get("/:id/seat-map",    flightController.getSeatMap);
 router.get("/:id",             flightController.getFlightById);
+router.get("/recommendations", flightController.getFlightRecommendations);
 
 module.exports = router;
