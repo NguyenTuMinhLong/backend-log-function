@@ -150,7 +150,7 @@ const initSocketServer = (server) => {
         console.error(`[FlightTracker] ${roomName}:`, err.message);
       }
     }
-  }, 30 * 1000); // 30 giây
+  }, 100); // 100ms
 
   return io;
 };
