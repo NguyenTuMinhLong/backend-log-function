@@ -38,7 +38,7 @@ const addToWishlist = async (actor, flightId, seatClass = "economy") => {
 
   const normalizedClass = String(seatClass).toLowerCase();
   if (!VALID_CLASSES.includes(normalizedClass)) {
-    throw new Error(`seat_class phải là: ${VALID_CLASSES.join(", ")}`);
+        throw new Error(`seat_class phải là: ${VALID_CLASSES.join(", ")}`);
   }
 
   // Kiểm tra flight có tồn tại không
@@ -68,7 +68,7 @@ const addToWishlist = async (actor, flightId, seatClass = "economy") => {
  */
 const removeFromWishlist = async (actor, flightId, seatClass = "economy") => {
   const flightIdInt     = parseInt(flightId, 10);
-  const normalizedClass = String(seatClass).toLowerCase();
+    const normalizedClass = String(seatClass).toLowerCase();
 
   let result;
   if (actor.kind === "user") {

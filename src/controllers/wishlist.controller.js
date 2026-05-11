@@ -68,7 +68,7 @@ const getWishlist = async (req, res) => {
     const result = await wishlistService.getWishlist(actor);
     res.json(result);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+        res.status(400).json({ error: err.message });
   }
 };
 
