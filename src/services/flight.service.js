@@ -755,7 +755,7 @@ const getFlightPosition = async (flightId) => {
       city: f.arr_city,
       lat:  parseFloat(f.arr_lat),
       lng:  parseFloat(f.arr_lng),
-      time: new Date(arrTime).toISOString(),
+      time: new Date(arrTime + TZ_OFFSET).toISOString(),
     },
   };
 };
