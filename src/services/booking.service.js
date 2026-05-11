@@ -269,7 +269,6 @@ const getBookingDetail = async (bookingCode, userId = null) => {
     created_at:   b.created_at,
     contact: { name: b.contact_name, email: b.contact_email, phone: b.contact_phone },
     outbound_flight: {
-      flight_id:        b.outbound_flight_id,
       flight_number:    b.outbound_flight_number,
       seat_class:       b.outbound_seat_class,
       airline:   { code: b.outbound_airline_code, name: b.outbound_airline_name },
@@ -279,7 +278,6 @@ const getBookingDetail = async (bookingCode, userId = null) => {
     },
     return_flight: b.return_flight_id
       ? {
-          flight_id:        b.return_flight_id,
           flight_number:    b.return_flight_number,
           seat_class:       b.return_seat_class,
           airline:   { code: b.return_airline_code, name: b.return_airline_name },

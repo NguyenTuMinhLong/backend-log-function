@@ -45,6 +45,7 @@ const getBookingDetail = async (req, res) => {
  * GET /api/bookings/my
  * Lịch sử booking của user đã đăng nhập
  */
+
 const getMyBookings = async (req, res) => {
   try {
     const { filter = "all", from_date, to_date } = req.query;
