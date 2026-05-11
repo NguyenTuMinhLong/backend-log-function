@@ -96,39 +96,52 @@ const getSeatMap = async (req, res) => {
 /**
  * GET /api/bookings/recommendations
  * 
- * Controller chính xử lý request gợi ý chuyến bay từ Frontend.
- * Hỗ trợ 2 chế độ:
- *   - Có from & to     → Gợi ý theo tuyến bay cụ thể
- *   - Không có from/to → General mode (chuyến bay hot nhất toàn hệ thống)
+ * Controller chính xử lý request 
+ * 
+ * - Trả về dữ liệu sạch, dễ render 3 card (HAN + SGN, giá, nút Chọn vé)
  */
 const getFlightRecommendations = async (req, res) => {
   try {
-    // Lấy tham số từ query string (?from=SGN&to=BKK&limit=10)
+    // Lấy tham số từ query string (?from=SGN&to=HAN&limit=10)
     const { from, to, limit = 10 } = req.query;
 
-    // Gọi service để xử lý logic (đã được tối ưu hybrid + general mode)
+    // Chuẩn hóa mã sân bay thành chữ hoa và loại bỏ khoảng trắng
+    const fromAirport = from ? from.toUpperCase().trim() : null;
+    const toAirport   = to   ? to.toUpperCase().trim()   : null;
+
+    // Parse limit và đảm bảo là số hợp lệ
+    const parsedLimit = parseInt(limit) || 10;
+
+    console.log(`[Controller] Nhận request recommend - from=${fromAirport}, to=${toAirport}, limit=${parsedLimit}`);
+
+    // Gọi service (đã được tối ưu hybrid recommendation)
     const recommendations = await flightService.recommendFlights({
-      userId: req.user?.id || null,                    // Lấy userId từ middleware (null = Guest)
-      fromAirport: from ? from.toUpperCase().trim() : null,   // null = general mode
-      toAirport:   to   ? to.toUpperCase().trim()   : null,
-      limit: parseInt(limit) || 10                     // Mặc định lấy tối đa 10 chuyến
+      userId: req.user?.id || null,           // null = Guest (không login)
+      fromAirport,
+      toAirport,
+      limit: parsedLimit,
     });
 
-    // Trả về response chuẩn cho Frontend
+    // Response chuẩn RESTful + thông tin cho Figma
     res.status(200).json({
       success: true,
       message: "Lấy gợi ý chuyến bay thành công",
-      data: recommendations
+      data: recommendations,                  // mảng các object đã format, sẵn sàng render card
+      meta: {
+        total: recommendations.length,
+        isGeneralMode: !fromAirport || !toAirport,
+      },
     });
 
   } catch (err) {
     // Log lỗi chi tiết để debug
-    console.error("[Flight Recommendation] Error:", err);
-    
-    // Trả về lỗi server
+    console.error("[Flight Recommendation Controller] Error:", err);
+
+    // Trả về lỗi server thân thiện với frontend
     res.status(500).json({
       success: false,
-      message: "Lỗi server khi lấy gợi ý chuyến bay"
+      message: "Lỗi server khi lấy gợi ý chuyến bay. Vui lòng thử lại sau.",
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined,
     });
   }
 };
