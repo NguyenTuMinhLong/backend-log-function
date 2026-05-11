@@ -93,29 +93,28 @@ const getSeatMap = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/bookings/recommendations
+ * 
+ * Controller chính xử lý request gợi ý chuyến bay từ Frontend.
+ * Hỗ trợ 2 chế độ:
+ *   - Có from & to     → Gợi ý theo tuyến bay cụ thể
+ *   - Không có from/to → General mode (chuyến bay hot nhất toàn hệ thống)
+ */
 const getFlightRecommendations = async (req, res) => {
   try {
-    // Lấy các tham số từ query string của URL
+    // Lấy tham số từ query string (?from=SGN&to=BKK&limit=10)
     const { from, to, limit = 10 } = req.query;
 
-    // Validation: Kiểm tra xem người dùng có truyền from và to chưa
-    if (!from || !to) {
-      return res.status(400).json({
-        success: false,
-        message: "Thiếu tham số 'from' hoặc 'to' (mã sân bay)"
-      });
-    }
-
-    // Gọi service để xử lý logic recommendation
-    // req.user?.id sẽ là undefined nếu là Guest, hoặc là id thật nếu đã login
+    // Gọi service để xử lý logic (đã được tối ưu hybrid + general mode)
     const recommendations = await flightService.recommendFlights({
-      userId: req.user?.id || null,           // Lấy userId từ middleware authenticate
-      fromAirport: from.toUpperCase().trim(), // Chuẩn hóa mã sân bay thành chữ hoa
-      toAirport: to.toUpperCase().trim(),
-      limit: parseInt(limit) || 10            // Giới hạn số lượng chuyến bay trả về
+      userId: req.user?.id || null,                    // Lấy userId từ middleware (null = Guest)
+      fromAirport: from ? from.toUpperCase().trim() : null,   // null = general mode
+      toAirport:   to   ? to.toUpperCase().trim()   : null,
+      limit: parseInt(limit) || 10                     // Mặc định lấy tối đa 10 chuyến
     });
 
-    // Trả về response thành công
+    // Trả về response chuẩn cho Frontend
     res.status(200).json({
       success: true,
       message: "Lấy gợi ý chuyến bay thành công",
@@ -123,8 +122,10 @@ const getFlightRecommendations = async (req, res) => {
     });
 
   } catch (err) {
-    // Bắt lỗi bất kỳ và trả về 500
+    // Log lỗi chi tiết để debug
     console.error("[Flight Recommendation] Error:", err);
+    
+    // Trả về lỗi server
     res.status(500).json({
       success: false,
       message: "Lỗi server khi lấy gợi ý chuyến bay"
