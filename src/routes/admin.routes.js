@@ -48,6 +48,13 @@ router.put("/coupons/:id", adminCouponController.updateCoupon);
 router.patch("/coupons/:id/status", adminCouponController.updateCouponStatus);
 router.delete("/coupons/:id", adminCouponController.deleteCoupon);
 
+// AD-03: Recurring Flight Schedules + AD-04: Manual Generate
+router.get("/schedules",                       adminFlightController.getSchedules);
+router.post("/schedules",                      adminFlightController.createSchedule);
+router.patch("/schedules/:id/status",          adminFlightController.updateScheduleStatus);
+router.delete("/schedules/:id",                adminFlightController.deleteSchedule);
+router.post("/schedules/generate",             adminFlightController.triggerGenerateFlights);
+
 // A-06: Manage Bookings
 router.get("/bookings", adminFlightController.getBookings);
 router.get("/bookings/:id", adminFlightController.getBookingDetailAdmin);
