@@ -38,9 +38,9 @@ const getFlightById = async (req, res) => {
   try {
     const { adults, children, infants } = req.query;
     const flight = await flightService.getFlightById(req.params.id, {
-      adults:   adults   || 1,
+      adults: adults || 1,
       children: children || 0,
-      infants:  infants  || 0,
+      infants: infants || 0,
     });
     res.json({ message: "Lấy thông tin chuyến bay thành công", data: flight });
   } catch (err) {
@@ -95,8 +95,10 @@ const getSeatMap = async (req, res) => {
 
 const getFlightRecommendations = async (req, res) => {
   try {
+    // Lấy các tham số từ query string của URL
     const { from, to, limit = 10 } = req.query;
 
+    // Validation: Kiểm tra xem người dùng có truyền from và to chưa
     if (!from || !to) {
       return res.status(400).json({
         success: false,
@@ -104,13 +106,16 @@ const getFlightRecommendations = async (req, res) => {
       });
     }
 
+    // Gọi service để xử lý logic recommendation
+    // req.user?.id sẽ là undefined nếu là Guest, hoặc là id thật nếu đã login
     const recommendations = await flightService.recommendFlights({
-      userId: req.user?.id || null,
-      fromAirport: from.toUpperCase().trim(),
+      userId: req.user?.id || null,           // Lấy userId từ middleware authenticate
+      fromAirport: from.toUpperCase().trim(), // Chuẩn hóa mã sân bay thành chữ hoa
       toAirport: to.toUpperCase().trim(),
-      limit: parseInt(limit) || 10
+      limit: parseInt(limit) || 10            // Giới hạn số lượng chuyến bay trả về
     });
 
+    // Trả về response thành công
     res.status(200).json({
       success: true,
       message: "Lấy gợi ý chuyến bay thành công",
@@ -118,7 +123,8 @@ const getFlightRecommendations = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ [Flight Recommendation] Error:", err);
+    // Bắt lỗi bất kỳ và trả về 500
+    console.error("[Flight Recommendation] Error:", err);
     res.status(500).json({
       success: false,
       message: "Lỗi server khi lấy gợi ý chuyến bay"
@@ -126,9 +132,5 @@ const getFlightRecommendations = async (req, res) => {
   }
 };
 
-module.exports = { 
-  // các hàm khác giữ nguyên...
-  getFlightRecommendations 
-};
 
 module.exports = { searchFlights, getAirports, getAirlines, getFlightById, getAlternativeFlights, getPriceCalendar, getSeatMap, getFlightRecommendations };
