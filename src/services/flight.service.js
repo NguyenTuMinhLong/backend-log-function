@@ -702,8 +702,11 @@ const getFlightPosition = async (flightId) => {
   const f = result.rows[0];
 
   // 2. Tính thời gian
+  // departure_time lưu dạng "HH:MM:SSZ" nhưng thực tế là giờ Vietnam (UTC+7)
+  // → trừ 7h để so sánh đúng với Date.now() (UTC thực)
+  const TZ_OFFSET  = 7 * 60 * 60 * 1000;
   const now        = Date.now();
-  const depTime    = new Date(f.departure_time).getTime();
+  const depTime    = new Date(f.departure_time).getTime() - TZ_OFFSET;
   const durationMs = f.duration_minutes * 60 * 1000;
   const arrTime    = depTime + durationMs;
 
@@ -752,7 +755,7 @@ const getFlightPosition = async (flightId) => {
       city: f.arr_city,
       lat:  parseFloat(f.arr_lat),
       lng:  parseFloat(f.arr_lng),
-      time: new Date(arrTime).toISOString(),
+      time: new Date(arrTime + TZ_OFFSET).toISOString(),
     },
   };
 };

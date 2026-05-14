@@ -122,7 +122,7 @@ const run = async () => {
   process.exit(0);
 };
 
-run().catch((err) => {
+run().catch((err) => { //hàm chạy
   console.error("Lỗi:", err.message);
   process.exit(1);
 });
