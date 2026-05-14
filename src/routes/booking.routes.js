@@ -1,11 +1,6 @@
 const express = require("express");
 const router = express.Router();
-
-// Controllers
 const bookingController = require("../controllers/booking.controller");
-const flightController = require("../controllers/flight.controller");
-
-// Middlewares
 const { authenticate, authenticateOptional } = require("../middlewares/auth.middleware");
 
 // ==================== STATIC ROUTES ====================
@@ -13,18 +8,18 @@ const { authenticate, authenticateOptional } = require("../middlewares/auth.midd
 // Lịch sử booking của tôi: phải đăng nhập
 router.get("/my", authenticate, bookingController.getMyBookings);
 
-// Flight Recommendation - Guest và User đều dùng được
-router.get("/recommendations", authenticateOptional, flightController.getFlightRecommendations);
+// Flight Recommendation (mới)
+router.get("/recommendations", flightController.getFlightRecommendations);
 
-// Tạo booking: guest hoặc user login đều được
+// Tạo booking
 router.post("/", authenticateOptional, bookingController.createBooking);
 
-// ==================== DYNAMIC ROUTES ====================
+// ==================== DYNAMIC ROUTES (phải để sau) ====================
 
-// Xem chi tiết booking theo mã
+// Xem chi tiết booking (dynamic)
 router.get("/:bookingCode", authenticateOptional, bookingController.getBookingDetail);
 
-// Hủy booking: chỉ user login mới được
+// Hủy booking (dynamic)
 router.post("/:bookingCode/cancel", authenticate, bookingController.cancelBooking);
 
 module.exports = router;

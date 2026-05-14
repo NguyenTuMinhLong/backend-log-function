@@ -3,6 +3,7 @@ const QA   = require("../../queries/airline.queries");
 const QAP  = require("../../queries/airport.queries");
 const QF   = require("../../queries/flight.queries");
 const QB   = require("../../queries/booking.queries");
+const QS   = require("../../queries/schedule.queries");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -498,6 +499,243 @@ const getStatistics = async (params) => {
   };
 };
 
+// ══════════════════════════════════════════════════════
+// AD-03: Recurring Flight Schedules
+// ══════════════════════════════════════════════════════
+
+/**
+ * Tạo lịch bay định kỳ mới
+ */
+const createSchedule = async (data) => {
+  const {
+    flight_number, airline_id,
+    departure_airport_id, arrival_airport_id,
+    departure_time, arrival_time, duration_minutes,
+    days_of_week, start_date, end_date,
+    seats = [],
+  } = data;
+
+  if (!flight_number)        throw new Error("flight_number là bắt buộc");
+  if (!airline_id)           throw new Error("airline_id là bắt buộc");
+  if (!departure_airport_id) throw new Error("departure_airport_id là bắt buộc");
+  if (!arrival_airport_id)   throw new Error("arrival_airport_id là bắt buộc");
+  if (!departure_time)       throw new Error("departure_time là bắt buộc (HH:MM)");
+  if (!arrival_time)         throw new Error("arrival_time là bắt buộc (HH:MM)");
+  if (!duration_minutes)     throw new Error("duration_minutes là bắt buộc");
+  if (!days_of_week || !Array.isArray(days_of_week) || days_of_week.length === 0) {
+    throw new Error("days_of_week là bắt buộc (mảng số 0–6, 0=CN...6=T7)");
+  }
+  if (!start_date)           throw new Error("start_date là bắt buộc");
+  if (seats.length === 0)    throw new Error("seats là bắt buộc");
+
+  if (parseInt(departure_airport_id) === parseInt(arrival_airport_id)) {
+    throw new Error("Điểm đi và điểm đến không được trùng nhau");
+  }
+
+  validateSeats(seats);
+
+  const airlineCheck = await pool.query(QA.FIND_ACTIVE_AIRLINE_BY_ID, [airline_id]);
+  if (airlineCheck.rows.length === 0) throw new Error("Hãng hàng không không tồn tại hoặc đã bị vô hiệu");
+
+  const depCheck = await pool.query(QAP.FIND_ACTIVE_AIRPORT_BY_ID, [departure_airport_id]);
+  if (depCheck.rows.length === 0) throw new Error("Sân bay đi không tồn tại");
+
+  const arrCheck = await pool.query(QAP.FIND_ACTIVE_AIRPORT_BY_ID, [arrival_airport_id]);
+  if (arrCheck.rows.length === 0) throw new Error("Sân bay đến không tồn tại");
+
+  const result = await pool.query(QS.INSERT_SCHEDULE, [
+    flight_number, airline_id,
+    departure_airport_id, arrival_airport_id,
+    departure_time, arrival_time, parseInt(duration_minutes),
+    days_of_week, start_date, end_date || null,
+    JSON.stringify(seats),
+  ]);
+
+  return result.rows[0];
+};
+
+/**
+ * Danh sách lịch bay định kỳ (có filter + phân trang)
+ */
+const getSchedules = async (params) => {
+  const {
+    page = 1, limit = 10,
+    airline_code, departure_code, arrival_code,
+    is_active, flight_number,
+  } = params;
+
+  const offset     = (parseInt(page) - 1) * parseInt(limit);
+  const conditions = [];
+  const values     = [];
+  let   idx        = 1;
+
+  if (flight_number)       { conditions.push(`fs.flight_number ILIKE $${idx++}`); values.push(`%${flight_number}%`); }
+  if (airline_code)        { conditions.push(`al.code = $${idx++}`);              values.push(airline_code.toUpperCase()); }
+  if (departure_code)      { conditions.push(`dep.code = $${idx++}`);             values.push(departure_code.toUpperCase()); }
+  if (arrival_code)        { conditions.push(`arr.code = $${idx++}`);             values.push(arrival_code.toUpperCase()); }
+  if (is_active !== undefined) {
+    conditions.push(`fs.is_active = $${idx++}`);
+    values.push(is_active === "true" || is_active === true);
+  }
+
+  const dk = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const countRes = await pool.query(QS.COUNT_SCHEDULES(dk), values);
+  const total    = parseInt(countRes.rows[0].count);
+
+  const dataRes  = await pool.query(
+    QS.SELECT_SCHEDULES(dk, idx, idx + 1),
+    [...values, parseInt(limit), offset]
+  );
+
+  return {
+    data:       dataRes.rows,
+    pagination: {
+      total,
+      page:        parseInt(page),
+      limit:       parseInt(limit),
+      total_pages: Math.ceil(total / parseInt(limit)),
+    },
+  };
+};
+
+/**
+ * Bật/tắt lịch bay định kỳ
+ */
+const updateScheduleStatus = async (scheduleId, isActive) => {
+  const result = await pool.query(QS.UPDATE_SCHEDULE_STATUS, [isActive, scheduleId]);
+  if (result.rows.length === 0) throw new Error("Không tìm thấy lịch bay");
+
+  const r = result.rows[0];
+  return {
+    message:       isActive ? "Đã kích hoạt lịch bay" : "Đã tạm dừng lịch bay",
+    schedule_id:   r.id,
+    flight_number: r.flight_number,
+    is_active:     r.is_active,
+  };
+};
+
+/**
+ * Xóa lịch bay định kỳ
+ */
+const deleteSchedule = async (scheduleId) => {
+  const existing = await pool.query(QS.FIND_SCHEDULE_BY_ID, [scheduleId]);
+  if (existing.rows.length === 0) throw new Error("Không tìm thấy lịch bay");
+
+  await pool.query(QS.DELETE_SCHEDULE, [scheduleId]);
+  return { message: "Đã xóa lịch bay", schedule_id: parseInt(scheduleId) };
+};
+
+// ══════════════════════════════════════════════════════
+// AD-04: Auto Generate Flights (Cron Job)
+// ══════════════════════════════════════════════════════
+
+const DEFAULT_BAGGAGE = {
+  economy:  { baggage_included_kg: 23, carry_on_kg: 7,  extra_baggage_price: 250000 },
+  business: { baggage_included_kg: 32, carry_on_kg: 10, extra_baggage_price: 150000 },
+  first:    { baggage_included_kg: 40, carry_on_kg: 14, extra_baggage_price: 0      },
+};
+
+/**
+ * Tự động sinh chuyến bay từ các lịch bay đang active
+ * Sinh cho 30 ngày kể từ hôm nay
+ */
+const autoGenerateFlights = async () => {
+  const schedulesRes = await pool.query(QS.SELECT_ACTIVE_SCHEDULES);
+  const schedules    = schedulesRes.rows;
+
+  if (schedules.length === 0) return { generated: 0, skipped: 0, errors: 0 };
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  let generated = 0;
+  let skipped   = 0;
+  let errors    = 0;
+
+  const client = await pool.connect();
+  try {
+    for (const sched of schedules) {
+      const seats      = Array.isArray(sched.seats) ? sched.seats : [];
+      const daysOfWeek = Array.isArray(sched.days_of_week) ? sched.days_of_week : [];
+      const startDate  = new Date(sched.start_date);
+      const endDate    = sched.end_date ? new Date(sched.end_date) : null;
+
+      for (let i = 0; i < 30; i++) {
+        const date = new Date(today);
+        date.setDate(today.getDate() + i);
+
+        // Kiểm tra ngày nằm trong khoảng lịch bay
+        if (date < startDate) continue;
+        if (endDate && date > endDate) continue;
+
+        // Kiểm tra đúng thứ trong tuần
+        if (!daysOfWeek.includes(date.getDay())) continue;
+
+        const dateStr = date.toISOString().split("T")[0];
+
+        // Kiểm tra chuyến bay đã tồn tại chưa
+        const existCheck = await client.query(QS.CHECK_FLIGHT_EXISTS, [
+          sched.flight_number, dateStr, sched.airline_id,
+        ]);
+        if (existCheck.rows.length > 0) { skipped++; continue; }
+
+        // Xây dựng timestamp cho giờ khởi hành và đến nơi
+        const depTimestamp = `${dateStr} ${sched.departure_time}`;
+
+        // Xử lý trường hợp bay qua nửa đêm
+        let arrDateStr = dateStr;
+        if (sched.arrival_time < sched.departure_time) {
+          const nextDay = new Date(date);
+          nextDay.setDate(date.getDate() + 1);
+          arrDateStr = nextDay.toISOString().split("T")[0];
+        }
+        const arrTimestamp = `${arrDateStr} ${sched.arrival_time}`;
+
+        try {
+          await client.query("BEGIN");
+
+          const flightRes = await client.query(QF.INSERT_FLIGHT, [
+            sched.flight_number, sched.airline_id,
+            sched.departure_airport_id, sched.arrival_airport_id,
+            depTimestamp, arrTimestamp,
+            sched.duration_minutes,
+          ]);
+          const flight = flightRes.rows[0];
+
+          for (const s of seats) {
+            const def        = DEFAULT_BAGGAGE[s.class] || DEFAULT_BAGGAGE.economy;
+            const totalSeats = parseInt(s.total_seats);
+            await client.query(QF.INSERT_FLIGHT_SEAT, [
+              flight.id, s.class,
+              totalSeats, totalSeats,
+              parseFloat(s.base_price),
+              s.baggage_included_kg  !== undefined ? parseInt(s.baggage_included_kg)   : def.baggage_included_kg,
+              s.carry_on_kg          !== undefined ? parseInt(s.carry_on_kg)           : def.carry_on_kg,
+              s.extra_baggage_price  !== undefined ? parseFloat(s.extra_baggage_price) : def.extra_baggage_price,
+            ]);
+          }
+
+          await client.query("COMMIT");
+          generated++;
+        } catch (err) {
+          await client.query("ROLLBACK");
+          console.error(
+            `[AutoGenerate] Lỗi tạo chuyến ${sched.flight_number} ngày ${dateStr}:`,
+            err.message
+          );
+          errors++;
+        }
+      }
+    }
+  } finally {
+    client.release();
+  }
+
+  console.log(`[AutoGenerate] Hoàn thành: ${generated} tạo mới, ${skipped} đã tồn tại, ${errors} lỗi`);
+  return { generated, skipped, errors };
+};
+
 module.exports = {
   // A-01
   getFlights, createFlight, updateFlight, updateFlightStatus, toggleFlightVisibility,
@@ -509,4 +747,8 @@ module.exports = {
   getBookings, getBookingDetailAdmin, updateBookingStatus,
   // A-07
   getStatistics,
+  // AD-03
+  createSchedule, getSchedules, updateScheduleStatus, deleteSchedule,
+  // AD-04
+  autoGenerateFlights,
 };

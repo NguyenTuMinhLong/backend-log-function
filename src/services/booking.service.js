@@ -263,8 +263,68 @@ const createBooking = async (data, userId = null) => {
 
 // Các hàm còn lại giữ nguyên (getBookingDetail, getMyBookings, cancelBooking, expireHeldBookings)
 const getBookingDetail = async (bookingCode, userId = null) => {
-  // ... (giữ nguyên toàn bộ code của bạn)
+  const result = await pool.query(QB.SELECT_BOOKING_DETAIL, [bookingCode]);
+  if (result.rows.length === 0) throw new Error("Không tìm thấy booking");
+
+  const b = result.rows[0];
+  if (userId && b.user_id && b.user_id !== userId) throw new Error("Bạn không có quyền xem booking này");
+
+  const passResult = await pool.query(QB.SELECT_PASSENGERS_BY_BOOKING, [b.id]);
+
+  let paymentInfo = null;
+  try {
+    const payResult = await pool.query(QB.SELECT_BOOKING_PAYMENT_INFO, [b.id]);
+    if (payResult.rows.length > 0) paymentInfo = payResult.rows[0];
+  } catch (_) {}
+
+  const totalPrice  = parseFloat(b.total_price);
+  const finalAmount = paymentInfo ? parseFloat(paymentInfo.final_amount || totalPrice) : totalPrice;
+  const discountAmt = paymentInfo ? parseFloat(paymentInfo.discount_amount || 0) : 0;
+
+  return {
+    booking_code: b.booking_code,
+    booking_id:   b.id,
+    status:       b.status,
+    trip_type:    b.trip_type,
+    held_until:   b.held_until,
+    created_at:   b.created_at,
+    contact: { name: b.contact_name, email: b.contact_email, phone: b.contact_phone },
+    outbound_flight: {
+      flight_id:        b.outbound_flight_id,
+      flight_number:    b.outbound_flight_number,
+      seat_class:       b.outbound_seat_class,
+      airline:   { code: b.outbound_airline_code, name: b.outbound_airline_name },
+      departure: { code: b.outbound_dep_code, city: b.outbound_dep_city, time: b.outbound_departure_time },
+      arrival:   { code: b.outbound_arr_code, city: b.outbound_arr_city, time: b.outbound_arrival_time },
+      duration_minutes: b.outbound_duration,
+    },
+    return_flight: b.return_flight_id
+      ? {
+          flight_id:        b.return_flight_id,
+          flight_number:    b.return_flight_number,
+          seat_class:       b.return_seat_class,
+          airline:   { code: b.return_airline_code, name: b.return_airline_name },
+          departure: { code: b.return_dep_code, city: b.return_dep_city, time: b.return_departure_time },
+          arrival:   { code: b.return_arr_code, city: b.return_arr_city, time: b.return_arrival_time },
+          duration_minutes: b.return_duration,
+        }
+      : null,
+    passengers: {
+      adults:   b.total_adults,
+      children: b.total_children,
+      infants:  b.total_infants,
+      list:     passResult.rows,
+    },
+    price: {
+      base_price:      parseFloat(b.base_price),
+      total_price:     totalPrice,
+      final_amount:    finalAmount,
+      discount_amount: discountAmt,
+    },
+  };
 };
+
+// ─── getMyBookings ────────────────────────────────────────────────────────────
 
 const getMyBookings = async (userId, filter = "all", from_date, to_date) => {
   // ... (giữ nguyên)

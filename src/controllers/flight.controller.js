@@ -24,7 +24,10 @@ const getAirports = async (req, res) => {
 const getAirlines = async (req, res) => {
   try {
     const airlines = await flightService.getAirlines();
-    res.json({ message: "Lấy danh sách hãng hàng không thành công", data: airlines });
+    res.json({
+      message: "Lấy danh sách hãng hàng không thành công",
+      data: airlines,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -54,11 +57,21 @@ const getFlightById = async (req, res) => {
  */
 const getAlternativeFlights = async (req, res) => {
   try {
-    const { flight_id, seat_class = "economy", adults = 1, children = 0, infants = 0 } = req.query;
-    if (!flight_id) return res.status(400).json({ error: "flight_id là bắt buộc" });
+    const {
+      flight_id,
+      seat_class = "economy",
+      adults = 1,
+      children = 0,
+      infants = 0,
+    } = req.query;
+    if (!flight_id)
+      return res.status(400).json({ error: "flight_id là bắt buộc" });
 
     const result = await flightService.getAlternativeFlights(flight_id, {
-      seat_class, adults, children, infants,
+      seat_class,
+      adults,
+      children,
+      infants,
     });
     res.json({ message: "Lấy chuyến bay thay thế thành công", data: result });
   } catch (err) {
@@ -86,7 +99,9 @@ const getPriceCalendar = async (req, res) => {
 const getSeatMap = async (req, res) => {
   try {
     const { seat_class } = req.query;
-    const result = await flightService.getSeatMap(req.params.id, { seat_class });
+    const result = await flightService.getSeatMap(req.params.id, {
+      seat_class,
+    });
     res.json({ message: "Lấy sơ đồ ghế thành công", data: result });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -105,34 +120,24 @@ const getFlightRecommendations = async (req, res) => {
     // Lấy tham số từ query string (?from=SGN&to=HAN&limit=10)
     const { from, to, limit = 10 } = req.query;
 
-    // Chuẩn hóa mã sân bay thành chữ hoa và loại bỏ khoảng trắng
-    const fromAirport = from ? from.toUpperCase().trim() : null;
-    const toAirport   = to   ? to.toUpperCase().trim()   : null;
+    // Validation
+    if (!from || !to) {
+      return res.status(400).json({ 
+        error: "Thiếu tham số 'from' hoặc 'to' (mã sân bay)" 
+      });
+    }
 
-    // Parse limit và đảm bảo là số hợp lệ
-    const parsedLimit = parseInt(limit) || 10;
-
-    console.log(`[Controller] Nhận request recommend - from=${fromAirport}, to=${toAirport}, limit=${parsedLimit}`);
-
-    // Gọi service (đã được tối ưu hybrid recommendation)
     const recommendations = await flightService.recommendFlights({
-      userId: req.user?.id || null,           // null = Guest (không login)
-      fromAirport,
-      toAirport,
-      limit: parsedLimit,
+      userId: user_id || null,
+      fromAirport: from.toUpperCase(),
+      toAirport: to.toUpperCase(),
+      limit: parseInt(limit) || 10
     });
 
-    // Response chuẩn RESTful + thông tin cho Figma
-    res.status(200).json({
-      success: true,
-      message: "Lấy gợi ý chuyến bay thành công",
-      data: recommendations,                  // mảng các object đã format, sẵn sàng render card
-      meta: {
-        total: recommendations.length,
-        isGeneralMode: !fromAirport || !toAirport,
-      },
+    res.json({ 
+      message: "Lấy gợi ý chuyến bay thành công", 
+      data: recommendations 
     });
-
   } catch (err) {
     // Log lỗi chi tiết để debug
     console.error("[Flight Recommendation Controller] Error:", err);
@@ -147,4 +152,38 @@ const getFlightRecommendations = async (req, res) => {
 };
 
 
-module.exports = { searchFlights, getAirports, getAirlines, getFlightById, getAlternativeFlights, getPriceCalendar, getSeatMap, getFlightRecommendations };
+/**
+ * GET /api/flights/:id/position
+ * Trả về vị trí hiện tại của máy bay theo flight ID
+ */
+const getFlightPosition = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Kiểm tra id có phải số không
+    if (!id || isNaN(Number(id))) {
+      return res.status(400).json({ error: "Flight ID không hợp lệ" });
+    }
+
+    const data = await flightService.getFlightPosition(Number(id));
+    return res.json({ data });
+  } catch (err) {
+    if (err.message === "Không tìm thấy chuyến bay") {
+      return res.status(404).json({ error: err.message });
+    }
+    console.error("[getFlightPosition]", err.message);
+    return res.status(500).json({ error: "Lỗi server" });
+  }
+};
+
+module.exports = {
+  searchFlights,
+  getAirports,
+  getAirlines,
+  getFlightById,
+  getAlternativeFlights,
+  getPriceCalendar,
+  getSeatMap,
+  getFlightRecommendations,
+  getFlightPosition,
+};

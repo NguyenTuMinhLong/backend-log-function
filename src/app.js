@@ -12,12 +12,12 @@ const wishlistRoutes = require("./routes/wishlist.routes");
 const loyaltyRoutes = require('./routes/loyalty.routes');
 
 const { expireHeldBookings }   = require("./services/booking.service");
+const { autoGenerateFlights }  = require("./services/admin/flight.service");
 
 const app = express();
 
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
-
 
 app.use("/api/auth",     authRoutes);
 app.use("/api",          publicRoutes);
@@ -40,7 +40,7 @@ setInterval(async () => {
   }
 
   isExpiringHeldBookings = true;
-
+  
   try {
     await expireHeldBookings();
   } catch (err) {
@@ -49,5 +49,21 @@ setInterval(async () => {
     isExpiringHeldBookings = false;
   }
 }, 60 * 1000);
+
+// AD-04: Mỗi 24 giờ tự động sinh chuyến bay từ lịch bay định kỳ (flight_schedules)
+let isGeneratingFlights = false;
+
+setInterval(async () => {
+  if (isGeneratingFlights) return;
+
+  isGeneratingFlights = true;
+  try {
+    await autoGenerateFlights();
+  } catch (err) {
+    console.error("[AutoGenerate] Unhandled error:", err.message);
+  } finally {
+    isGeneratingFlights = false;
+  }
+}, 24 * 60 * 60 * 1000); // mỗi 24 giờ
 
 module.exports = app;
