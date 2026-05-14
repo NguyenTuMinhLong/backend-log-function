@@ -28,6 +28,7 @@ app.use("/api/admin",    adminRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/wishlist", wishlistRoutes);
 app.use('/api/membership', loyaltyRoutes);
+app.use('/api/loyalty', loyaltyRoutes);
 
 // Mỗi 1 phút sẽ chạy 1 lần để kiểm tra toàn bộ danh sách booking nhằm tự động hủy booking đã hết hạn giữ ghế
 // 5. Thời gian giữ ghế (30 phút) nằm bên service dòng 192
