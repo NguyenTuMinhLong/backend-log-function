@@ -673,27 +673,7 @@ const getSeatMap = async (flightId, params = {}) => {
  */
 const getFlightPosition = async (flightId) => {
   // 1. Lấy thông tin chuyến bay + tọa độ 2 sân bay
-  const result = await pool.query(
-    `SELECT
-       f.id,
-       f.flight_number,
-       f.departure_time,
-       f.duration_minutes,
-       f.status,
-       dep.code AS dep_code,
-       dep.city AS dep_city,
-       dep.lat  AS dep_lat,
-       dep.lng  AS dep_lng,
-       arr.code AS arr_code,
-       arr.city AS arr_city,
-       arr.lat  AS arr_lat,
-       arr.lng  AS arr_lng
-     FROM flights f
-     JOIN airports dep ON dep.id = f.departure_airport_id
-     JOIN airports arr ON arr.id = f.arrival_airport_id
-     WHERE f.id = $1`,
-    [flightId]
-  );
+  const result = await pool.query(QF.SELECT_FLIGHT_POSITION, [flightId]);
 
   if (!result.rows.length) {
     throw new Error("Không tìm thấy chuyến bay");
