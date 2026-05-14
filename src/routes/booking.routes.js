@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const bookingController = require("../controllers/booking.controller");
+const flightController = require("../controllers/flight.controller");
 const { authenticate, authenticateOptional } = require("../middlewares/auth.middleware");
 
 // ==================== STATIC ROUTES ====================
