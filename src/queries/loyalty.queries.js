@@ -47,6 +47,18 @@ const CALCULATE_NEXT_TIER = `
   ORDER BY min_points ASC 
   LIMIT 1`;
 
+// ====================== REDEEM VOUCHER ======================
+const GET_AVAILABLE_REWARDS = `
+  SELECT * FROM loyalty_rewards 
+  WHERE is_active = true 
+  ORDER BY points_required ASC
+`;
+
+const GET_REWARD_BY_ID = `
+  SELECT * FROM loyalty_rewards 
+  WHERE id = $1 AND is_active = true
+`;
+
 module.exports = {
   GET_USER_LOYALTY,
   CREATE_USER_LOYALTY,
@@ -54,5 +66,7 @@ module.exports = {
   UPDATE_POINTS,
   INSERT_TRANSACTION,
   GET_LOYALTY_HISTORY,
-  CALCULATE_NEXT_TIER
+  CALCULATE_NEXT_TIER,
+  GET_AVAILABLE_REWARDS,
+  GET_REWARD_BY_ID,
 };

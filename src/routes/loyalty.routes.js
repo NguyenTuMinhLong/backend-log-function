@@ -1,13 +1,19 @@
 const express = require('express');
 const router = express.Router();
 
-const { getMyMembership } = require('../controllers/loyalty.controller');
+const loyaltyController = require('../controllers/loyalty.controller');
 const loyaltyService = require('../services/loyalty.service');
 
 // Route chính: xem membership
-router.get('/me', getMyMembership);
+router.get('/me', loyaltyController.getMyMembership);
 
-// ====================== ROUTE TEST TÍCH ĐIỂM (đã fix) ======================
+// Xem danh sách voucher có thể đổi
+router.get('/rewards', loyaltyController.getAvailableRewards);
+
+// Đổi điểm lấy voucher
+router.post('/redeem', loyaltyController.redeemReward);
+
+// ====================== ROUTE TEST TÍCH ĐIỂM ======================
 router.get('/test-earn', async (req, res) => {
   try {
     const userId = req.query.userId;
@@ -22,7 +28,6 @@ router.get('/test-earn', async (req, res) => {
 
     console.log(`[TEST] Bắt đầu test tích điểm cho userId = ${userId}, giá = ${totalPrice}`);
 
-    // bookingId = null vì đây chỉ là test
     const result = await loyaltyService.earnPointsAfterBooking(userId, null, totalPrice);
 
     res.json({
@@ -38,6 +43,5 @@ router.get('/test-earn', async (req, res) => {
     });
   }
 });
-// ============================================================================
 
 module.exports = router;

@@ -120,6 +120,9 @@ const getFlightRecommendations = async (req, res) => {
     // Lấy tham số từ query string (?from=SGN&to=HAN&limit=10)
     const { from, to, limit = 10 } = req.query;
 
+    // === LẤY USER ID (hỗ trợ cả đăng nhập JWT lẫn test qua query) ===
+    const userId = req.user?.id || req.query.userId || null;
+
     // Validation
     if (!from || !to) {
       return res.status(400).json({ 
@@ -128,7 +131,7 @@ const getFlightRecommendations = async (req, res) => {
     }
 
     const recommendations = await flightService.recommendFlights({
-      userId: user_id || null,
+      userId: userId,                    // ← ĐÃ SỬA Ở ĐÂY
       fromAirport: from.toUpperCase(),
       toAirport: to.toUpperCase(),
       limit: parseInt(limit) || 10

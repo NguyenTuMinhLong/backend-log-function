@@ -114,3 +114,68 @@ const upgradeTierIfEligible = async (userId) => {
     console.log(`[Loyalty] 🎉 User ${userId} đã được nâng tier: ${current_tier} → ${newTier.name}`);
   }
 };
+
+/**
+ * LẤY DANH SÁCH VOUCHER CÓ THỂ ĐỔI
+ */
+exports.getAvailableRewards = async () => {
+  const result = await db.query(queries.GET_AVAILABLE_REWARDS);
+  return result.rows;
+};
+
+/**
+ * REDEEM VOUCHER + SINH MÃ VOUCHER (KHÔNG GIẢM HẠNG)
+ */
+exports.redeemReward = async (userId, rewardId) => {
+  // 1. Lấy thông tin membership hiện tại
+  const membership = await exports.getMembershipInfo(userId);
+  if (!membership) throw new Error('Không tìm thấy thông tin membership');
+
+  // 2. Lấy thông tin voucher
+  const rewardResult = await db.query(queries.GET_REWARD_BY_ID, [rewardId]);
+  if (rewardResult.rows.length === 0) {
+    throw new Error('Voucher không tồn tại hoặc đã hết hạn');
+  }
+  const reward = rewardResult.rows[0];
+
+  // 3. Kiểm tra đủ điểm không
+  if (membership.total_points < reward.points_required) {
+    throw new Error(`Không đủ điểm. Cần ${reward.points_required} điểm, hiện có ${membership.total_points} điểm`);
+  }
+
+  // ==================== SINH MÃ VOUCHER ====================
+  const voucherCode = `VOUCHER-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+
+  // 4. Trừ điểm (KHÔNG update tier_id)
+  await db.query(`
+    UPDATE user_loyalty 
+    SET total_points = total_points - $1, updated_at = NOW()
+    WHERE user_id = $2
+  `, [reward.points_required, userId]);
+
+  // 5. Ghi lịch sử
+  const transactionDesc = `Đổi ${reward.name} - Mã: ${voucherCode} (-${reward.points_required} điểm)`;
+  await db.query(queries.INSERT_TRANSACTION, [
+    userId,
+    null,
+    'redeem',
+    -reward.points_required,
+    transactionDesc
+  ]);
+
+  console.log(`[Loyalty] User ${userId} đã redeem ${reward.name} - Mã: ${voucherCode} (tier giữ nguyên)`);
+
+  return {
+    success: true,
+    reward: {
+      id: reward.id,
+      name: reward.name,
+      discountAmount: reward.discount_amount,
+      description: reward.description
+    },
+    voucherCode,
+    pointsRemaining: membership.total_points - reward.points_required,
+    currentTier: membership.tier_name,           // ← giữ nguyên tier
+    message: `Đổi thành công! Mã voucher của bạn là **${voucherCode}** (${reward.discount_amount.toLocaleString('vi-VN')} VNĐ). Hạng của bạn vẫn giữ nguyên.`
+  };
+};

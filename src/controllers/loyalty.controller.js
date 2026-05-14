@@ -1,8 +1,9 @@
 const { getMembershipInfo } = require('../services/loyalty.service');
+const loyaltyService = require('../services/loyalty.service');
 
+// ====================== MEMBERSHIP ======================
 const getMyMembership = async (req, res) => {
   try {
-    // === DÙNG CHO TEST - RẤT TIỆN ===
     const userId = req.query.userId || req.user?.id;
 
     if (!userId) {
@@ -29,4 +30,42 @@ const getMyMembership = async (req, res) => {
   }
 };
 
-module.exports = { getMyMembership };
+// ====================== REDEEM VOUCHER ======================
+// Lấy danh sách voucher có thể đổi
+const getAvailableRewards = async (req, res) => {
+  try {
+    const rewards = await loyaltyService.getAvailableRewards();
+    res.json({ success: true, rewards });
+  } catch (error) {
+    console.error('[Loyalty Controller] Error getAvailableRewards:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Đổi điểm lấy voucher
+const redeemReward = async (req, res) => {
+  try {
+    const { rewardId } = req.body;
+    const userId = req.user?.id || req.query.userId;
+
+    if (!rewardId) {
+      return res.status(400).json({ success: false, message: 'Thiếu rewardId' });
+    }
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'Thiếu userId' });
+    }
+
+    const result = await loyaltyService.redeemReward(parseInt(userId), parseInt(rewardId));
+    res.json(result);
+  } catch (error) {
+    console.error('[Loyalty Controller] Error redeemReward:', error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// Export tất cả
+module.exports = {
+  getMyMembership,
+  getAvailableRewards,
+  redeemReward
+};

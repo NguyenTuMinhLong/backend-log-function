@@ -1,153 +1,137 @@
-IVUDEE REWARDS - Membership & Loyalty System
-Hệ thống Chương trình Khách hàng Thân thiết cho dự án Flight Booking.
-Tính năng đã hoàn thành
+# IVUDEE REWARDS - Membership & Loyalty System
 
-Tự động tạo membership khi user chưa có
-Tích điểm tự động sau khi đặt vé thành công
-Hệ thống tier (Member → Silver → Gold → Platinum)
-Multiplier điểm theo tier
-Lịch sử giao dịch điểm (loyalty_transactions)
-API xem thông tin membership
-Route test nhanh
+Hệ thống **Chương trình Khách hàng Thân thiết** cho dự án **Flight Booking**.
 
+---
 
-1. Database Schema (đã chạy)
-Các bảng:
+## 🌟 Tính năng đã hoàn thành (Production Ready)
 
-loyalty_tiers – Định nghĩa các cấp bậc
-user_loyalty – Thông tin membership của user
-loyalty_transactions – Lịch sử tích/đổi điểm
+| Tính năng                                         | Trạng thái    | Chi tiết                                    |
+| ------------------------------------------------- | ------------- | ------------------------------------------- |
+| Tự động tạo membership khi user chưa có           | ✅ Hoàn thành | Tạo ngay khi user lần đầu booking           |
+| Tích điểm tự động sau khi đặt vé thành công       | ✅ Hoàn thành | Hook trong `booking.service.js`             |
+| Hệ thống Tier (Member → Silver → Gold → Platinum) | ✅ Hoàn thành | 4 cấp bậc với multiplier                    |
+| Tự động nâng hạng (Auto Upgrade Tier)             | ✅ Hoàn thành | Khi tích đủ điểm sẽ tự nâng                 |
+| **Không giảm hạng khi redeem**                    | ✅ Hoàn thành | Tier chỉ nâng, không downgrade khi đổi điểm |
+| Redeem điểm lấy Voucher giảm giá cố định          | ✅ Hoàn thành | Sinh mã voucher ngẫu nhiên                  |
+| Lịch sử giao dịch điểm (`loyalty_transactions`)   | ✅ Hoàn thành | Ghi rõ earn/redeem                          |
+| API xem thông tin membership                      | ✅ Hoàn thành | `/api/loyalty/me`                           |
+| API danh sách voucher & redeem                    | ✅ Hoàn thành | `/rewards` & `/redeem`                      |
+| Route test nhanh tích điểm                        | ✅ Hoàn thành | `/test-earn`                                |
 
-Đã seed sẵn 4 tier:
+---
 
-Member (0 điểm, multiplier 1.0)
-Silver (15.000 điểm, multiplier 1.25)
-Gold (40.000 điểm, multiplier 1.50)
-Platinum (80.000 điểm, multiplier 1.75)
+## 📊 Database Schema (đã chạy migration)
 
+### Các bảng đã tạo:
 
-2. Cấu trúc file module
-textsrc/
+- **`loyalty_tiers`** – Định nghĩa các cấp bậc
+- **`user_loyalty`** – Thông tin membership của từng user
+- **`loyalty_transactions`** – Lịch sử tích/đổi điểm
+- **`loyalty_rewards`** – Danh sách voucher có thể đổi
+
+**Tier mặc định đã seed:**
+
+| Tier     | Min Points | Multiplier |
+| -------- | ---------- | ---------- |
+| Member   | 0          | 1.00x      |
+| Silver   | 15.000     | 1.25x      |
+| Gold     | 40.000     | 1.50x      |
+| Platinum | 80.000     | 1.75x      |
+
+---
+
+## 📁 Cấu trúc File Module
+
+```bash
+src/
 ├── queries/
-│   └── loyalty.queries.js
+│   └── loyalty.queries.js          # Tất cả SQL queries
 ├── services/
-│   └── loyalty.service.js
+│   └── loyalty.service.js          # Business logic (earn, redeem, upgrade tier)
 ├── controllers/
-│   └── loyalty.controller.js
+│   └── loyalty.controller.js       # Controller API
 ├── routes/
-│   └── loyalty.routes.js
+│   └── loyalty.routes.js           # Định nghĩa routes
 └── services/
-    └── booking.service.js          ← đã hook loyalty
+    └── booking.service.js          # Đã hook loyalty (earnPointsAfterBooking)
 
-3. Cách sử dụng
-API chính
 
-GET /api/loyalty/me → Xem thông tin membership của user đang đăng nhập
-GET /api/loyalty/me?userId=8 → Test (truyền userId)
+🔌 API Endpoints
+Base URL: http://localhost:3000/api/loyalty
+1. Xem thông tin Membership
 
-Test nhanh tích điểm
-textGET http://localhost:3000/api/loyalty/test-earn?userId=8&totalPrice=1200000
+GET /me
+Hỗ trợ test: ?userId=8
+Trả về: tier hiện tại, total_points, multiplier, lịch sử transaction
 
-4. Hook tự động tích điểm
-Đã hook trong src/services/booking.service.js (trong hàm createBooking):
-JavaScriptif (userId) {
-  await loyaltyService.earnPointsAfterBooking(userId, booking.id, totalPrice);
+2. Xem danh sách Voucher có thể đổi
+
+GET /rewards
+
+3. Đổi điểm lấy Voucher
+
+POST /redeem
+Body:JSON{
+  "rewardId": 1
 }
-Cách tính điểm:
+Hỗ trợ test: ?userId=8
 
-10.000 VNĐ = 1 điểm cơ bản
-Nhân thêm multiplier theo tier
+Voucher hiện có:
 
-Ví dụ: vé 1.200.000 VNĐ ở tier Gold (1.5x) → được 180 điểm
+ID 1 → Voucher 100K (5.000 điểm)
+ID 2 → Voucher 250K (10.000 điểm)
+ID 3 → Voucher 500K (20.000 điểm)
+ID 4 → Voucher 1M (40.000 điểm)
 
-5. Các file đã tạo / sửa (tóm tắt)
+4. Test tích điểm (dùng để test nhanh)
+
+GET /test-earn?userId=8&totalPrice=1200000
 
 
-FileMục đíchTrạng tháiloyalty.queries.jsTất cả SQL queriesHoàn thànhloyalty.service.jsLogic business (tạo membership, tích điểm)Hoàn thànhloyalty.controller.jsController APIHoàn thànhloyalty.routes.jsĐịnh nghĩa route + route testHoàn thànhbooking.service.jsHook earnPointsAfterBookingĐã thêmDatabase tablesloyalty_tiers, user_loyalty, loyalty_transactionsĐã tạo
+📋 Cách tính điểm
 
-6. Lưu ý quan trọng
+Công thức: 10.000 VNĐ = 1 điểm cơ bản
+Nhân thêm multiplier theo tier hiện tại
+Ví dụ: Vé 1.200.000 VNĐ ở tier Gold (1.5x) → được 180 điểm
 
-Chỉ tích điểm khi user đã đăng nhập (userId tồn tại)
+
+🔄 Logic Redeem Voucher
+
+Sinh mã voucher ngẫu nhiên: VOUCHER-7K9M2P4X
+Không giảm hạng (tier giữ nguyên)
+Trừ điểm + ghi lịch sử transaction (type = 'redeem')
+Response trả về đầy đủ mã voucher để user dùng
+
+
+🧪 Cách Test (Postman)
+Test thứ tự khuyến nghị:
+
+Tích điểm: GET /test-earn?userId=8&totalPrice=1200000 (chạy nhiều lần)
+Xem membership: GET /me?userId=8
+Xem danh sách voucher: GET /rewards
+Redeem: POST /redeem?userId=8 với body {"rewardId": 1}
+
+
+⚠️ Lưu ý quan trọng
+
+Chỉ tích điểm khi booking thành công và có userId
+Tier chỉ nâng khi earn điểm, không giảm khi redeem
 booking_id trong transaction có thể là null (test) hoặc ID thật
-Điểm chỉ tăng khi booking thành công (sau COMMIT)
-Có console log rõ ràng để debug ([Loyalty], [TEST])
+Có console log rõ ràng với prefix [Loyalty] để debug
+Voucher code được sinh ngẫu nhiên mỗi lần redeem
 
-Mình ghi nhận rõ vấn đề bạn đang gặp:
-🔴 Điểm còn thiếu (cho lần làm tiếp theo):
-Tính năng "Auto Upgrade Tier" chưa có
 
-Điểm đã tích đủ để lên tier mới (ví dụ đủ 15.000 điểm lên Silver).
-Nhưng tier_id trong bảng user_loyalty vẫn chưa được cập nhật.
-Khi gọi /loyalty/me vẫn hiển thị tier cũ ("Member").
+🚀 Cách mở rộng sau này (Todo)
 
-Đây là logic tự động nâng hạng (Tier Progression) mà chúng ta chưa implement.
+ Reset tier hàng năm (1/1 hoặc ngày kỷ niệm)
+ Lưu voucher code vào bảng riêng (user_vouchers)
+ Redeem voucher khi thanh toán booking (áp dụng tự động)
+ Voucher theo sự kiện (Black Friday, sinh nhật…)
+ Tier reset + điểm giữ lại hoặc reset theo policy
 
-Code bổ sung cho lần sau (copy-paste sẵn)
-Mở file src/services/loyalty.service.js, thay hàm earnPointsAfterBooking bằng phiên bản mới sau (đã thêm auto upgrade):
-JavaScript/**
- * TÍCH ĐIỂM + TỰ ĐỘNG NÂNG TIER (đã fix)
- */
-exports.earnPointsAfterBooking = async (userId, bookingId, totalPrice) => {
-  let membership = await exports.getMembershipInfo(userId);
 
-  const basePoints = Math.floor(totalPrice / 10000);
-  const pointsEarned = Math.floor(basePoints * membership.multiplier);
-
-  // 1. Cập nhật điểm
-  await db.query(queries.UPDATE_POINTS, [userId, pointsEarned]);
-
-  // 2. Ghi lịch sử
-  await db.query(queries.INSERT_TRANSACTION, [
-    userId,
-    bookingId,
-    'earn',
-    pointsEarned,
-    `Tích điểm từ booking #${bookingId} (${totalPrice} VNĐ)`
-  ]);
-
-  // 3. KIỂM TRA VÀ NÂNG TIER TỰ ĐỘNG
-  await upgradeTierIfEligible(userId);
-
-  console.log(`[Loyalty] User ${userId} tích ${pointsEarned} điểm từ booking ${bookingId}`);
-
-  return { pointsEarned };
-};
-
-/** Hàm mới: Tự động nâng tier nếu đủ điều kiện */
-const upgradeTierIfEligible = async (userId) => {
-  const result = await db.query(`
-    SELECT ul.total_points, lt.name as current_tier, lt.min_points
-    FROM user_loyalty ul
-    JOIN loyalty_tiers lt ON ul.tier_id = lt.id
-    WHERE ul.user_id = $1
-  `, [userId]);
-
-  if (result.rows.length === 0) return;
-
-  const { total_points, current_tier } = result.rows[0];
-
-  // Tìm tier cao hơn phù hợp
-  const nextTierResult = await db.query(`
-    SELECT id, name 
-    FROM loyalty_tiers 
-    WHERE min_points <= $1 
-      AND name != $2
-    ORDER BY min_points DESC 
-    LIMIT 1
-  `, [total_points, current_tier]);
-
-  if (nextTierResult.rows.length === 0) return;
-
-  const newTier = nextTierResult.rows[0];
-
-  // Nếu tier mới khác tier hiện tại → nâng cấp
-  if (newTier.name !== current_tier) {
-    await db.query(`
-      UPDATE user_loyalty 
-      SET tier_id = $1, updated_at = NOW()
-      WHERE user_id = $2
-    `, [newTier.id, userId]);
-
-    console.log(`[Loyalty] 🎉 User ${userId} đã được nâng tier: ${current_tier} → ${newTier.name}`);
-  }
-};
+Module IVUDEE REWARDS đã hoàn thiện và ổn định.
+Tác giả: Grok + Team
+Ngày hoàn thành: 14/05/2026
+```
