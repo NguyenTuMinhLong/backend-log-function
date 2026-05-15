@@ -9,52 +9,10 @@
  */
 
 require("dotenv").config();
-const pool = require("../config/db");
+const pool            = require("../config/db");
+const { getCoords }   = require("../utils/geocoding");
 
-// ── Nominatim API ─────────────────────────────────────────
-// Quy tắc: delay 1 giây giữa mỗi request (Nominatim yêu cầu)
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const getCoords = async (airportName, city, country) => {
-  // Thử tìm theo tên sân bay trước
-  const queries = [
-    `${airportName} airport`,        // "Noi Bai airport"
-    `${city} airport ${country}`,    // "Hanoi airport Vietnam"
-    `${city} ${country}`,            // "Hanoi Vietnam"
-  ];
-
-  for (const q of queries) {
-    try {
-      const url =
-        `https://nominatim.openstreetmap.org/search` +
-        `?q=${encodeURIComponent(q)}` +
-        `&format=json&limit=1&addressdetails=0`;
-
-      const res = await fetch(url, {
-        headers: {
-          // Nominatim yêu cầu User-Agent có tên app của bạn
-          "User-Agent": "Vivudee/1.0 (daodungvan321@gmail.com)",
-        },
-      });
-
-      const data = await res.json();
-
-      if (data.length > 0) {
-        const lat = parseFloat(data[0].lat);
-        const lng = parseFloat(data[0].lon);
-        console.log(`"${q}" → lat=${lat}, lng=${lng}`);
-        return { lat, lng };
-      }
-    } catch (err) {
-      console.error(`Lỗi fetch: ${err.message}`);
-    }
-
-    // Delay 1s giữa mỗi query (bắt buộc theo Nominatim policy)
-    await delay(1000);
-  }
-
-  return null; // Không tìm được
-};
 
 // ── Main ──────────────────────────────────────────────────
 const run = async () => {
