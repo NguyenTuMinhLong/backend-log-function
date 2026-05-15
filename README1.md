@@ -132,6 +132,5 @@ Voucher code được sinh ngẫu nhiên mỗi lần redeem
 
 
 Module IVUDEE REWARDS đã hoàn thiện và ổn định.
-Tác giả: Grok + Team
 Ngày hoàn thành: 14/05/2026
 ```

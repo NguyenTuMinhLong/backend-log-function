@@ -131,7 +131,7 @@ const getFlightRecommendations = async (req, res) => {
     }
 
     const recommendations = await flightService.recommendFlights({
-      userId: userId,                    // ← ĐÃ SỬA Ở ĐÂY
+      userId: userId,                    
       fromAirport: from.toUpperCase(),
       toAirport: to.toUpperCase(),
       limit: parseInt(limit) || 10

@@ -1,181 +1,525 @@
 const db = require('../config/db');
+const crypto = require('crypto');
 const queries = require('../queries/loyalty.queries');
 
-/**
- * SERVICE - Logic Membership / Loyalty (khớp schema mới)
- */
+/*
+=========================================================
+SERVICE: LOYALTY / MEMBERSHIP BUSINESS LOGIC
+=========================================================
+- Membership info
+- Earn points
+- Auto upgrade tier
+- Redeem reward
+- Loyalty transactions
+=========================================================
+*/
 
+
+/*
+=========================================================
+LẤY MEMBERSHIP INFO
+=========================================================
+*/
 exports.getMembershipInfo = async (userId) => {
-  let result = await db.query(queries.GET_USER_LOYALTY, [userId]);
 
-  // Tự động tạo membership nếu user chưa có
+  // Query membership hiện tại
+  let result = await db.query(
+    queries.GET_USER_LOYALTY,
+    [userId]
+  );
+
+  /*
+  Nếu chưa có membership:
+  - tạo membership mặc định
+  - tier mặc định = Member
+  */
   if (result.rows.length === 0) {
-    console.log(`[Loyalty] User ${userId} chưa có membership → tạo mới`);
 
-    const tierResult = await db.query(queries.GET_LOYALTY_TIER_BY_NAME, ['Member']);
+    console.log(
+      `[Loyalty] User ${userId} chưa có membership → tạo mới`
+    );
+
+    // Lấy default tier
+    const tierResult = await db.query(
+      queries.GET_LOYALTY_TIER_BY_NAME,
+      ['Member']
+    );
+
     const tierId = tierResult.rows[0].id;
-    const membershipNumber = `VVD${Date.now().toString().slice(-9)}`;
 
-    await db.query(queries.CREATE_USER_LOYALTY, [userId, tierId, membershipNumber]);
+    // Sinh membership number
+    const membershipNumber =
+      `VVD${Date.now().toString().slice(-9)}`;
 
-    result = await db.query(queries.GET_USER_LOYALTY, [userId]);
+    // Tạo membership
+    await db.query(
+      queries.CREATE_USER_LOYALTY,
+      [
+        userId,
+        tierId,
+        membershipNumber
+      ]
+    );
+
+    // Query lại membership
+    result = await db.query(
+      queries.GET_USER_LOYALTY,
+      [userId]
+    );
   }
 
+  // Membership data
   const data = result.rows[0];
 
-  // Tính next tier
-  const nextTierResult = await db.query(queries.CALCULATE_NEXT_TIER, [data.total_points]);
-  const nextTier = nextTierResult.rows[0] || { name: 'Platinum', min_points: data.total_points + 100000 };
+  /*
+  =========================================================
+  TÍNH NEXT TIER
+  =========================================================
+  */
+  const nextTierResult = await db.query(
+    queries.CALCULATE_NEXT_TIER,
+    [data.tier_points]
+  );
 
+  // Nếu không còn tier cao hơn
+  const nextTier =
+    nextTierResult.rows[0] || {
+      name: 'Platinum',
+      min_points: data.tier_points + 100000
+    };
+
+  /*
+  =========================================================
+  TÍNH PROGRESS %
+  =========================================================
+  */
   const progress = Math.min(
-    Math.floor((data.total_points / nextTier.min_points) * 100),
+    Math.floor(
+      (
+        data.tier_points /
+        nextTier.min_points
+      ) * 100
+    ),
     100
   );
 
+  /*
+  =========================================================
+  RESPONSE CHO FRONTEND
+  =========================================================
+  */
   return {
-    membership_number: data.membership_number,
-    tier: data.tier_name,
-    current_points: data.current_points,
-    total_points: data.total_points,
-    multiplier: parseFloat(data.multiplier),
+
+    // Membership number
+    membership_number:
+      data.membership_number,
+
+    // Tier hiện tại
+    tier:
+      data.tier_name,
+
+    // Điểm dùng redeem
+    current_points:
+      data.current_points,
+
+    // Tổng điểm lifetime
+    total_points:
+      data.total_points,
+
+    // Tổng điểm lifetime v2
+    lifetime_points:
+      data.lifetime_points,
+
+    // Điểm dùng xét tier
+    tier_points:
+      data.tier_points,
+
+    // Multiplier
+    multiplier:
+      parseFloat(data.multiplier),
+
+    // Tier tiếp theo
     next_tier: {
-      name: nextTier.name,
-      points_needed: nextTier.min_points - data.total_points
+
+      name:
+        nextTier.name,
+
+      points_needed:
+        nextTier.min_points -
+        data.tier_points
     },
-    benefits: data.benefits || [],
-    progress: progress > 0 ? progress : 0
+
+    // Benefit
+    benefits:
+      data.benefits || [],
+
+    // Progress %
+    progress:
+      progress > 0 ? progress : 0
   };
 };
 
-/**
- * TÍCH ĐIỂM + TỰ ĐỘNG NÂNG TIER (đã fix)
- */
-exports.earnPointsAfterBooking = async (userId, bookingId, totalPrice) => {
-  let membership = await exports.getMembershipInfo(userId);
 
-  const basePoints = Math.floor(totalPrice / 10000);
-  const pointsEarned = Math.floor(basePoints * membership.multiplier);
+/*
+=========================================================
+TÍCH ĐIỂM SAU BOOKING
+=========================================================
+Flow:
+1. Lấy membership
+2. Tính điểm
+3. Update points
+4. Ghi transaction
+5. Auto upgrade tier
+=========================================================
+*/
+exports.earnPointsAfterBooking = async (
+  userId,
+  bookingId,
+  totalPrice
+) => {
 
-  // 1. Cập nhật điểm
-  await db.query(queries.UPDATE_POINTS, [userId, pointsEarned]);
+  // Membership hiện tại
+  const membership =
+    await exports.getMembershipInfo(userId);
 
-  // 2. Ghi lịch sử
-  await db.query(queries.INSERT_TRANSACTION, [
-    userId,
-    bookingId,
-    'earn',
-    pointsEarned,
-    `Tích điểm từ booking #${bookingId} (${totalPrice} VNĐ)`
-  ]);
+  /*
+  =========================================================
+  TÍNH ĐIỂM
+  =========================================================
+  1 điểm / 10.000 VNĐ
+  */
+  const basePoints =
+    Math.floor(totalPrice / 10000);
 
-  // 3. KIỂM TRA VÀ NÂNG TIER TỰ ĐỘNG
+  // Áp multiplier theo tier
+  const pointsEarned =
+    Math.floor(
+      basePoints *
+      membership.multiplier
+    );
+
+  /*
+  =========================================================
+  UPDATE POINTS
+  =========================================================
+  current_points:
+    điểm redeem
+
+  lifetime_points:
+    tổng điểm không reset
+
+  tier_points:
+    điểm xét tier
+  */
+  await db.query(
+    queries.UPDATE_POINTS,
+    [
+      pointsEarned,
+      userId
+    ]
+  );
+
+  /*
+  =========================================================
+  GHI TRANSACTION
+  =========================================================
+  */
+  await db.query(
+    queries.INSERT_TRANSACTION,
+    [
+      userId,
+      bookingId,
+      'earn',
+      pointsEarned,
+      `Tích điểm từ booking #${bookingId} (${totalPrice} VNĐ)`
+    ]
+  );
+
+  /*
+  =========================================================
+  AUTO UPGRADE TIER
+  =========================================================
+  */
   await upgradeTierIfEligible(userId);
 
-  console.log(`[Loyalty] User ${userId} tích ${pointsEarned} điểm từ booking ${bookingId}`);
+  console.log(
+    `[Loyalty] User ${userId} tích ${pointsEarned} điểm từ booking ${bookingId}`
+  );
 
-  return { pointsEarned };
+  return {
+    pointsEarned
+  };
 };
 
-/** Hàm mới: Tự động nâng tier nếu đủ điều kiện */
-const upgradeTierIfEligible = async (userId) => {
+
+/*
+=========================================================
+AUTO UPGRADE TIER
+=========================================================
+- tier_points dùng để xét tier
+- redeem KHÔNG làm tụt tier
+=========================================================
+*/
+const upgradeTierIfEligible = async (
+  userId
+) => {
+
+  // Lấy tier hiện tại + tier points
   const result = await db.query(`
-    SELECT ul.total_points, lt.name as current_tier, lt.min_points
+    SELECT
+      ul.tier_points,
+      lt.name as current_tier,
+      lt.min_points
     FROM user_loyalty ul
-    JOIN loyalty_tiers lt ON ul.tier_id = lt.id
+    JOIN loyalty_tiers lt
+      ON ul.tier_id = lt.id
     WHERE ul.user_id = $1
   `, [userId]);
 
-  if (result.rows.length === 0) return;
+  // Không có membership
+  if (result.rows.length === 0) {
+    return;
+  }
 
-  const { total_points, current_tier } = result.rows[0];
+  const {
+    tier_points,
+    current_tier
+  } = result.rows[0];
 
-  // Tìm tier cao hơn phù hợp
-  const nextTierResult = await db.query(`
-    SELECT id, name 
-    FROM loyalty_tiers 
-    WHERE min_points <= $1 
-      AND name != $2
-    ORDER BY min_points DESC 
-    LIMIT 1
-  `, [total_points, current_tier]);
-
-  if (nextTierResult.rows.length === 0) return;
-
-  const newTier = nextTierResult.rows[0];
-
-  // Nếu tier mới khác tier hiện tại → nâng cấp
-  if (newTier.name !== current_tier) {
+  /*
+  =========================================================
+  TÌM TIER PHÙ HỢP NHẤT
+  =========================================================
+  */
+  const nextTierResult =
     await db.query(`
-      UPDATE user_loyalty 
-      SET tier_id = $1, updated_at = NOW()
-      WHERE user_id = $2
-    `, [newTier.id, userId]);
+      SELECT
+        id,
+        name
+      FROM loyalty_tiers
+      WHERE min_points <= $1
+        AND name != $2
+      ORDER BY min_points DESC
+      LIMIT 1
+    `, [
+      tier_points,
+      current_tier
+    ]);
 
-    console.log(`[Loyalty] 🎉 User ${userId} đã được nâng tier: ${current_tier} → ${newTier.name}`);
+  // Không có tier mới
+  if (nextTierResult.rows.length === 0) {
+    return;
+  }
+
+  const newTier =
+    nextTierResult.rows[0];
+
+  /*
+  =========================================================
+  UPDATE TIER
+  =========================================================
+  */
+  if (newTier.name !== current_tier) {
+
+    await db.query(`
+      UPDATE user_loyalty
+      SET
+        tier_id = $1,
+        updated_at = NOW()
+      WHERE user_id = $2
+    `, [
+      newTier.id,
+      userId
+    ]);
+
+    console.log(
+      `[Loyalty]  User ${userId} đã được nâng tier: ${current_tier} → ${newTier.name}`
+    );
   }
 };
 
-/**
- * LẤY DANH SÁCH VOUCHER CÓ THỂ ĐỔI
- */
+
+/*
+=========================================================
+LẤY DANH SÁCH REWARD
+=========================================================
+*/
 exports.getAvailableRewards = async () => {
-  const result = await db.query(queries.GET_AVAILABLE_REWARDS);
+
+  const result = await db.query(
+    queries.GET_AVAILABLE_REWARDS
+  );
+
   return result.rows;
 };
 
-/**
- * REDEEM VOUCHER + SINH MÃ VOUCHER (KHÔNG GIẢM HẠNG)
- */
-exports.redeemReward = async (userId, rewardId) => {
-  // 1. Lấy thông tin membership hiện tại
-  const membership = await exports.getMembershipInfo(userId);
-  if (!membership) throw new Error('Không tìm thấy thông tin membership');
 
-  // 2. Lấy thông tin voucher
-  const rewardResult = await db.query(queries.GET_REWARD_BY_ID, [rewardId]);
+/*
+=========================================================
+REDEEM REWARD
+=========================================================
+Flow:
+1. Lấy membership
+2. Kiểm tra reward
+3. Kiểm tra đủ điểm
+4. Sinh voucher code
+5. Trừ current_points
+6. Ghi transaction
+=========================================================
+*/
+exports.redeemReward = async (
+  userId,
+  rewardId
+) => {
+
+  /*
+  =========================================================
+  MEMBERSHIP INFO
+  =========================================================
+  */
+  const membership =
+    await exports.getMembershipInfo(userId);
+
+  if (!membership) {
+
+    throw new Error(
+      'Không tìm thấy thông tin membership'
+    );
+  }
+
+  /*
+  =========================================================
+  LẤY REWARD
+  =========================================================
+  */
+  const rewardResult =
+    await db.query(
+      queries.GET_REWARD_BY_ID,
+      [rewardId]
+    );
+
+  // Reward không tồn tại
   if (rewardResult.rows.length === 0) {
-    throw new Error('Voucher không tồn tại hoặc đã hết hạn');
-  }
-  const reward = rewardResult.rows[0];
 
-  // 3. Kiểm tra đủ điểm không
-  if (membership.total_points < reward.points_required) {
-    throw new Error(`Không đủ điểm. Cần ${reward.points_required} điểm, hiện có ${membership.total_points} điểm`);
+    throw new Error(
+      'Voucher không tồn tại hoặc đã hết hạn'
+    );
   }
 
-  // ==================== SINH MÃ VOUCHER ====================
-  const voucherCode = `VOUCHER-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+  const reward =
+    rewardResult.rows[0];
 
-  // 4. Trừ điểm (KHÔNG update tier_id)
+  /*
+  =========================================================
+  CHECK ĐỦ ĐIỂM
+  =========================================================
+  current_points:
+    điểm có thể tiêu
+  */
+  if (
+    membership.current_points <
+    reward.points_required
+  ) {
+
+    throw new Error(
+      `Không đủ điểm. Cần ${reward.points_required} điểm, hiện có ${membership.current_points} điểm`
+    );
+  }
+
+  /*
+  =========================================================
+  SINH MÃ VOUCHER
+  =========================================================
+  */
+  const voucherCode =
+    `VOUCHER-${crypto
+      .randomBytes(4)
+      .toString('hex')
+      .toUpperCase()}`;
+
+  /*
+  =========================================================
+  TRỪ ĐIỂM
+  =========================================================
+  Chỉ trừ current_points
+  KHÔNG trừ tier_points
+  KHÔNG tụt tier
+  =========================================================
+  */
   await db.query(`
-    UPDATE user_loyalty 
-    SET total_points = total_points - $1, updated_at = NOW()
-    WHERE user_id = $2
-  `, [reward.points_required, userId]);
+    UPDATE user_loyalty
+    SET
+      current_points =
+        current_points - $1,
 
-  // 5. Ghi lịch sử
-  const transactionDesc = `Đổi ${reward.name} - Mã: ${voucherCode} (-${reward.points_required} điểm)`;
-  await db.query(queries.INSERT_TRANSACTION, [
-    userId,
-    null,
-    'redeem',
-    -reward.points_required,
-    transactionDesc
+      updated_at = NOW()
+
+    WHERE user_id = $2
+  `, [
+    reward.points_required,
+    userId
   ]);
 
-  console.log(`[Loyalty] User ${userId} đã redeem ${reward.name} - Mã: ${voucherCode} (tier giữ nguyên)`);
+  /*
+  =========================================================
+  GHI TRANSACTION
+  =========================================================
+  */
+  const transactionDesc =
+    `Đổi ${reward.name} - Mã: ${voucherCode} (-${reward.points_required} điểm)`;
 
+  await db.query(
+    queries.INSERT_TRANSACTION,
+    [
+      userId,
+      null,
+      'redeem',
+      -reward.points_required,
+      transactionDesc
+    ]
+  );
+
+  console.log(
+    `[Loyalty] User ${userId} đã redeem ${reward.name} - Mã: ${voucherCode}`
+  );
+
+  /*
+  =========================================================
+  RESPONSE CHO FRONTEND
+  =========================================================
+  */
   return {
+
     success: true,
+
     reward: {
-      id: reward.id,
-      name: reward.name,
-      discountAmount: reward.discount_amount,
-      description: reward.description
+
+      id:
+        reward.id,
+
+      name:
+        reward.name,
+
+      discountAmount:
+        reward.discount_amount,
+
+      description:
+        reward.description
     },
+
+    // Voucher code
     voucherCode,
-    pointsRemaining: membership.total_points - reward.points_required,
-    currentTier: membership.tier_name,           // ← giữ nguyên tier
-    message: `Đổi thành công! Mã voucher của bạn là **${voucherCode}** (${reward.discount_amount.toLocaleString('vi-VN')} VNĐ). Hạng của bạn vẫn giữ nguyên.`
+
+    // Điểm còn lại
+    pointsRemaining:
+      membership.current_points -
+      reward.points_required,
+
+    // Tier hiện tại
+    currentTier:
+      membership.tier,
+
+    message:
+      `Đổi thành công! Mã voucher của bạn là ${voucherCode}`
   };
 };
