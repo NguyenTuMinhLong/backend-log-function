@@ -3,22 +3,20 @@ const crypto = require('crypto');
 const queries = require('../queries/loyalty.queries');
 
 /*
-=========================================================
+
 SERVICE: LOYALTY / MEMBERSHIP BUSINESS LOGIC
-=========================================================
+
 - Membership info
 - Earn points
 - Auto upgrade tier
 - Redeem reward
 - Loyalty transactions
-=========================================================
+
 */
-
-
 /*
-=========================================================
+
 LẤY MEMBERSHIP INFO
-=========================================================
+
 */
 exports.getMembershipInfo = async (userId) => {
 

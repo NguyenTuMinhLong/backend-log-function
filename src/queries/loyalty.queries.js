@@ -1,44 +1,30 @@
 "use strict";
-
 /*
-=========================================================
 QUERIES: LOYALTY / MEMBERSHIP
-=========================================================
 - Membership
 - Points
 - Tier
 - Rewards
 - Transactions
-=========================================================
 */
-
-
 /*
-=========================================================
 LẤY MEMBERSHIP USER
-=========================================================
 */
 const GET_USER_LOYALTY = `
   SELECT
     ul.*,
-
     lt.name as tier_name,
-
     lt.multiplier,
-
     lt.benefits
 
   FROM user_loyalty ul
-
   JOIN loyalty_tiers lt
     ON ul.tier_id = lt.id
-
   WHERE ul.user_id = $1
 `;
 
 
 /*
-=========================================================
 TẠO MEMBERSHIP
 =========================================================
 */
@@ -55,9 +41,9 @@ const CREATE_USER_LOYALTY = `
 
 
 /*
-=========================================================
+
 LẤY TIER THEO NAME
-=========================================================
+
 */
 const GET_LOYALTY_TIER_BY_NAME = `
   SELECT id
@@ -67,9 +53,8 @@ const GET_LOYALTY_TIER_BY_NAME = `
 
 
 /*
-=========================================================
+
 UPDATE POINTS
-=========================================================
 current_points:
   điểm redeem
 
@@ -78,7 +63,7 @@ lifetime_points:
 
 tier_points:
   điểm xét tier
-=========================================================
+
 */
 const UPDATE_POINTS = `
   UPDATE user_loyalty
@@ -103,9 +88,9 @@ const UPDATE_POINTS = `
 
 
 /*
-=========================================================
+
 INSERT TRANSACTION
-=========================================================
+
 */
 const INSERT_TRANSACTION = `
   INSERT INTO loyalty_transactions (
@@ -121,9 +106,9 @@ const INSERT_TRANSACTION = `
 
 
 /*
-=========================================================
+
 LẤY LỊCH SỬ LOYALTY
-=========================================================
+
 */
 const GET_LOYALTY_HISTORY = `
   SELECT
