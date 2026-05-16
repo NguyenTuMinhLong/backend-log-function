@@ -13,6 +13,7 @@ const loyaltyRoutes = require('./routes/loyalty.routes');
 
 const { expireHeldBookings }   = require("./services/booking.service");
 const { autoGenerateFlights }  = require("./services/admin/flight.service");
+require("./scripts/Loyalty.cron"); // Loyalty annual reset cron job
 
 const app = express();
 
@@ -27,7 +28,6 @@ app.use("/api/chat",     chatRoutes);
 app.use("/api/admin",    adminRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/wishlist", wishlistRoutes);
-app.use('/api/membership', loyaltyRoutes);
 app.use('/api/loyalty', loyaltyRoutes);
 
 // Mỗi 1 phút sẽ chạy 1 lần để kiểm tra toàn bộ danh sách booking nhằm tự động hủy booking đã hết hạn giữ ghế

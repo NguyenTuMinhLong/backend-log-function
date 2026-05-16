@@ -1,96 +1,95 @@
-"use strict";
+'use strict';
+
 /*
+=========================================================
 QUERIES: LOYALTY / MEMBERSHIP
-- Membership
-- Points
-- Tier
-- Rewards
-- Transactions
+=========================================================
+
+Sync với loyalty.service.js — 3 cột điểm:
+  lifetime_points   chỉ cộng, không bao giờ trừ
+  tier_points       xét tier + cronjob penalty
+  current_points    redeem được
+
+Đã bỏ:
+  total_points      → không dùng (đã remove)
+  CALCULATE_NEXT_TIER → tier logic chuyển về TIERS config trong service
+
+=========================================================
 */
-/*
-LẤY MEMBERSHIP USER
-*/
+
+
+// =========================================================
+// MEMBERSHIP
+// =========================================================
+
 const GET_USER_LOYALTY = `
   SELECT
-    ul.*,
-    lt.name as tier_name,
+    ul.id,
+    ul.user_id,
+    ul.membership_number,
+    ul.lifetime_points,
+    ul.tier_points,
+    ul.current_points,
+    lt.name       AS tier_name,
     lt.multiplier,
     lt.benefits
 
   FROM user_loyalty ul
   JOIN loyalty_tiers lt
     ON ul.tier_id = lt.id
+
   WHERE ul.user_id = $1
 `;
 
-
-/*
-TẠO MEMBERSHIP
-=========================================================
-*/
 const CREATE_USER_LOYALTY = `
   INSERT INTO user_loyalty (
     user_id,
     tier_id,
-    membership_number
+    membership_number,
+    lifetime_points,
+    tier_points,
+    current_points
   )
-  VALUES ($1, $2, $3)
-
+  VALUES ($1, $2, $3, 0, 0, 0)
   RETURNING *
 `;
 
 
-/*
+// =========================================================
+// TIER
+// =========================================================
 
-LẤY TIER THEO NAME
-
-*/
 const GET_LOYALTY_TIER_BY_NAME = `
-  SELECT id
+  SELECT id, name, min_points, multiplier, benefits
   FROM loyalty_tiers
   WHERE name = $1
 `;
 
 
+// =========================================================
+// POINTS
+// =========================================================
+
 /*
+UPDATE_POINTS đã bỏ — service mới inline query trực tiếp
+để kiểm soát chính xác từng cột theo từng action:
 
-UPDATE POINTS
-current_points:
-  điểm redeem
-
-lifetime_points:
-  tổng điểm lifetime
-
-tier_points:
-  điểm xét tier
-
+  earn           → cộng cả 3 cột
+  redeem         → chỉ trừ current_points
+  cancel/refund  → trừ tier + current (không trừ lifetime)
+  cron           → chỉ trừ tier_points (không trừ current)
 */
-const UPDATE_POINTS = `
-  UPDATE user_loyalty
 
-  SET
-    current_points =
-      current_points + $1,
 
-    total_points =
-      total_points + $1,
-
-    lifetime_points =
-      lifetime_points + $1,
-
-    tier_points =
-      tier_points + $1,
-
-    updated_at = NOW()
-
-  WHERE user_id = $2
-`;
-
+// =========================================================
+// TRANSACTIONS
+// =========================================================
 
 /*
-
-INSERT TRANSACTION
-
+type có thể là:
+  'earn'    → tích điểm từ booking
+  'redeem'  → đổi reward
+  'revoke'  → trừ điểm do huỷ / refund booking
 */
 const INSERT_TRANSACTION = `
   INSERT INTO loyalty_transactions (
@@ -100,24 +99,22 @@ const INSERT_TRANSACTION = `
     amount,
     description
   )
-
   VALUES ($1, $2, $3, $4, $5)
 `;
 
-
 /*
-
-LẤY LỊCH SỬ LOYALTY
-
+$1 = user_id
+$2 = limit  (mặc định truyền 20, frontend tự phân trang)
+$3 = offset (page * limit)
 */
 const GET_LOYALTY_HISTORY = `
   SELECT
     id,
+    booking_id,
     type,
-    amount,
+    amount   AS points,
     description,
-    created_at,
-    booking_id
+    created_at
 
   FROM loyalty_transactions
 
@@ -125,37 +122,23 @@ const GET_LOYALTY_HISTORY = `
 
   ORDER BY created_at DESC
 
-  LIMIT 5
+  LIMIT  $2
+  OFFSET $3
 `;
 
 
-/*
-=========================================================
-TÍNH NEXT TIER
-=========================================================
-*/
-const CALCULATE_NEXT_TIER = `
-  SELECT
-    name,
-    min_points
+// =========================================================
+// REWARDS
+// =========================================================
 
-  FROM loyalty_tiers
-
-  WHERE min_points > $1
-
-  ORDER BY min_points ASC
-
-  LIMIT 1
-`;
-
-
-/*
-=========================================================
-LẤY REWARD AVAILABLE
-=========================================================
-*/
 const GET_AVAILABLE_REWARDS = `
-  SELECT *
+  SELECT
+    id,
+    name,
+    description,
+    points_required,
+    discount_amount,
+    is_active
 
   FROM loyalty_rewards
 
@@ -164,39 +147,39 @@ const GET_AVAILABLE_REWARDS = `
   ORDER BY points_required ASC
 `;
 
-
-/*
-=========================================================
-LẤY REWARD THEO ID
-=========================================================
-*/
 const GET_REWARD_BY_ID = `
-  SELECT *
+  SELECT
+    id,
+    name,
+    description,
+    points_required,
+    discount_amount
 
   FROM loyalty_rewards
 
-  WHERE id = $1
+  WHERE id        = $1
     AND is_active = true
 `;
 
 
+// =========================================================
+// EXPORTS
+// =========================================================
+
 module.exports = {
 
+  // Membership
   GET_USER_LOYALTY,
-
   CREATE_USER_LOYALTY,
 
+  // Tier
   GET_LOYALTY_TIER_BY_NAME,
 
-  UPDATE_POINTS,
-
+  // Transactions
   INSERT_TRANSACTION,
-
   GET_LOYALTY_HISTORY,
 
-  CALCULATE_NEXT_TIER,
-
+  // Rewards
   GET_AVAILABLE_REWARDS,
-
-  GET_REWARD_BY_ID
+  GET_REWARD_BY_ID,
 };

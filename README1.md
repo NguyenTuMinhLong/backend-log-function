@@ -1,136 +1,346 @@
-# IVUDEE REWARDS - Membership & Loyalty System
+# LOYALTY / MEMBERSHIP SYSTEM
 
-Hệ thống **Chương trình Khách hàng Thân thiết** cho dự án **Flight Booking**.
+## 1. OVERVIEW
 
----
-
-## 🌟 Tính năng đã hoàn thành (Production Ready)
-
-| Tính năng                                         | Trạng thái    | Chi tiết                                    |
-| ------------------------------------------------- | ------------- | ------------------------------------------- |
-| Tự động tạo membership khi user chưa có           | ✅ Hoàn thành | Tạo ngay khi user lần đầu booking           |
-| Tích điểm tự động sau khi đặt vé thành công       | ✅ Hoàn thành | Hook trong `booking.service.js`             |
-| Hệ thống Tier (Member → Silver → Gold → Platinum) | ✅ Hoàn thành | 4 cấp bậc với multiplier                    |
-| Tự động nâng hạng (Auto Upgrade Tier)             | ✅ Hoàn thành | Khi tích đủ điểm sẽ tự nâng                 |
-| **Không giảm hạng khi redeem**                    | ✅ Hoàn thành | Tier chỉ nâng, không downgrade khi đổi điểm |
-| Redeem điểm lấy Voucher giảm giá cố định          | ✅ Hoàn thành | Sinh mã voucher ngẫu nhiên                  |
-| Lịch sử giao dịch điểm (`loyalty_transactions`)   | ✅ Hoàn thành | Ghi rõ earn/redeem                          |
-| API xem thông tin membership                      | ✅ Hoàn thành | `/api/loyalty/me`                           |
-| API danh sách voucher & redeem                    | ✅ Hoàn thành | `/rewards` & `/redeem`                      |
-| Route test nhanh tích điểm                        | ✅ Hoàn thành | `/test-earn`                                |
+Hệ thống tích điểm và thăng hạng cho khách hàng của ứng dụng đặt vé máy bay. Mỗi lần booking, user được cộng điểm dựa trên số tiền thanh toán và hạng thành viên hiện tại.
 
 ---
 
-## 📊 Database Schema (đã chạy migration)
+## 2. POINTS SYSTEM — 3 CỘT ĐIỂM
 
-### Các bảng đã tạo:
+```
+ACTION             lifetime    tier      current
+────────────────────────────────────────────────
+Earn (booking)     + pts       + pts     + pts
+Redeem reward      —           —         - pts
+Cancel / refund    —           - pts     - pts  → check downgrade
+Cron annual reset  —           - 20%     —      → check downgrade
+```
 
-- **`loyalty_tiers`** – Định nghĩa các cấp bậc
-- **`user_loyalty`** – Thông tin membership của từng user
-- **`loyalty_transactions`** – Lịch sử tích/đổi điểm
-- **`loyalty_rewards`** – Danh sách voucher có thể đổi
-
-**Tier mặc định đã seed:**
-
-| Tier     | Min Points | Multiplier |
-| -------- | ---------- | ---------- |
-| Member   | 0          | 1.00x      |
-| Silver   | 15.000     | 1.25x      |
-| Gold     | 40.000     | 1.50x      |
-| Platinum | 80.000     | 1.75x      |
+| Cột | Vai trò | Giảm khi nào? |
+|-----|---------|--------------|
+| `lifetime_points` | Chỉ cộng, không bao giờ giảm → lịch sử vĩnh viễn, báo cáo | ❌ Không bao giờ |
+| `tier_points` | Dùng để xét tier + cronjob penalty | ❌ Không khi redeem, ✅ Khi cancel/refund/cron |
+| `current_points` | Điểm user có thể tiêu để đổi reward | ❌ Không ảnh hưởng tier |
 
 ---
 
-## 📁 Cấu trúc File Module
+## 3. TIER SYSTEM
+
+### 3.1 Cấu hình
+
+| Hạng | Điểm tối thiểu (tier_points) | Hệ số nhân (multiplier) |
+|------|------------------------------|-------------------------|
+| Member | 0 | ×1.0 |
+| Silver | 5,000 | ×1.25 |
+| Gold | 20,000 | ×1.5 |
+| Platinum | 50,000 | ×1.75 |
+
+### 3.2 Cách tính điểm khi earn
+
+```
+basePoints   = floor(totalPrice / 10,000)
+pointsEarned = floor(basePoints × multiplier)
+```
+
+**Ví dụ:** Member mua vé 1,200,000 VND:
+- basePoints = floor(1,200,000 / 10,000) = 120
+- pointsEarned = floor(120 × 1.0) = 120 điểm
+
+**Ví dụ:** Platinum mua vé 1,200,000 VND:
+- basePoints = 120
+- pointsEarned = floor(120 × 1.75) = 210 điểm
+
+---
+
+## 4. ACTIONS — BUSINESS LOGIC
+
+### 4.1 Earn Points (sau booking confirmed)
+
+```
+Flow:
+  1. Lấy multiplier từ tier hiện tại
+  2. Tính điểm = floor(price / 10000) × multiplier
+  3. Cộng cả 3 cột trong 1 query
+  4. Ghi transaction (type: 'earn')
+  5. Check upgrade tier
+```
+
+**Idempotent:** Kiểm tra `loyalty_transactions` xem booking đã tích điểm chưa → nếu rồi thì bỏ qua.
+
+---
+
+### 4.2 Revoke Points (khi cancel/refund booking)
+
+```
+Flow:
+  1. Tìm điểm đã earn từ booking này trong loyalty_transactions
+  2. Trừ tier_points + current_points (KHÔNG trừ lifetime)
+  3. Không để âm — trừ tối đa đến 0
+  4. Ghi transaction (type: 'revoke')
+  5. Check downgrade tier → notify nếu tụt hạng
+```
+
+---
+
+### 4.3 Redeem Reward
+
+```
+Flow:
+  1. Lock row (SELECT FOR UPDATE) → tránh race condition khi 2 request đổi đồng thời
+  2. Kiểm tra reward tồn tại
+  3. Kiểm tra đủ current_points từ locked row
+  4. Sinh voucher code (format: VOUCHER-XXXXXXXX)
+  5. Trừ current_points, RETURNING để lấy số chính xác
+  6. Ghi transaction (type: 'redeem')
+
+⚠️ lifetime_points và tier_points KHÔNG đổi → không tụt tier khi redeem
+```
+
+---
+
+## 5. ANNUAL RESET CRON JOB
+
+### 5.1 Thời gian chạy
+
+```
+Cron: "0 0 1 1 *" (00:00 ngày 1/1 theo GMT+7)
+      = 17:00 UTC ngày 31/12
+```
+
+### 5.2 Logic
+
+```
+1. Lấy tất cả membership
+2. Phạt 20% tier_points  (tier_points -= floor(tier_points × 0.20))
+3. Recalculate tier theo tier_points mới
+4. Nếu tier thay đổi → downgrade + notify
+5. lifetime_points KHÔNG đổi
+6. current_points  KHÔNG đổi
+```
+
+### 5.3 Ví dụ
+
+| User | Tier | tier_points trước | Penalty | tier_points sau | Tier mới |
+|------|------|-------------------|---------|-----------------|----------|
+| A | Platinum | 55,000 | -11,000 | 44,000 | Gold |
+| B | Gold | 25,000 | -5,000 | 20,000 | Gold |
+| C | Silver | 6,000 | -1,200 | 4,800 | Member |
+
+### 5.4 Notifications
+
+| Tình huống | Type | Message |
+|------------|------|---------|
+| Downgrade tier | `tier_reset` | Thông báo điểm bị trừ, hạng thay đổi, kêu gọi tích lũy lại |
+| Giữ nguyên tier | `points_reset` | Thông báo điểm bị trừ, hạng được giữ nguyên |
+
+---
+
+## 6. SYNC TIER LOGIC
+
+```
+Direction 'upgrade'   → chỉ lên tier, không xuống  (sau earn)
+Direction 'downgrade' → chỉ xuống tier, không lên    (sau cancel/refund/cron)
+Direction 'both'      → sync tuyệt đối               (dùng khi cần force sync)
+```
+
+---
+
+## 7. DATABASE SCHEMA
+
+### 7.1 Bảng `user_loyalty`
+
+```sql
+user_loyalty (
+  id                  SERIAL PRIMARY KEY,
+  user_id             BIGINT UNIQUE REFERENCES users(id),
+  membership_number   VARCHAR(20) UNIQUE,   -- VD: VVD123456789
+  tier_id             INT REFERENCES loyalty_tiers(id),
+  lifetime_points     BIGINT NOT NULL DEFAULT 0,  -- chỉ cộng
+  tier_points         BIGINT NOT NULL DEFAULT 0, -- xét tier + penalty
+  current_points      BIGINT NOT NULL DEFAULT 0,  -- redeem được
+  created_at          TIMESTAMP DEFAULT NOW(),
+  updated_at          TIMESTAMP DEFAULT NOW()
+)
+```
+
+### 7.2 Bảng `loyalty_tiers`
+
+```sql
+loyalty_tiers (
+  id          SERIAL PRIMARY KEY,
+  name        VARCHAR(20) UNIQUE,  -- Member, Silver, Gold, Platinum
+  min_points  INT NOT NULL,
+  multiplier  NUMERIC(4,2) NOT NULL,  -- 1.00, 1.25, 1.50, 1.75
+  benefits    JSONB
+)
+```
+
+### 7.3 Bảng `loyalty_transactions`
+
+```sql
+loyalty_transactions (
+  id          BIGSERIAL PRIMARY KEY,
+  user_id     BIGINT REFERENCES users(id),
+  booking_id  BIGINT,               -- NULL khi redeem
+  type        VARCHAR(20),           -- earn | revoke | redeem
+  amount      BIGINT,               -- số điểm (+/-)
+  description TEXT,
+  created_at  TIMESTAMP DEFAULT NOW()
+)
+```
+
+### 7.4 Bảng `loyalty_rewards`
+
+```sql
+loyalty_rewards (
+  id               SERIAL PRIMARY KEY,
+  name             VARCHAR(100),
+  description      TEXT,
+  points_required  INT NOT NULL,
+  discount_amount  NUMERIC(12,2),   -- số tiền được giảm
+  is_active        BOOLEAN DEFAULT true,
+  created_at       TIMESTAMP DEFAULT NOW()
+)
+```
+
+### 7.5 Bảng `loyalty_notifications`
+
+```sql
+loyalty_notifications (
+  id          BIGSERIAL PRIMARY KEY,
+  user_id     BIGINT REFERENCES users(id),
+  type        VARCHAR(50),          -- tier_reset | points_reset | tier_downgrade
+  message     TEXT,
+  is_read     BOOLEAN DEFAULT false,
+  created_at  TIMESTAMP DEFAULT NOW()
+)
+```
+
+---
+
+## 8. API ENDPOINTS
+
+### 8.1 Public / Optional Auth
+
+| Method | Endpoint | Auth | Mô tả |
+|--------|----------|------|-------|
+| GET | `/api/loyalty/membership` | Optional | Lấy thông tin membership (theo token hoặc ?userId=) |
+| GET | `/api/loyalty/rewards` | None | Danh sách reward có thể đổi |
+
+### 8.2 Protected — Cần Auth
+
+| Method | Endpoint | Body | Mô tả |
+|--------|----------|------|-------|
+| POST | `/api/loyalty/earn` | `{ bookingId, totalPrice }` | Tích điểm sau booking (idempotent) |
+| POST | `/api/loyalty/revoke` | `{ bookingId }` | Revoke điểm khi huỷ booking |
+| POST | `/api/loyalty/redeem` | `{ rewardId }` | Đổi điểm lấy reward |
+| GET | `/api/loyalty/history` | query: `?page=0&limit=20` | Lịch sử giao dịch điểm |
+
+### 8.3 Admin
+
+| Method | Endpoint | Auth | Mô tả |
+|--------|----------|------|-------|
+| POST | `/api/loyalty/admin/trigger-annual-reset` | Admin only | Trigger annual reset thủ công |
+
+### 8.4 Test Endpoints
+
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| GET | `/api/loyalty/test-earn?userId=8&totalPrice=1200000` | Tạo booking giả + tích điểm |
+| GET | `/api/loyalty/test-redeem?userId=8&rewardId=1` | Test redeem reward |
+
+---
+
+## 9. FILE STRUCTURE
+
+```
+src/
+├── services/loyalty.service.js    ← Business logic chính
+├── queries/loyalty.queries.js    ← SQL queries
+├── scripts/Loyalty.cron.js       ← Cron job annual reset
+└── routes/loyalty.routes.js      ← API routes
+```
+
+---
+
+## 10. INTEGRATION VỚI BOOKING SERVICE
+
+Khi nào gọi các hàm loyalty:
+
+```javascript
+// 1. Sau khi booking confirmed → tích điểm
+await loyaltyService.earnPointsAfterBooking(userId, bookingId, totalPrice);
+
+// 2. Khi booking bị cancel hoặc refund → revoke điểm
+await loyaltyService.revokePointsOnCancel(userId, bookingId);
+```
+
+---
+
+## 11. EDGE CASES XỬ LÝ
+
+| Trường hợp | Xử lý |
+|-----------|--------|
+| User chưa có membership | Tự động tạo mới với tier Member |
+| Booking giá < 10,000 VND | Bỏ qua, không tích điểm (basePoints = 0) |
+| Revoke nhiều hơn điểm hiện có | Chỉ trừ đến 0, không âm |
+| 2 request redeem đồng thời | `SELECT FOR UPDATE` lock row → tránh race condition |
+| Booking đã tích điểm rồi | `checkAlreadyEarned()` → bỏ qua, không tích trùng |
+| Penalty khiến tier xuống thấp hơn | `resolveTier()` tự động recalculate tier |
+
+---
+
+## 12. MIGRATION
+
+File migration: `src/migrations/009_create_loyalty_tables.sql`
+
+Tạo đầy đủ:
+- Bảng `loyalty_tiers` (4 hạng)
+- Bảng `user_loyalty`
+- Bảng `loyalty_transactions`
+- Bảng `loyalty_rewards`
+- Bảng `loyalty_notifications`
+
+---
+
+## 13. CRON JOB MANUAL TRIGGER
+
+Để test cron job mà không cần chờ 00:00 ngày 1/1:
 
 ```bash
-src/
-├── queries/
-│   └── loyalty.queries.js          # Tất cả SQL queries
-├── services/
-│   └── loyalty.service.js          # Business logic (earn, redeem, upgrade tier)
-├── controllers/
-│   └── loyalty.controller.js       # Controller API
-├── routes/
-│   └── loyalty.routes.js           # Định nghĩa routes
-└── services/
-    └── booking.service.js          # Đã hook loyalty (earnPointsAfterBooking)
+# Gọi API (cần token admin)
+curl -X POST http://localhost:3000/api/loyalty/admin/trigger-annual-reset \
+  -H "Authorization: Bearer <admin_token>"
 
-
-🔌 API Endpoints
-Base URL: http://localhost:3000/api/loyalty
-1. Xem thông tin Membership
-
-GET /me
-Hỗ trợ test: ?userId=8
-Trả về: tier hiện tại, total_points, multiplier, lịch sử transaction
-
-2. Xem danh sách Voucher có thể đổi
-
-GET /rewards
-
-3. Đổi điểm lấy Voucher
-
-POST /redeem
-Body:JSON{
-  "rewardId": 1
-}
-Hỗ trợ test: ?userId=8
-
-Voucher hiện có:
-
-ID 1 → Voucher 100K (5.000 điểm)
-ID 2 → Voucher 250K (10.000 điểm)
-ID 3 → Voucher 500K (20.000 điểm)
-ID 4 → Voucher 1M (40.000 điểm)
-
-4. Test tích điểm (dùng để test nhanh)
-
-GET /test-earn?userId=8&totalPrice=1200000
-
-
-📋 Cách tính điểm
-
-Công thức: 10.000 VNĐ = 1 điểm cơ bản
-Nhân thêm multiplier theo tier hiện tại
-Ví dụ: Vé 1.200.000 VNĐ ở tier Gold (1.5x) → được 180 điểm
-
-
-🔄 Logic Redeem Voucher
-
-Sinh mã voucher ngẫu nhiên: VOUCHER-7K9M2P4X
-Không giảm hạng (tier giữ nguyên)
-Trừ điểm + ghi lịch sử transaction (type = 'redeem')
-Response trả về đầy đủ mã voucher để user dùng
-
-
-🧪 Cách Test (Postman)
-Test thứ tự khuyến nghị:
-
-Tích điểm: GET /test-earn?userId=8&totalPrice=1200000 (chạy nhiều lần)
-Xem membership: GET /me?userId=8
-Xem danh sách voucher: GET /rewards
-Redeem: POST /redeem?userId=8 với body {"rewardId": 1}
-
-
-⚠️ Lưu ý quan trọng
-
-Chỉ tích điểm khi booking thành công và có userId
-Tier chỉ nâng khi earn điểm, không giảm khi redeem
-booking_id trong transaction có thể là null (test) hoặc ID thật
-Có console log rõ ràng với prefix [Loyalty] để debug
-Voucher code được sinh ngẫu nhiên mỗi lần redeem
-
-
-🚀 Cách mở rộng sau này (Todo)
-
- Reset tier hàng năm (1/1 hoặc ngày kỷ niệm)
- Lưu voucher code vào bảng riêng (user_vouchers)
- Redeem voucher khi thanh toán booking (áp dụng tự động)
- Voucher theo sự kiện (Black Friday, sinh nhật…)
- Tier reset + điểm giữ lại hoặc reset theo policy
-
-
-Module IVUDEE REWARDS đã hoàn thiện và ổn định.
-Ngày hoàn thành: 14/05/2026
+# Hoặc chạy trực tiếp từ Node
+node -e "require('./src/scripts/Loyalty.cron').runAnnualReset()"
 ```
+
+---
+
+## 14. TIER PROGRESSION TRACKING
+
+Frontend có thể hiển thị progress bar cho user:
+
+```javascript
+// Response từ /api/loyalty/membership
+{
+  tier: "Silver",
+  tier_points: 3500,
+  next_tier: {
+    name: "Gold",
+    points_needed: 16500   // cần thêm bao nhiêu điểm để lên Gold
+  },
+  progress: 70   // 70% tiến đến Gold (chỉ hiện khi chưa max tier)
+}
+```
+
+---
+
+## 15. NOTES
+
+- Tất cả điểm đều là số nguyên (dùng `floor()` để tránh số lẻ)
+- `membership_number` format: `VVD` + 9 chữ số cuối của timestamp
+- Voucher code format: `VOUCHER-XXXXXXXX` (8 ký tự hex ngẫu nhiên)
+- Cron job có `ROLLBACK` nếu lỗi → đảm bảo tính atomic
