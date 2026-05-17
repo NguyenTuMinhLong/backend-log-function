@@ -330,8 +330,76 @@ const getMyBookings = async (userId, filter = "all", from_date, to_date) => {
   // ... (giữ nguyên)
 };
 
-const cancelBooking = async (userId, bookingCode) => {
-  // ... (giữ nguyên)
+const cancelBooking = async (userId, bookingCode, reason = null) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Get booking
+    const bookingResult = await client.query(QB.SELECT_BOOKING_DETAIL, [bookingCode]);
+    if (bookingResult.rows.length === 0) throw new Error('Không tìm thấy booking');
+
+    const booking = bookingResult.rows[0];
+
+    // 2. Check ownership
+    if (userId && booking.user_id && booking.user_id !== userId) {
+      throw new Error('Bạn không có quyền hủy booking này');
+    }
+
+    // 3. Check payment exists
+    const paymentResult = await client.query(QP.SELECT_PAYMENT_BY_BOOKING, [booking.id]);
+    const payment = paymentResult.rows[0];
+
+    // 4. Determine cancel flow based on status and payment
+    if (booking.status === 'pending' || booking.status === 'expired') {
+      // CHƯA THANH TOÁN: Hủy trực tiếp (giải phóng ghế)
+      if (booking.status === 'pending') {
+        // Release seats
+        const seatsNeeded = parseInt(booking.total_adults) + parseInt(booking.total_children);
+        await client.query(
+          `UPDATE flight_seats SET available_seats = available_seats + $1, updated_at = NOW()
+           WHERE flight_id = $2 AND seat_class = $3`,
+          [seatsNeeded, booking.outbound_flight_id, booking.outbound_seat_class]
+        );
+
+        if (booking.trip_type === 'round_trip' && booking.return_flight_id) {
+          await client.query(
+            `UPDATE flight_seats SET available_seats = available_seats + $1, updated_at = NOW()
+             WHERE flight_id = $2 AND seat_class = $3`,
+            [seatsNeeded, booking.return_flight_id, booking.return_seat_class]
+          );
+        }
+      }
+
+      // Update booking status
+      await client.query(QB.UPDATE_BOOKING_STATUS, ['cancelled', booking.id]);
+
+      await client.query('COMMIT');
+
+      return {
+        success: true,
+        booking_code: bookingCode,
+        status: 'cancelled',
+        refund_status: 'no_refund',
+        message: 'Booking đã được hủy thành công (không hoàn tiền vì chưa thanh toán)',
+      };
+    } else if (booking.status === 'confirmed' && payment && payment.status === 'SUCCESS') {
+      // ĐÃ THANH TOÁN: Redirect to refund flow
+      await client.query('ROLLBACK'); // Release client
+
+      // Import and call refund service
+      const refundService = require('./refund.service');
+      return await refundService.cancelWithRefund(userId, bookingCode, reason || 'Yêu cầu hủy booking');
+    } else {
+      // Các trạng thái khác không cho hủy
+      throw new Error(`Không thể hủy booking có trạng thái "${booking.status}"`);
+    }
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 const expireHeldBookings = async () => {

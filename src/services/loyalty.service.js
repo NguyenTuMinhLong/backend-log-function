@@ -267,6 +267,81 @@ exports.revokePointsOnCancel = async (userId, bookingId) => {
 
 
 // =========================================================
+// REVOKE POINTS FOR REFUND (FULL hoặc PARTIAL)
+// =========================================================
+// Được gọi từ refund.service khi refund hoàn thành
+// - Full refund: revoke toàn bộ điểm đã earn từ booking
+// - Partial refund: revoke theo tỷ lệ % refund
+// =========================================================
+exports.revokePointsForRefund = async (bookingId, userId, refundType = 'full', refundPercent = 100) => {
+  // Lấy điểm đã earn từ booking này
+  const txResult = await db.query(`
+    SELECT amount
+    FROM loyalty_transactions
+    WHERE user_id    = $1
+      AND booking_id = $2
+      AND type       = 'earn'
+    ORDER BY created_at DESC
+    LIMIT 1
+  `, [userId, bookingId]);
+
+  // Booking chưa tích điểm → không cần revoke
+  if (txResult.rows.length === 0) {
+    console.log(`[Loyalty] Booking #${bookingId} chưa có điểm earn → bỏ qua revoke`);
+    return { pointsRevoked: 0 };
+  }
+
+  let pointsToRevoke = parseInt(txResult.rows[0].amount);
+
+  // Nếu là partial refund, tính lại theo tỷ lệ
+  if (refundType !== 'full' && refundPercent < 100) {
+    pointsToRevoke = Math.floor(pointsToRevoke * (refundPercent / 100));
+  }
+
+  // Lấy điểm hiện tại để tính safe revoke
+  const memberResult = await db.query(`
+    SELECT tier_points, current_points
+    FROM user_loyalty
+    WHERE user_id = $1
+  `, [userId]);
+
+  if (memberResult.rows.length === 0) return { pointsRevoked: 0 };
+
+  const { tier_points, current_points } = memberResult.rows[0];
+
+  // Không để điểm âm — trừ tối đa xuống 0
+  const safeRevokeTier = Math.min(pointsToRevoke, parseInt(tier_points));
+  const safeRevokeCurrent = Math.min(pointsToRevoke, parseInt(current_points));
+
+  await db.query(`
+    UPDATE user_loyalty
+    SET
+      tier_points    = tier_points    - $1,
+      current_points = current_points - $2,
+      updated_at     = NOW()
+    WHERE user_id = $3
+  `, [safeRevokeTier, safeRevokeCurrent, userId]);
+
+  // Ghi transaction
+  await db.query(queries.INSERT_TRANSACTION, [
+    userId,
+    bookingId,
+    'revoke',
+    -safeRevokeTier,
+    `Trừ điểm do refund booking #${bookingId} (${refundType}, ${refundPercent}% = -${safeRevokeTier} điểm)`,
+  ]);
+
+  // Check downgrade — sau revoke chỉ xuống tier, không lên
+  await syncTierAfterChange(userId, 'downgrade');
+
+  console.log(
+    `[Loyalty] User ${userId} bị trừ ${safeRevokeTier} điểm do refund booking #${bookingId}`
+  );
+
+  return { pointsRevoked: safeRevokeTier };
+};
+
+// =========================================================
 // REDEEM REWARD
 // =========================================================
 // Flow:
