@@ -84,14 +84,6 @@ const SELECT_FLIGHT_SEAT_CLASS_INFO = `
   ${1 ? "AND ($2::text IS NULL OR fs.class = $2)" : ""}
 `;
 
-const SELECT_OCCUPIED_SEATS = `
-  SELECT seat_number, status
-  FROM flight_seat_assignments
-  WHERE flight_id = $1
-    AND ($2::text IS NULL OR class = $2)
-    AND status = 'occupied'
-`;
-
 // ── Flight by ID ──────────────────────────────────────────────────────────────
 
 const SELECT_FLIGHT_BY_ID = `
