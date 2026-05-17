@@ -1,0 +1,202 @@
+const crypto = require('crypto');
+const https = require('https');
+const { URL } = require('url');
+const config = require('../config/payment.config');
+
+const getEnv = (name, value) => {
+  if (!value) throw new Error(`${name} is not configured`);
+  return value;
+};
+
+const sign = (rawSignature) => {
+  const secretKey = getEnv('MOMO_SECRET_KEY', config.momo.secretKey);
+  return crypto.createHmac('sha256', secretKey).update(rawSignature).digest('hex');
+};
+
+const normalizeAmount = (amount) => {
+  const num = Number(amount || 0);
+  const rate = Number(config.momo.convertRate || 1);
+  if (!Number.isFinite(rate) || rate <= 0) throw new Error('MOMO_CONVERT_RATE is invalid');
+  const converted = Math.round(num * rate);
+  if (!Number.isFinite(converted) || converted <= 0) throw new Error('MoMo amount is invalid');
+  return converted;
+};
+
+const requestJson = (targetUrl, payload) =>
+  new Promise((resolve, reject) => {
+    const url = new URL(targetUrl);
+    const data = JSON.stringify(payload);
+    const req = https.request(
+      {
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
+        path: `${url.pathname}${url.search}`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data),
+        },
+        timeout: 10000,
+      },
+      (res) => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => {
+          try {
+            const parsed = body ? JSON.parse(body) : {};
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              resolve(parsed);
+              return;
+            }
+            reject(new Error(parsed.message || `MoMo request failed with status ${res.statusCode}`));
+          } catch (_) {
+            reject(new Error('Invalid JSON response from MoMo'));
+          }
+        });
+      }
+    );
+    req.on('timeout', () => req.destroy(new Error('MoMo request timeout')));
+    req.on('error', (err) => reject(new Error(err.message || 'Cannot connect to MoMo')));
+    req.write(data);
+    req.end();
+  });
+
+const decodeExtraData = (extraData) => {
+  if (!extraData) return {};
+  try {
+    return JSON.parse(Buffer.from(String(extraData), 'base64').toString('utf8'));
+  } catch (_) {
+    return {};
+  }
+};
+
+const createMomoPaymentInstruction = async (payment) => {
+  if (!config.momo.enabled) {
+    throw new Error('MoMo config is incomplete or disabled');
+  }
+
+  const partnerCode = getEnv('MOMO_PARTNER_CODE', config.momo.partnerCode);
+  const accessKey = getEnv('MOMO_ACCESS_KEY', config.momo.accessKey);
+  const endpoint = getEnv('MOMO_ENDPOINT', config.momo.endpoint);
+  const redirectUrl = getEnv('MOMO_REDIRECT_URL', config.momo.redirectUrl);
+  const ipnUrl = getEnv('MOMO_IPN_URL', config.momo.ipnUrl);
+  const requestType = config.momo.requestType || 'payWithMethod';
+  const lang = config.momo.lang || 'vi';
+
+  const amount = normalizeAmount(payment.final_amount ?? payment.amount ?? 0);
+  const orderId = String(payment.payment_code);
+  const requestId = `REQ_${orderId}_${Date.now()}`;
+  const orderInfo = `Thanh toan don hang ${orderId}`;
+  const extraData = Buffer.from(JSON.stringify({
+    payment_code: payment.payment_code,
+    booking_id: payment.booking_id,
+  })).toString('base64');
+
+  const rawSignature =
+    `accessKey=${accessKey}` +
+    `&amount=${amount}` +
+    `&extraData=${extraData}` +
+    `&ipnUrl=${ipnUrl}` +
+    `&orderId=${orderId}` +
+    `&orderInfo=${orderInfo}` +
+    `&partnerCode=${partnerCode}` +
+    `&redirectUrl=${redirectUrl}` +
+    `&requestId=${requestId}` +
+    `&requestType=${requestType}`;
+
+  const signature = sign(rawSignature);
+
+  const payload = {
+    partnerCode,
+    accessKey,
+    requestId,
+    amount,
+    orderId,
+    orderInfo,
+    redirectUrl,
+    ipnUrl,
+    extraData,
+    requestType,
+    signature,
+    lang,
+  };
+
+  const response = await requestJson(endpoint, payload);
+
+  if (Number(response.resultCode) !== 0) {
+    if (Number(response.resultCode) === 1041 && response.payUrl) {
+      return {
+        provider: 'MOMO',
+        request_id: requestId,
+        order_id: orderId,
+        amount,
+        order_info: orderInfo,
+        request_type: requestType,
+        pay_url: response.payUrl,
+        deeplink: response.deeplink || response.deeplinkMiniApp || null,
+        qr_payload: response.qrCodeUrl || response.payUrl || null,
+        qr_code_url: response.qrCodeUrl || null,
+        extra_data: extraData,
+        raw_response: response,
+      };
+    }
+    throw new Error(response.message || 'MoMo create payment failed');
+  }
+
+  return {
+    provider: 'MOMO',
+    request_id: requestId,
+    order_id: orderId,
+    amount,
+    order_info: orderInfo,
+    request_type: requestType,
+    pay_url: response.payUrl || null,
+    deeplink: response.deeplink || response.deeplinkMiniApp || null,
+    qr_payload: response.qrCodeUrl || response.payUrl || null,
+    qr_code_url: response.qrCodeUrl || null,
+    extra_data: extraData,
+    raw_response: response,
+  };
+};
+
+const verifyMomoCallbackSignature = (body = {}) => {
+  if (!body.signature) return false;
+  const accessKey = getEnv('MOMO_ACCESS_KEY', config.momo.accessKey);
+  const rawSignature =
+    `accessKey=${accessKey}` +
+    `&amount=${body.amount}` +
+    `&extraData=${body.extraData || ''}` +
+    `&message=${body.message}` +
+    `&orderId=${body.orderId}` +
+    `&orderInfo=${body.orderInfo}` +
+    `&orderType=${body.orderType || ''}` +
+    `&partnerCode=${body.partnerCode}` +
+    `&payType=${body.payType || ''}` +
+    `&requestId=${body.requestId}` +
+    `&responseTime=${body.responseTime}` +
+    `&resultCode=${body.resultCode}` +
+    `&transId=${body.transId || ''}`;
+  return sign(rawSignature) === body.signature;
+};
+
+const inferPaymentCode = (body = {}) => {
+  if (body.orderId) return String(body.orderId);
+  const extra = decodeExtraData(body.extraData);
+  return extra.payment_code ? String(extra.payment_code) : '';
+};
+
+const isMomoCancelResult = (resultCode, message = '') => {
+  if ([1003, 1005, 1006, 1007, 1017].includes(Number(resultCode))) return true;
+  return /cancel/i.test(String(message || ''));
+};
+
+module.exports = {
+  createMomoPaymentInstruction,
+  verifyMomoCallbackSignature,
+  inferPaymentCode,
+  normalizeAmount,
+  decodeExtraData,
+  isMomoCancelResult,
+};

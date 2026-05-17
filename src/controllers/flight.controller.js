@@ -108,33 +108,52 @@ const getSeatMap = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/bookings/recommendations
+ * 
+ * Controller chính xử lý request 
+ * 
+ * - Trả về dữ liệu sạch, dễ render 3 card (HAN + SGN, giá, nút Chọn vé)
+ */
 const getFlightRecommendations = async (req, res) => {
   try {
-    const { from, to, user_id, limit = 10 } = req.query;
+    // Lấy tham số từ query string (?from=SGN&to=HAN&limit=10)
+    const { from, to, limit = 10 } = req.query;
+
+    // === LẤY USER ID (hỗ trợ cả đăng nhập JWT lẫn test qua query) ===
+    const userId = req.user?.id || req.query.userId || null;
 
     // Validation
     if (!from || !to) {
-      return res.status(400).json({
-        error: "Thiếu tham số 'from' hoặc 'to' (mã sân bay)",
+      return res.status(400).json({ 
+        error: "Thiếu tham số 'from' hoặc 'to' (mã sân bay)" 
       });
     }
 
     const recommendations = await flightService.recommendFlights({
-      userId: user_id || null,
+      userId: userId,                    
       fromAirport: from.toUpperCase(),
       toAirport: to.toUpperCase(),
-      limit: parseInt(limit) || 10,
+      limit: parseInt(limit) || 10
     });
 
-    res.json({
-      message: "Lấy gợi ý chuyến bay thành công",
-      data: recommendations,
+    res.json({ 
+      message: "Lấy gợi ý chuyến bay thành công", 
+      data: recommendations 
     });
   } catch (err) {
-    console.error("❌ [Flight Recommendation] Error:", err);
-    res.status(500).json({ error: err.message });
+    // Log lỗi chi tiết để debug
+    console.error("[Flight Recommendation Controller] Error:", err);
+
+    // Trả về lỗi server thân thiện với frontend
+    res.status(500).json({
+      success: false,
+      message: "Lỗi server khi lấy gợi ý chuyến bay. Vui lòng thử lại sau.",
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    });
   }
 };
+
 
 /**
  * GET /api/flights/:id/position
