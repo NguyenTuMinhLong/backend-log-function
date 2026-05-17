@@ -155,6 +155,7 @@ const SEARCH_FLIGHTS = (conditions, orderBy) => `
     al.id AS airline_id,
     al.code AS airline_code,
     al.name AS airline_name,
+    al.logo_url AS airline_logo,
     dep.id AS departure_airport_id,
     dep.code AS departure_code,
     dep.city AS departure_city,
