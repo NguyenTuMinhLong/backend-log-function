@@ -14,7 +14,6 @@ const INSERT_REFUND = `
   INSERT INTO refunds (
     refund_code,
     booking_id,
-    payment_id,
     refund_type,
     requested_items,
     refund_amount,
@@ -26,7 +25,7 @@ const INSERT_REFUND = `
     user_notes,
     requested_by
   )
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
   RETURNING *
 `;
 
@@ -48,9 +47,9 @@ const SELECT_REFUND_BY_CODE = `
     admin.full_name AS admin_name
   FROM refunds r
   JOIN bookings b ON r.booking_id = b.id
-  LEFT JOIN payments p ON r.payment_id = p.id
-  LEFT JOIN users u ON r.requested_by = u.id
-  LEFT JOIN users admin ON r.processed_by = admin.id
+  LEFT JOIN payments p ON p.id::text = r.payment_id::text
+  LEFT JOIN users u ON u.id::text = r.requested_by::text
+  LEFT JOIN users admin ON admin.id::text = r.processed_by::text
   WHERE r.refund_code = $1
 `;
 
@@ -68,9 +67,9 @@ const SELECT_REFUND_BY_ID = `
     admin.full_name AS admin_name
   FROM refunds r
   JOIN bookings b ON r.booking_id = b.id
-  LEFT JOIN payments p ON r.payment_id = p.id
-  LEFT JOIN users u ON r.requested_by = u.id
-  LEFT JOIN users admin ON r.processed_by = admin.id
+  LEFT JOIN payments p ON p.id::text = r.payment_id::text
+  LEFT JOIN users u ON u.id::text = r.requested_by::text
+  LEFT JOIN users admin ON admin.id::text = r.processed_by::text
   WHERE r.id = $1
 `;
 
@@ -79,7 +78,7 @@ const SELECT_REFUNDS_BY_BOOKING = `
     r.*,
     admin.full_name AS admin_name
   FROM refunds r
-  LEFT JOIN users admin ON r.processed_by = admin.id
+  LEFT JOIN users admin ON admin.id::text = r.processed_by::text
   WHERE r.booking_id = $1
   ORDER BY r.created_at DESC
 `;
@@ -136,7 +135,7 @@ const SELECT_PENDING_REFUNDS = `
   JOIN flights f ON b.outbound_flight_id = f.id
   JOIN airports dep ON f.departure_airport_id = dep.id
   JOIN airports arr ON f.arrival_airport_id = arr.id
-  LEFT JOIN users u ON r.requested_by = u.id
+  LEFT JOIN users u ON u.id::text = r.requested_by::text
   WHERE r.status = 'pending'
   ORDER BY r.created_at ASC
   LIMIT $1 OFFSET $2
@@ -168,17 +167,14 @@ const SELECT_REFUNDS_ADMIN = (whereClause, idx, idx2) => `
     dep.code AS departure_code,
     arr.code AS arrival_code,
     f.departure_time AS outbound_departure,
-    admin.full_name AS processed_by_name,
-    p.provider AS payment_provider,
-    p.status AS payment_status
+    admin.full_name AS processed_by_name
   FROM refunds r
   JOIN bookings b ON r.booking_id = b.id
   JOIN flights f ON b.outbound_flight_id = f.id
   JOIN airports dep ON f.departure_airport_id = dep.id
   JOIN airports arr ON f.arrival_airport_id = arr.id
-  LEFT JOIN users u ON r.requested_by = u.id
-  LEFT JOIN users admin ON r.processed_by = admin.id
-  LEFT JOIN payments p ON r.payment_id = p.id
+  LEFT JOIN users u ON u.id::text = r.requested_by::text
+  LEFT JOIN users admin ON admin.id::text = r.processed_by::text
   ${whereClause}
   ORDER BY r.created_at DESC
   LIMIT $${idx} OFFSET $${idx2}

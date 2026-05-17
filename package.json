@@ -8,6 +8,8 @@
     "start": "node src/server.js",
     "migrate": "node scripts/runMigrations.js",
     "seed:admin": "node scripts/seedAdmin.js",
+    "db:seed": "node src/seeders/test-data.seeder.js",
+    "db:reset": "node scripts/reset-and-seed.js",
     "test": "node --test tests/unit/*.test.js"
   },
   "keywords": [],
@@ -16,6 +18,7 @@
   "type": "commonjs",
   "dependencies": {
     "@google/genai": "^1.49.0",
+    "@payos/node": "^1.0.10",
     "@supabase/supabase-js": "^2.100.1",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",

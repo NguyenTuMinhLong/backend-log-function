@@ -1,5 +1,6 @@
 // src/services/flight.service.js
 const pool = require('../config/db');
+const QF = require('../queries/flight.queries');
 
 const recommendFlights = async ({ userId, fromAirport, toAirport, limit = 15 }) => {
     console.log(`🔍 [Recommendation TEST] Lấy tất cả chuyến bay scheduled (bỏ filter from/to)`);
@@ -98,6 +99,27 @@ const formatFlights = (rows, adults, children, infants) =>
     };
   });
 
+// ─── Validation ────────────────────────────────────────────────────────────────
+
+const validateSearchParams = ({ departure_code, arrival_code, departure_date, adults, children, infants, seat_class }) => {
+  if (!departure_code) throw new Error("Mã sân bay đi là bắt buộc");
+  if (!arrival_code) throw new Error("Mã sân bay đến là bắt buộc");
+  if (!departure_date) throw new Error("Ngày khởi hành là bắt buộc");
+  
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(departure_date)) throw new Error("Ngày khởi hành không hợp lệ (định dạng: YYYY-MM-DD)");
+  
+  const a = parseInt(adults) || 1;
+  const c = parseInt(children) || 0;
+  const i = parseInt(infants) || 0;
+  if (a < 1) throw new Error("Phải có ít nhất 1 người lớn");
+  if (i > a) throw new Error("Số em bé không được nhiều hơn số người lớn");
+  
+  if (seat_class && !['economy', 'business', 'first'].includes(seat_class.toLowerCase())) {
+    throw new Error("seat_class phải là economy, business hoặc first");
+  }
+};
+
 const queryFlights = async ({
   departure_code, arrival_code, departure_date,
   adults, children, infants,
@@ -122,8 +144,8 @@ const queryFlights = async ({
   const values     = [];
   let   idx        = 1;
 
-  conditions.push(`dep_ap.code = $${idx++}`);            values.push(departure_code.toUpperCase());
-  conditions.push(`arr_ap.code = $${idx++}`);            values.push(arrival_code.toUpperCase());
+  conditions.push(`dep.code = $${idx++}`);            values.push(departure_code.toUpperCase());
+  conditions.push(`arr.code = $${idx++}`);            values.push(arrival_code.toUpperCase());
   conditions.push(`DATE(f.departure_time) = $${idx++}`); values.push(departure_date);
   conditions.push(`fs.class = $${idx++}`);               values.push(cls);
   conditions.push(`fs.available_seats >= $${idx++}`);    values.push(seatsNeeded);
@@ -133,8 +155,8 @@ const queryFlights = async ({
   if (min_price !== undefined && min_price !== "") { conditions.push(`fs.base_price >= $${idx++}`); values.push(parseFloat(min_price)); }
   if (max_price !== undefined && max_price !== "") { conditions.push(`fs.base_price <= $${idx++}`); values.push(parseFloat(max_price)); }
   if (airline_code)   { conditions.push(`al.code = $${idx++}`);                         values.push(airline_code.toUpperCase()); }
-  if (departure_city) { conditions.push(`LOWER(dep_ap.city) LIKE LOWER($${idx++})`);    values.push(`%${departure_city}%`); }
-  if (arrival_city)   { conditions.push(`LOWER(arr_ap.city) LIKE LOWER($${idx++})`);    values.push(`%${arrival_city}%`); }
+  if (departure_city) { conditions.push(`LOWER(dep.city) LIKE LOWER($${idx++})`);    values.push(`%${departure_city}%`); }
+  if (arrival_city)   { conditions.push(`LOWER(arr.city) LIKE LOWER($${idx++})`);    values.push(`%${arrival_city}%`); }
 
   const result = await pool.query(
     QF.SEARCH_FLIGHTS(conditions.join(" AND "), orderBy),
@@ -184,8 +206,12 @@ const searchFlights = async (params) => {
     returnFlights = formatFlights(returnRows, a, c, i);
   }
 
-  const { rows } = await pool.query(query, params);
-  return rows;
+  return {
+    outbound_flights: outboundFlights,
+    return_flights: returnFlights,
+    total_outbound: outboundFlights.length,
+    total_return: returnFlights ? returnFlights.length : 0,
+  };
 };
 
 /**
@@ -406,4 +432,93 @@ const getFlightPosition = async (flightId) => {
   };
 };
 
-module.exports = { recommendFlights };
+// ─── getAirports ───────────────────────────────────────────────────────────────
+
+const getAirports = async () => {
+  const { rows } = await pool.query(QF.SELECT_ALL_AIRPORTS);
+  return rows;
+};
+
+// ─── getAirlines ──────────────────────────────────────────────────────────────
+
+const getAirlines = async () => {
+  const { rows } = await pool.query(QF.SELECT_ALL_AIRLINES);
+  return rows;
+};
+
+// ─── getFlightById ─────────────────────────────────────────────────────────────
+
+const getFlightById = async (flightId, params = {}) => {
+  const { adults = 1, children = 0, infants = 0 } = params;
+  const a = parseInt(adults);
+  const c = parseInt(children);
+  const i = parseInt(infants);
+
+  const result = await pool.query(QF.SELECT_FLIGHT_BY_ID, [flightId]);
+  if (result.rows.length === 0) throw new Error("Không tìm thấy chuyến bay");
+
+  const flight = result.rows[0];
+  const seatsResult = await pool.query(`
+    SELECT * FROM flight_seats WHERE flight_id = $1 ORDER BY base_price
+  `, [flightId]);
+
+  return {
+    ...flight,
+    seats: seatsResult.rows.map(s => ({
+      ...s,
+      total_price: calcTotalPrice(parseFloat(s.base_price), a, c, i),
+    })),
+  };
+};
+
+// ─── getAlternativeFlights ────────────────────────────────────────────────────
+
+const getAlternativeFlights = async (flightId, params = {}) => {
+  const { seat_class = 'economy', adults = 1, children = 0, infants = 0 } = params;
+  const a = parseInt(adults);
+  const c = parseInt(children);
+  const i = parseInt(infants);
+
+  const original = await pool.query(QF.SELECT_FLIGHT_BY_ID, [flightId]);
+  if (original.rows.length === 0) throw new Error("Không tìm thấy chuyến bay");
+
+  const orig = original.rows[0];
+  const departureDate = new Date(orig.departure_time).toISOString().split('T')[0];
+  const seatsNeeded = a + c;
+
+  const result = await pool.query(QF.SEARCH_ALTERNATIVE_FLIGHTS, [
+    flightId, orig.departure_code, orig.arrival_code, seat_class, seatsNeeded, departureDate
+  ]);
+
+  return formatFlights(result.rows, a, c, i);
+};
+
+// ─── getPriceCalendar ──────────────────────────────────────────────────────────
+
+const getPriceCalendar = async (params = {}) => {
+  const { from, to, month, seat_class = 'economy', adults = 1 } = params;
+  if (!from || !to || !month) throw new Error("Thiếu tham số bắt buộc: from, to, month");
+
+  const startDate = month + '-01';
+  const endDate = new Date(month + '-01');
+  endDate.setMonth(endDate.getMonth() + 1);
+  const endDateStr = endDate.toISOString().split('T')[0];
+
+  const result = await pool.query(QF.GET_MIN_PRICES_CALENDAR, [
+    from.toUpperCase(), to.toUpperCase(), seat_class, startDate, endDateStr
+  ]);
+
+  return result.rows;
+};
+
+module.exports = { 
+  recommendFlights,
+  searchFlights,
+  getAirports,
+  getAirlines,
+  getFlightById,
+  getAlternativeFlights,
+  getPriceCalendar,
+  getSeatMap,
+  getFlightPosition,
+};

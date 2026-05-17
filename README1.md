@@ -338,9 +338,137 @@ Frontend có thể hiển thị progress bar cho user:
 
 ---
 
-## 15. NOTES
+## 16. REFUND SYSTEM
+
+### 16.1 Overview
+
+Hệ thống hoàn tiền tích hợp với multiple payment gateways (PayPal, PayOS, MoMo).
+
+### 16.2 Refund Flow
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  User       │────▶│  Pending    │────▶│  Approved    │────▶│  Processing   │
+│  Request    │     │             │     │  (Admin)     │     │  (Admin)      │
+└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+                                                                    │
+                              ┌─────────────────────────────────────┘
+                              ▼
+                     ┌──────────────┐     ┌──────────────┐
+                     │ Payment      │────▶│  Completed   │
+                     │ Gateway      │     │              │
+                     └──────────────┘     └──────────────┘
+```
+
+### 16.3 Refund Types
+
+| Type | Mô tả | Phí (Admin Fee) |
+|------|--------|-----------------|
+| `full` | Hoàn toàn | 0% |
+| `partial` | Một phần | 10% của số tiền hoàn |
+
+### 16.4 Refund Policies
+
+| Policy | Điều kiện | Refund % |
+|--------|-----------|----------|
+| `free_cancellation` | Hủy trước 24h | 100% |
+| `flight_cancelled` | Hãng hủy chuyến | 100% |
+| `schedule_changed` | Đổi lịch trình | 100% |
+| `no_show` | Không lên máy bay | 0% |
+| `partial_refund` | Lý do khác | 90% |
+
+### 16.5 Payment Gateway Integration
+
+#### PayPal
+- Gọi API `refundPayPalCapture()`
+- Cập nhật `payments.status = 'REFUNDED'`
+- Cập nhật `gateway_response` với refund result
+
+#### PayOS
+- Không hỗ trợ refund qua API
+- Đánh dấu `refund_requested = true` trong `gateway_response`
+- Admin cần xử lý thủ công
+
+#### MoMo
+- Không hỗ trợ refund qua API
+- Đánh dấu `refund_requested = true` trong `gateway_response`
+- Admin cần xử lý thủ công
+
+### 16.6 API Endpoints
+
+#### User Endpoints
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| POST | `/api/bookings/:bookingCode/refund` | Yêu cầu hoàn tiền |
+| GET | `/api/bookings/:bookingCode/refunds` | Danh sách refunds |
+| GET | `/api/refunds/my` | Lịch sử refund của tôi |
+| GET | `/api/refunds/:refundCode` | Chi tiết refund |
+| DELETE | `/api/refunds/:refundCode` | Hủy yêu cầu (pending/approved) |
+
+#### Admin Endpoints
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| GET | `/api/admin/refunds` | Danh sách (filter) |
+| GET | `/api/admin/refunds/pending` | Danh sách chờ duyệt |
+| GET | `/api/admin/refunds/stats` | Thống kê |
+| GET | `/api/admin/refunds/:refundCode` | Chi tiết |
+| POST | `/api/admin/refunds/:refundCode/approve` | Duyệt |
+| POST | `/api/admin/refunds/:refundCode/reject` | Từ chối |
+| POST | `/api/admin/refunds/:refundCode/complete` | Hoàn thành (gọi gateway) |
+| POST | `/api/admin/refunds/:refundCode/cancel` | Hủy refund |
+
+### 16.7 File Structure
+
+```
+src/
+├── services/refund.service.js     ← Business logic + reversePayment()
+├── queries/refund.queries.js      ← SQL queries
+├── controllers/
+│   ├── refund.controller.js       ← User endpoints
+│   └── admin/refund.controller.js  ← Admin endpoints
+└── routes/
+    ├── refund.routes.js           ← User routes
+    └── admin.routes.js            ← Admin routes (A-08)
+```
+
+### 16.8 Reverse Payment Logic
+
+```javascript
+// Trong reversePayment(paymentId, amount)
+// 1. Lấy payment từ DB để xác định gateway
+// 2. Theo provider:
+//    - PAYPAL: Gọi refundPayPalCapture() → API thật
+//    - PAYOS: Đánh dấu refund_requested
+//    - MOMO: Đánh dấu refund_requested
+// 3. Cập nhật payments.status = 'REFUNDED'
+// 4. Trả về kết quả
+```
+
+### 16.9 Integration với Loyalty
+
+Khi refund completed:
+- `revokePointsForRefund()` được gọi
+- Trừ `tier_points` và `current_points`
+- Không trừ `lifetime_points`
+- Check tier downgrade nếu cần
+
+### 16.10 Edge Cases
+
+| Trường hợp | Xử lý |
+|-----------|--------|
+| Refund khi payment_id null | Bỏ qua gateway call, vẫn cập nhật refund status |
+| Payment không tìm thấy | Log warning, return true để không block refund |
+| Gateway call fail | Cập nhật status = 'failed', throw error |
+| User hủy refund đang processing | Không cho phép, chỉ hủy pending/approved |
+| Nhiều refund cho 1 booking | Chỉ cho phép 1 pending/approved/processing |
+
+---
+
+## 17. NOTES
 
 - Tất cả điểm đều là số nguyên (dùng `floor()` để tránh số lẻ)
 - `membership_number` format: `VVD` + 9 chữ số cuối của timestamp
 - Voucher code format: `VOUCHER-XXXXXXXX` (8 ký tự hex ngẫu nhiên)
 - Cron job có `ROLLBACK` nếu lỗi → đảm bảo tính atomic
+- Refund code format: `REF` + random số
+- Payment gateway refund chỉ gọi khi admin complete refund

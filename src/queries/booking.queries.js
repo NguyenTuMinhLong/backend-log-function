@@ -89,7 +89,6 @@ const SELECT_MY_BOOKINGS = (dk) =>
    JOIN airports arr ON arr.id = f.arrival_airport_id
    JOIN airlines al  ON al.id  = f.airline_id
    LEFT JOIN passengers p ON p.booking_id = b.id
-   WHERE b.user_id = $1
    ${dk}
    GROUP BY b.id, f.id, dep.id, arr.id, al.id
    ORDER BY b.created_at DESC`;

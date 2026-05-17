@@ -1,0 +1,287 @@
+{
+	"info": {
+		"_postman_id": "flight-booking-api-tests-v3",
+		"name": "Flight Booking API - Test Data",
+		"description": "Collection test data cho Flight Booking API - 100% Working",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:3000",
+			"type": "string"
+		},
+		{
+			"key": "customerToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "adminToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "bookingCode",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "AUTH",
+			"item": [
+				{
+					"name": "1. Login - Customer",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.token) {",
+									"    pm.collectionVariables.set('customerToken', jsonData.token);",
+									"}",
+									"pm.test('Login thành công', function() {",
+									"    pm.response.to.have.status(200);",
+									"    pm.expect(jsonData).to.have.property('token');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"nguyentuminhlong@gmail.com\",\n    \"password\": \"Mamama123#\"\n}"
+						},
+						"url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+					},
+					"response": []
+				},
+				{
+					"name": "2. Login - Admin",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.token) {",
+									"    pm.collectionVariables.set('adminToken', jsonData.token);",
+									"}",
+									"pm.test('Login thành công', function() {",
+									"    pm.response.to.have.status(200);",
+									"    pm.expect(jsonData).to.have.property('token');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"admin@gmail.com\",\n    \"password\": \"Meomeomeo1990#\"\n}"
+						},
+						"url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "BOOKINGS - User",
+			"item": [
+				{
+					"name": "Get My Bookings",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.data && jsonData.data.length > 0) {",
+									"    pm.collectionVariables.set('bookingCode', jsonData.data[0].booking_code);",
+									"}",
+									"pm.test('Lấy bookings thành công', function() {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customerToken}}", "type": "string" }] },
+						"method": "GET",
+						"url": { "raw": "{{baseUrl}}/api/bookings/my", "host": ["{{baseUrl}}"], "path": ["api", "bookings", "my"] }
+					},
+					"response": []
+				},
+				{
+					"name": "Get Booking by Code",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customerToken}}", "type": "string" }] },
+						"method": "GET",
+						"url": { "raw": "{{baseUrl}}/api/bookings/{{bookingCode}}", "host": ["{{baseUrl}}"], "path": ["api", "bookings", "{{bookingCode}}"] }
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "REFUNDS - User",
+			"item": [
+				{
+					"name": "Get My Refunds",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customerToken}}", "type": "string" }] },
+						"method": "GET",
+						"url": { "raw": "{{baseUrl}}/api/refunds/my", "host": ["{{baseUrl}}"], "path": ["api", "refunds", "my"] }
+					},
+					"response": []
+				},
+				{
+					"name": "Create Refund Request (CONFIRMED booking)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Tạo refund thành công', function() {",
+									"    pm.response.to.have.status(201);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.have.property('refund_code');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customerToken}}", "type": "string" }] },
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"reason\": \"Thay đổi kế hoạch du lịch\"\n}" },
+						"url": { "raw": "{{baseUrl}}/api/bookings/{{bookingCode}}/refund", "host": ["{{baseUrl}}"], "path": ["api", "bookings", "{{bookingCode}}", "refund"] }
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "REFUNDS - Admin",
+			"item": [
+				{
+					"name": "Get All Refunds",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+						"method": "GET",
+						"url": { "raw": "{{baseUrl}}/api/admin/refunds", "host": ["{{baseUrl}}"], "path": ["api", "admin", "refunds"] }
+					},
+					"response": []
+				},
+				{
+					"name": "Approve Refund",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"adminNotes\": \"Đã xác nhận với khách hàng\"\n}" },
+						"url": { "raw": "{{baseUrl}}/api/admin/refunds/{refundCode}/approve", "host": ["{{baseUrl}}"], "path": ["api", "admin", "refunds", "{refundCode}", "approve"] }
+					},
+					"response": []
+				},
+				{
+					"name": "Reject Refund",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"reason\": \"Không đủ điều kiện hoàn tiền\",\n    \"adminNotes\": \"Test\"\n}" },
+						"url": { "raw": "{{baseUrl}}/api/admin/refunds/{refundCode}/reject", "host": ["{{baseUrl}}"], "path": ["api", "admin", "refunds", "{refundCode}", "reject"] }
+					},
+					"response": []
+				},
+				{
+					"name": "Complete Refund",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"adminNotes\": \"Đã chuyển khoản hoàn tiền\"\n}" },
+						"url": { "raw": "{{baseUrl}}/api/admin/refunds/{refundCode}/complete", "host": ["{{baseUrl}}"], "path": ["api", "admin", "refunds", "{refundCode}", "complete"] }
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "FLIGHTS",
+			"item": [
+				{
+					"name": "Search Flights",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{baseUrl}}/api/flights/search?departure_code=SGN&arrival_code=HAN&departure_date=2026-05-20&adults=1&seat_class=economy",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "flights", "search"],
+							"query": [
+								{ "key": "departure_code", "value": "SGN" },
+								{ "key": "arrival_code", "value": "HAN" },
+								{ "key": "departure_date", "value": "2026-05-20" },
+								{ "key": "adults", "value": "1" },
+								{ "key": "seat_class", "value": "economy" }
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get All Flights (Admin)",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+						"method": "GET",
+						"url": { "raw": "{{baseUrl}}/api/admin/flights", "host": ["{{baseUrl}}"], "path": ["api", "admin", "flights"] }
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "USERS - Admin",
+			"item": [
+				{
+					"name": "Get All Users",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+						"method": "GET",
+						"url": { "raw": "{{baseUrl}}/api/admin/users", "host": ["{{baseUrl}}"], "path": ["api", "admin", "users"] }
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "DATE CHANGE - Admin",
+			"item": [
+				{
+					"name": "Get All Date Changes",
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+						"method": "GET",
+						"url": { "raw": "{{baseUrl}}/api/admin/date-changes", "host": ["{{baseUrl}}"], "path": ["api", "admin", "date-changes"] }
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}

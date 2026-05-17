@@ -4,6 +4,7 @@ const { rollbackReservedVoucherUsageForBooking } = require("./payment.service");
 const QB = require("../queries/booking.queries");
 const QF = require("../queries/flight.queries");
 const QP = require("../queries/payment.queries");
+const QB2 = { SELECT_MY_BOOKINGS: QB.SELECT_MY_BOOKINGS };
 
 // ====================== THÊM LOYALTY SERVICE ======================
 const loyaltyService = require('../services/loyalty.service');
@@ -327,7 +328,37 @@ const getBookingDetail = async (bookingCode, userId = null) => {
 // ─── getMyBookings ────────────────────────────────────────────────────────────
 
 const getMyBookings = async (userId, filter = "all", from_date, to_date) => {
-  // ... (giữ nguyên)
+  const conditions = [];
+  const values = [];
+  let idx = 1;
+
+  conditions.push(`b.user_id = $${idx++}`);
+  values.push(userId);
+
+  if (filter === "upcoming") {
+    conditions.push(`b.status IN ('confirmed', 'pending')`);
+    conditions.push(`f.departure_time > NOW()`);
+  } else if (filter === "completed") {
+    conditions.push(`b.status = 'confirmed'`);
+    conditions.push(`f.departure_time <= NOW()`);
+  } else if (filter === "cancelled") {
+    conditions.push(`b.status IN ('cancelled', 'refunded')`);
+  }
+
+  if (from_date) {
+    conditions.push(`DATE(b.created_at) >= $${idx++}`);
+    values.push(from_date);
+  }
+  if (to_date) {
+    conditions.push(`DATE(b.created_at) <= $${idx++}`);
+    values.push(to_date);
+  }
+
+  const dk = `WHERE ${conditions.join(' AND ')}`;
+  const query = QB2.SELECT_MY_BOOKINGS(dk);
+  
+  const result = await pool.query(query, values);
+  return result.rows;
 };
 
 const cancelBooking = async (userId, bookingCode, reason = null) => {

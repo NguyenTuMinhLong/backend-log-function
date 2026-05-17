@@ -53,11 +53,11 @@ const getRefunds = async (req, res) => {
       values.push(to_date);
     }
 
-    const dk = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const [dataResult, countResult] = await Promise.all([
-      pool.query(QR.SELECT_REFUNDS_ADMIN(dk, idx, idx + 1), [...values, parseInt(limit), offset]),
-      pool.query(QR.COUNT_REFUNDS_ADMIN(dk), values),
+      pool.query(QR.SELECT_REFUNDS_ADMIN(whereClause, idx, idx + 1), [...values, parseInt(limit), offset]),
+      pool.query(QR.COUNT_REFUNDS_ADMIN(whereClause), values),
     ]);
 
     const total = parseInt(countResult.rows[0].count);
