@@ -30,8 +30,12 @@ const authenticate = async (req, res, next) => {
 
     const token = authHeader.split(" ")[1];
 
+    console.log("🔑 [Auth Middleware] Token:", token.substring(0, 30) + "...");
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const { user, reason } = await loadUserAuthState(decoded.id);
+
+    console.log("👤 [Auth Middleware] User ID nhận được:", user ? user.id : "NULL");
 
     if (!user) {
       return res.status(reason === "ACCOUNT_DISABLED" ? 403 : 401).json({

@@ -2,7 +2,6 @@
 
 /**
  * SQL queries liên quan đến bảng flights và flight_seats
- * Được dùng bởi: admin.flight.service.js, flight.service.js, booking.service.js
  */
 
 // ── Admin: Flights ─────────────────────────────────────────────────────────────
@@ -41,320 +40,333 @@ const SELECT_FLIGHTS = (dk, gioiHan, viTri) =>
    ORDER BY f.departure_time ASC
    LIMIT $${gioiHan} OFFSET $${viTri}`;
 
-const FIND_FLIGHT_BY_ID =
-  `SELECT * FROM flights WHERE id = $1`;
+// ── Seats ─────────────────────────────────────────────────────────────────────
 
-const INSERT_FLIGHT =
-  `INSERT INTO flights (
-     flight_number, airline_id,
-     departure_airport_id, arrival_airport_id,
-     departure_time, arrival_time,
-     duration_minutes, status
-   ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'scheduled')
-   RETURNING *`;
+const SELECT_SEAT_INFO = `
+  SELECT 
+    fs.*, 
+    f.departure_time, f.status
+  FROM flight_seats fs
+  JOIN flights f ON f.id = fs.flight_id
+  WHERE fs.flight_id = $1 AND fs.class = $2
+`;
 
-const INSERT_FLIGHT_SEAT =
-  `INSERT INTO flight_seats (
-     flight_id, class, total_seats, available_seats, base_price,
-     baggage_included_kg, carry_on_kg, extra_baggage_price
-   ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`;
+const DECREASE_AVAILABLE_SEATS = `
+  UPDATE flight_seats
+  SET available_seats = available_seats - $1, updated_at = NOW()
+  WHERE flight_id = $2 AND class = $3
+  RETURNING *
+`;
 
-const UPDATE_FLIGHT_FIELDS = (truong, stt) =>
-  `UPDATE flights SET ${truong.join(", ")} WHERE id = $${stt}`;
+const INCREASE_AVAILABLE_SEATS = `
+  UPDATE flight_seats
+  SET available_seats = available_seats + $1, updated_at = NOW()
+  WHERE flight_id = $2 AND class = $3
+  RETURNING *
+`;
 
-const FIND_FLIGHT_SEAT =
-  `SELECT id FROM flight_seats WHERE flight_id = $1 AND class = $2`;
+const INSERT_FLIGHT_SEAT = `
+  INSERT INTO flight_seats (flight_id, class, total_seats, available_seats, base_price, baggage_included_kg, carry_on_kg, extra_baggage_price)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+  RETURNING *
+`;
 
-const UPDATE_FLIGHT_SEAT_FIELDS = (truongGhe, sttGhe) =>
-  `UPDATE flight_seats SET ${truongGhe.join(", ")}
-   WHERE flight_id = $${sttGhe} AND class = $${sttGhe + 1}`;
+const SELECT_FLIGHT_SEAT_CLASS_INFO = `
+  SELECT fs.*, f.flight_number, f.status as flight_status, f.departure_time,
+         al.code as airline_code, al.name as airline_name,
+         dep.code as departure_code, arr.code as arrival_code
+  FROM flight_seats fs
+  JOIN flights f ON f.id = fs.flight_id
+  JOIN airlines al ON al.id = f.airline_id
+  JOIN airports dep ON dep.id = f.departure_airport_id
+  JOIN airports arr ON arr.id = f.arrival_airport_id
+  WHERE fs.flight_id = $1
+  ${1 ? "AND ($2::text IS NULL OR fs.class = $2)" : ""}
+`;
 
-// Dùng khi INSERT seat trong updateFlight (available_seats = total_seats)
-const INSERT_FLIGHT_SEAT_UPSERT =
-  `INSERT INTO flight_seats (
-     flight_id, class, total_seats, available_seats, base_price,
-     baggage_included_kg, carry_on_kg, extra_baggage_price
-   ) VALUES ($1, $2, $3, $3, $4, $5, $6, $7)`;
+const SELECT_OCCUPIED_SEATS = `
+  SELECT seat_number, status
+  FROM flight_seat_assignments
+  WHERE flight_id = $1
+    AND ($2::text IS NULL OR class = $2)
+    AND status = 'occupied'
+`;
 
-const UPDATE_FLIGHT_STATUS =
-  `UPDATE flights SET status = $1, updated_at = NOW() WHERE id = $2
-   RETURNING id, flight_number, status`;
+// ── Flight by ID ──────────────────────────────────────────────────────────────
 
-const FIND_FLIGHT_VISIBILITY =
-  `SELECT id, flight_number, is_active FROM flights WHERE id = $1`;
+const SELECT_FLIGHT_BY_ID = `
+  SELECT 
+    f.*,
+    al.code AS airline_code, al.name AS airline_name,
+    dep.code AS departure_code, dep.city AS departure_city, dep.name AS departure_name,
+    arr.code AS arrival_code, arr.city AS arrival_city, arr.name AS arrival_name
+  FROM flights f
+  JOIN airlines al ON al.id = f.airline_id
+  JOIN airports dep ON dep.id = f.departure_airport_id
+  JOIN airports arr ON arr.id = f.arrival_airport_id
+  WHERE f.id = $1
+`;
 
-const SET_FLIGHT_VISIBILITY =
-  `UPDATE flights SET is_active = $1, updated_at = NOW() WHERE id = $2`;
+const SELECT_FLIGHTS_BY_IDS = `
+  SELECT 
+    f.*,
+    al.code AS airline_code, al.name AS airline_name,
+    dep.code AS departure_code, dep.city AS departure_city,
+    arr.code AS arrival_code, arr.city AS arrival_city
+  FROM flights f
+  JOIN airlines al ON al.id = f.airline_id
+  JOIN airports dep ON dep.id = f.departure_airport_id
+  JOIN airports arr ON arr.id = f.arrival_airport_id
+  WHERE f.id = ANY($1)
+`;
 
-// ── Public: Search Flights ─────────────────────────────────────────────────────
+// ── Search Flights ───────────────────────────────────────────────────────────
 
-const SEARCH_FLIGHTS = (dk, sapXep) =>
-  `SELECT
-     f.id                    AS flight_id,
-     f.flight_number,
-     f.departure_time,
-     f.arrival_time,
-     f.duration_minutes,
-     f.status,
-     al.id                   AS airline_id,
-     al.code                 AS airline_code,
-     al.name                 AS airline_name,
-     al.logo_url             AS airline_logo,
-     dep_ap.id               AS departure_airport_id,
-     dep_ap.code             AS departure_code,
-     dep_ap.name             AS departure_airport_name,
-     dep_ap.city             AS departure_city,
-     arr_ap.id               AS arrival_airport_id,
-     arr_ap.code             AS arrival_code,
-     arr_ap.name             AS arrival_airport_name,
-     arr_ap.city             AS arrival_city,
-     fs.class                AS seat_class,
-     fs.available_seats,
-     fs.total_seats,
-     fs.base_price,
-     fs.baggage_included_kg,
-     fs.carry_on_kg,
-     fs.extra_baggage_price
-   FROM flights f
-   JOIN airlines     al     ON al.id     = f.airline_id
-   JOIN airports     dep_ap ON dep_ap.id = f.departure_airport_id
-   JOIN airports     arr_ap ON arr_ap.id = f.arrival_airport_id
-   JOIN flight_seats fs     ON fs.flight_id = f.id
-   WHERE ${dk}
-   ORDER BY ${sapXep}`;
+const SEARCH_FLIGHTS = (conditions, orderBy) => `
+  SELECT 
+    f.id AS flight_id,
+    f.flight_number,
+    f.departure_time,
+    f.arrival_time,
+    f.duration_minutes,
+    f.status,
+    al.id AS airline_id,
+    al.code AS airline_code,
+    al.name AS airline_name,
+    dep.id AS departure_airport_id,
+    dep.code AS departure_code,
+    dep.city AS departure_city,
+    dep.name AS departure_airport_name,
+    arr.id AS arrival_airport_id,
+    arr.code AS arrival_code,
+    arr.city AS arrival_city,
+    arr.name AS arrival_airport_name,
+    fs.class AS seat_class,
+    fs.total_seats,
+    fs.available_seats,
+    fs.base_price,
+    fs.baggage_included_kg,
+    fs.carry_on_kg,
+    fs.extra_baggage_price
+  FROM flights f
+  JOIN airlines al ON al.id = f.airline_id
+  JOIN airports dep ON dep.id = f.departure_airport_id
+  JOIN airports arr ON arr.id = f.arrival_airport_id
+  JOIN flight_seats fs ON fs.flight_id = f.id
+  WHERE ${conditions}
+  ORDER BY ${orderBy}
+`;
 
-const SELECT_FLIGHT_BY_ID =
-  `SELECT
-     f.id, f.flight_number, f.departure_time, f.arrival_time,
-     f.duration_minutes, f.status,
-     al.code AS airline_code, al.name AS airline_name, al.logo_url,
-     dep.code AS departure_code, dep.name AS departure_name, dep.city AS departure_city,
-     arr.code AS arrival_code,  arr.name AS arrival_name,  arr.city AS arrival_city,
-     json_agg(
-       json_build_object(
-         'class',               fs.class,
-         'available_seats',     fs.available_seats,
-         'total_seats',         fs.total_seats,
-         'base_price',          fs.base_price,
-         'baggage_included_kg', fs.baggage_included_kg,
-         'carry_on_kg',         fs.carry_on_kg,
-         'extra_baggage_price', fs.extra_baggage_price
-       ) ORDER BY fs.base_price
-     ) AS seats
-   FROM flights f
-   JOIN airlines     al  ON al.id  = f.airline_id
-   JOIN airports     dep ON dep.id = f.departure_airport_id
-   JOIN airports     arr ON arr.id = f.arrival_airport_id
-   JOIN flight_seats fs  ON fs.flight_id = f.id
-   WHERE f.id = $1
-   GROUP BY f.id, al.code, al.name, al.logo_url,
-            dep.code, dep.name, dep.city,
-            arr.code, arr.name, arr.city`;
+const SEARCH_FLIGHTS_BASE = `
+  SELECT 
+    f.id AS flight_id,
+    f.flight_number,
+    f.departure_time,
+    f.arrival_time,
+    f.duration_minutes,
+    f.status,
+    al.id AS airline_id,
+    al.code AS airline_code,
+    al.name AS airline_name,
+    dep.id AS departure_airport_id,
+    dep.code AS departure_code,
+    dep.city AS departure_city,
+    dep.name AS departure_airport_name,
+    arr.id AS arrival_airport_id,
+    arr.code AS arrival_code,
+    arr.city AS arrival_city,
+    arr.name AS arrival_airport_name,
+    fs.class AS seat_class,
+    fs.total_seats,
+    fs.available_seats,
+    fs.base_price,
+    fs.baggage_included_kg,
+    fs.carry_on_kg,
+    fs.extra_baggage_price
+  FROM flights f
+  JOIN airlines al ON al.id = f.airline_id
+  JOIN airports dep ON dep.id = f.departure_airport_id
+  JOIN airports arr ON arr.id = f.arrival_airport_id
+  JOIN flight_seats fs ON fs.flight_id = f.id
+  WHERE f.status = 'scheduled'
+    AND f.is_active = true
+    AND f.departure_time > NOW()
+    AND dep.code = $1
+    AND arr.code = $2
+    AND fs.class = $3
+    AND DATE(f.departure_time) = $4
+    AND fs.available_seats >= $5
+`;
 
-// ── Public: Alternative Flights (SB-01) ───────────────────────────────────────
+// ── Alternative Flights ───────────────────────────────────────────────────────
 
-/**
- * Lấy thông tin chi tiết chuyến bay gốc kèm thông tin ghế theo class
- * $1 = flight_id, $2 = seat_class
- */
-const SELECT_ORIGINAL_FLIGHT =
-  `SELECT
-     f.id               AS flight_id,
-     f.flight_number,
-     f.departure_time,
-     f.arrival_time,
-     f.duration_minutes,
-     f.status,
-     al.id              AS airline_id,
-     al.code            AS airline_code,
-     al.name            AS airline_name,
-     al.logo_url        AS airline_logo,
-     dep.id             AS departure_airport_id,
-     dep.code           AS departure_code,
-     dep.name           AS departure_airport_name,
-     dep.city           AS departure_city,
-     arr.id             AS arrival_airport_id,
-     arr.code           AS arrival_code,
-     arr.name           AS arrival_airport_name,
-     arr.city           AS arrival_city,
-     fs.class           AS seat_class,
-     fs.available_seats,
-     fs.total_seats,
-     fs.base_price,
-     fs.baggage_included_kg,
-     fs.carry_on_kg,
-     fs.extra_baggage_price
-   FROM flights f
-   JOIN airlines     al  ON al.id  = f.airline_id
-   JOIN airports     dep ON dep.id = f.departure_airport_id
-   JOIN airports     arr ON arr.id = f.arrival_airport_id
-   LEFT JOIN flight_seats fs ON fs.flight_id = f.id AND fs.class = $2
-   WHERE f.id = $1`;
+const SEARCH_ALTERNATIVE_FLIGHTS = `
+  SELECT 
+    f.id AS flight_id,
+    f.flight_number,
+    f.departure_time,
+    f.arrival_time,
+    f.duration_minutes,
+    al.code AS airline_code,
+    al.name AS airline_name,
+    dep.code AS departure_code,
+    dep.city AS departure_city,
+    arr.code AS arrival_code,
+    arr.city AS arrival_city,
+    fs.class AS seat_class,
+    fs.available_seats,
+    fs.base_price,
+    fs.baggage_included_kg,
+    fs.extra_baggage_price
+  FROM flights f
+  JOIN airlines al ON al.id = f.airline_id
+  JOIN airports dep ON dep.id = f.departure_airport_id
+  JOIN airports arr ON arr.id = f.arrival_airport_id
+  JOIN flight_seats fs ON fs.flight_id = f.id
+  WHERE f.status = 'scheduled'
+    AND f.is_active = true
+    AND f.departure_time > NOW()
+    AND f.id != $1
+    AND dep.code = $2
+    AND arr.code = $3
+    AND fs.class = $4
+    AND fs.available_seats >= $5
+    AND DATE(f.departure_time) = $6
+  ORDER BY fs.base_price ASC
+  LIMIT 5
+`;
 
-/**
- * Tìm chuyến bay cùng tuyến cùng ngày còn ghế, loại trừ chuyến gốc
- * $1=excl_flight_id $2=dep_airport_id $3=arr_airport_id $4=dep_date $5=seat_class $6=seats_needed
- */
-const SELECT_SAME_ROUTE_ALTERNATIVES =
-  `SELECT
-     f.id               AS flight_id,
-     f.flight_number,
-     f.departure_time,
-     f.arrival_time,
-     f.duration_minutes,
-     f.status,
-     al.id              AS airline_id,
-     al.code            AS airline_code,
-     al.name            AS airline_name,
-     al.logo_url        AS airline_logo,
-     dep.id             AS departure_airport_id,
-     dep.code           AS departure_code,
-     dep.name           AS departure_airport_name,
-     dep.city           AS departure_city,
-     arr.id             AS arrival_airport_id,
-     arr.code           AS arrival_code,
-     arr.name           AS arrival_airport_name,
-     arr.city           AS arrival_city,
-     fs.class           AS seat_class,
-     fs.available_seats,
-     fs.total_seats,
-     fs.base_price,
-     fs.baggage_included_kg,
-     fs.carry_on_kg,
-     fs.extra_baggage_price
-   FROM flights f
-   JOIN airlines     al  ON al.id  = f.airline_id
-   JOIN airports     dep ON dep.id = f.departure_airport_id
-   JOIN airports     arr ON arr.id = f.arrival_airport_id
-   JOIN flight_seats fs  ON fs.flight_id = f.id AND fs.class = $5
-   WHERE f.id                   != $1
-     AND f.departure_airport_id  = $2
-     AND f.arrival_airport_id    = $3
-     AND DATE(f.departure_time)  = $4
-     AND fs.available_seats      >= $6
-     AND f.status                = 'scheduled'
-     AND f.is_active             = TRUE
-   ORDER BY fs.base_price ASC`;
+// ── Price Calendar ───────────────────────────────────────────────────────────
 
-/**
- * Tìm chuyến bay có quá cảnh (1 điểm dừng) rẻ hơn chuyến gốc
- * $1=dep_airport_id $2=arr_airport_id $3=dep_date $4=seat_class $5=seats_needed $6=price_limit
- */
-const SELECT_LAYOVER_FLIGHTS =
-  `SELECT
-     f1.id              AS leg1_flight_id,
-     f1.flight_number   AS leg1_flight_number,
-     f1.departure_time  AS leg1_departure_time,
-     f1.arrival_time    AS leg1_arrival_time,
-     f1.duration_minutes AS leg1_duration_minutes,
-     al1.id             AS leg1_airline_id,
-     al1.code           AS leg1_airline_code,
-     al1.name           AS leg1_airline_name,
-     al1.logo_url       AS leg1_airline_logo,
-     fs1.available_seats AS leg1_available_seats,
-     fs1.base_price     AS leg1_base_price,
-     fs1.baggage_included_kg AS leg1_baggage_included_kg,
-     fs1.carry_on_kg    AS leg1_carry_on_kg,
-     fs1.extra_baggage_price AS leg1_extra_baggage_price,
-     hub.id             AS hub_airport_id,
-     hub.code           AS hub_code,
-     hub.name           AS hub_name,
-     hub.city           AS hub_city,
-     f2.id              AS leg2_flight_id,
-     f2.flight_number   AS leg2_flight_number,
-     f2.departure_time  AS leg2_departure_time,
-     f2.arrival_time    AS leg2_arrival_time,
-     f2.duration_minutes AS leg2_duration_minutes,
-     al2.id             AS leg2_airline_id,
-     al2.code           AS leg2_airline_code,
-     al2.name           AS leg2_airline_name,
-     al2.logo_url       AS leg2_airline_logo,
-     fs2.available_seats AS leg2_available_seats,
-     fs2.base_price     AS leg2_base_price,
-     fs2.baggage_included_kg AS leg2_baggage_included_kg,
-     fs2.carry_on_kg    AS leg2_carry_on_kg,
-     fs2.extra_baggage_price AS leg2_extra_baggage_price,
-     (fs1.base_price + fs2.base_price) AS combined_base_price,
-     EXTRACT(EPOCH FROM (f2.departure_time - f1.arrival_time)) / 60 AS layover_minutes
-   FROM flights f1
-   JOIN airlines     al1 ON al1.id = f1.airline_id
-   JOIN airports     hub ON hub.id = f1.arrival_airport_id
-   JOIN flight_seats fs1 ON fs1.flight_id = f1.id AND fs1.class = $4
-   JOIN flights      f2  ON f2.departure_airport_id = hub.id
-                         AND f2.arrival_airport_id   = $2
-                         AND DATE(f2.departure_time)  = $3
-   JOIN airlines     al2 ON al2.id = f2.airline_id
-   JOIN flight_seats fs2 ON fs2.flight_id = f2.id AND fs2.class = $4
-   WHERE f1.departure_airport_id  = $1
-     AND DATE(f1.departure_time)  = $3
-     AND f1.status = 'scheduled'  AND f1.is_active = TRUE
-     AND f2.status = 'scheduled'  AND f2.is_active = TRUE
-     AND fs1.available_seats      >= $5
-     AND fs2.available_seats      >= $5
-     AND hub.id != $1
-     AND hub.id != $2
-     AND f2.departure_time > f1.arrival_time + INTERVAL '1 hour'
-     AND f2.departure_time < f1.arrival_time + INTERVAL '8 hours'
-     AND (fs1.base_price + fs2.base_price) < $6
-   ORDER BY combined_base_price ASC
-   LIMIT 5`;
+const GET_MIN_PRICES_CALENDAR = `
+  SELECT 
+    DATE(f.departure_time) AS flight_date,
+    MIN(fs.base_price) AS min_price
+  FROM flights f
+  JOIN airports dep ON dep.id = f.departure_airport_id
+  JOIN airports arr ON arr.id = f.arrival_airport_id
+  JOIN flight_seats fs ON fs.flight_id = f.id
+  WHERE f.status = 'scheduled'
+    AND f.is_active = true
+    AND f.departure_time > NOW()
+    AND dep.code = $1
+    AND arr.code = $2
+    AND fs.class = $3
+    AND DATE(f.departure_time) >= $4
+    AND DATE(f.departure_time) <= $5
+  GROUP BY DATE(f.departure_time)
+  ORDER BY DATE(f.departure_time)
+`;
 
-// ── Public: Price Calendar (SB-02) ────────────────────────────────────────────
+// ── Airports & Airlines ──────────────────────────────────────────────────────
 
-/**
- * Lấy giá vé thấp nhất mỗi ngày trong khoảng thời gian cho một tuyến bay
- * $1=departure_code $2=arrival_code $3=date_from $4=date_to $5=seat_class $6=seats_needed
- */
-const SELECT_PRICE_CALENDAR =
-  `SELECT
-     DATE(f.departure_time)  AS flight_date,
-     MIN(fs.base_price)      AS min_price,
-     COUNT(f.id)             AS flight_count
-   FROM flights f
-   JOIN airports     dep ON dep.id = f.departure_airport_id
-   JOIN airports     arr ON arr.id = f.arrival_airport_id
-   JOIN flight_seats fs  ON fs.flight_id = f.id AND fs.class = $5
-   WHERE UPPER(dep.code)         = UPPER($1)
-     AND UPPER(arr.code)         = UPPER($2)
-     AND DATE(f.departure_time) >= $3
-     AND DATE(f.departure_time) <= $4
-     AND fs.available_seats      >= $6
-     AND f.status                = 'scheduled'
-     AND f.is_active             = TRUE
-   GROUP BY DATE(f.departure_time)
-   ORDER BY flight_date ASC`;
+const SELECT_ALL_AIRPORTS = `
+  SELECT id, code, name, city, country
+  FROM airports
+  WHERE is_active = true
+  ORDER BY city
+`;
 
-// ── Public: Seat Map (SB-03) ──────────────────────────────────────────────────
+const SELECT_ALL_AIRLINES = `
+  SELECT id, code, name, logo_url
+  FROM airlines
+  WHERE is_active = true
+  ORDER BY name
+`;
 
-/**
- * Lấy thông tin ghế (tổng số, class) của một chuyến bay theo class
- * $1=flight_id, $2=seat_class (optional – nếu NULL lấy tất cả class)
- */
-const SELECT_FLIGHT_SEAT_CLASS_INFO =
-  `SELECT
-     fs.class,
-     fs.total_seats,
-     fs.available_seats,
-     fs.base_price,
-     fs.baggage_included_kg,
-     fs.carry_on_kg,
-     f.flight_number,
-     f.status        AS flight_status,
-     f.departure_time,
-     al.name         AS airline_name,
-     al.code         AS airline_code,
-     dep.code        AS departure_code,
-     arr.code        AS arrival_code
-   FROM flight_seats fs
-   JOIN flights  f   ON f.id   = fs.flight_id
-   JOIN airlines al  ON al.id  = f.airline_id
-   JOIN airports dep ON dep.id = f.departure_airport_id
-   JOIN airports arr ON arr.id = f.arrival_airport_id
-   WHERE fs.flight_id = $1
-     AND ($2::VARCHAR IS NULL OR fs.class = $2)
-   ORDER BY
-     CASE fs.class WHEN 'first' THEN 1 WHEN 'business' THEN 2 ELSE 3 END`;
+// ── Recommendation Queries ────────────────────────────────────────────────────
 
+const GET_USER_BOOKED_FLIGHT_IDS = `
+  SELECT DISTINCT outbound_flight_id 
+  FROM bookings 
+  WHERE user_id = $1 AND status = 'confirmed'
+`;
+
+const GET_HISTORY_RECOMMENDATIONS_GENERAL = `
+  SELECT 
+    f.*,
+    a.name as airline_name,
+    dep.code as departure_code,
+    arr.code as arrival_code,
+    'Tuyến bay bạn hay đi' as reason
+  FROM flights f
+  JOIN airlines a ON f.airline_id = a.id
+  JOIN airports dep ON f.departure_airport_id = dep.id
+  JOIN airports arr ON f.arrival_airport_id = arr.id
+  WHERE f.id != ALL($1)
+    AND f.status = 'scheduled'
+    AND f.is_active = true
+    AND f.departure_time > NOW()
+  ORDER BY f.departure_time ASC
+  LIMIT $2
+`;
+
+const GET_HISTORY_RECOMMENDATIONS_ROUTE = `
+  SELECT 
+    f.*,
+    a.name as airline_name,
+    dep.code as departure_code,
+    arr.code as arrival_code,
+    'Tuyến bay bạn hay đi' as reason
+  FROM flights f
+  JOIN airlines a ON f.airline_id = a.id
+  JOIN airports dep ON f.departure_airport_id = dep.id
+  JOIN airports arr ON f.arrival_airport_id = arr.id
+  WHERE dep.code = $1 
+    AND arr.code = $2
+    AND f.id != ALL($3)
+    AND f.status = 'scheduled'
+    AND f.is_active = true
+    AND f.departure_time > NOW()
+  ORDER BY f.departure_time ASC
+  LIMIT $4
+`;
+
+const GET_POPULAR_FLIGHTS_GENERAL = `
+  SELECT 
+    f.*,
+    a.name as airline_name,
+    dep.code as departure_code,
+    arr.code as arrival_code,
+    'Chuyến bay phổ biến' as reason
+  FROM flights f
+  JOIN airlines a ON f.airline_id = a.id
+  JOIN airports dep ON f.departure_airport_id = dep.id
+  JOIN airports arr ON f.arrival_airport_id = arr.id
+  LEFT JOIN bookings b ON b.outbound_flight_id = f.id
+  WHERE f.status = 'scheduled'
+    AND f.is_active = true
+    AND f.departure_time > NOW()
+  GROUP BY f.id, a.name, dep.code, arr.code
+  ORDER BY COUNT(b.id) DESC, f.departure_time ASC
+  LIMIT $1
+`;
+
+const GET_POPULAR_FLIGHTS_ROUTE = `
+  SELECT 
+    f.*,
+    a.name as airline_name,
+    dep.code as departure_code,
+    arr.code as arrival_code,
+    'Chuyến bay phổ biến' as reason
+  FROM flights f
+  JOIN airlines a ON f.airline_id = a.id
+  JOIN airports dep ON f.departure_airport_id = dep.id
+  JOIN airports arr ON f.arrival_airport_id = arr.id
+  LEFT JOIN bookings b ON b.outbound_flight_id = f.id
+  WHERE dep.code = $1 
+    AND arr.code = $2
+    AND f.status = 'scheduled'
+    AND f.is_active = true
+    AND f.departure_time > NOW()
+  GROUP BY f.id, a.name, dep.code, arr.code
+  ORDER BY COUNT(b.id) DESC, f.departure_time ASC
+  LIMIT $3
+`;
+
+// ── Module Exports ────────────────────────────────────────────────────────────
+
+// ── Module Exports ────────────────────────────────────────────────────────────
 /**
  * Lấy danh sách ghế đã được gán (occupied) cho chuyến bay theo class
  * $1=flight_id, $2=seat_class (optional)
@@ -413,8 +425,11 @@ const INCREASE_AVAILABLE_SEATS =
    WHERE flight_id = $2 AND class = $3`;
 
 module.exports = {
+  // Admin
   COUNT_FLIGHTS,
   SELECT_FLIGHTS,
+
+  // Seats
   FIND_FLIGHT_BY_ID,
   INSERT_FLIGHT,
   INSERT_FLIGHT_SEAT,
@@ -437,4 +452,28 @@ module.exports = {
   SELECT_SEAT_INFO,
   DECREASE_AVAILABLE_SEATS,
   INCREASE_AVAILABLE_SEATS,
+  INSERT_FLIGHT_SEAT,
+  SELECT_FLIGHT_SEAT_CLASS_INFO,
+  SELECT_OCCUPIED_SEATS,
+
+  // Flight by ID
+  SELECT_FLIGHT_BY_ID,
+  SELECT_FLIGHTS_BY_IDS,
+
+  // Search
+  SEARCH_FLIGHTS,
+  SEARCH_FLIGHTS_BASE,
+  SEARCH_ALTERNATIVE_FLIGHTS,
+  GET_MIN_PRICES_CALENDAR,
+
+  // Reference
+  SELECT_ALL_AIRPORTS,
+  SELECT_ALL_AIRLINES,
+
+  // Recommendations
+  GET_USER_BOOKED_FLIGHT_IDS,
+  GET_HISTORY_RECOMMENDATIONS_GENERAL,
+  GET_HISTORY_RECOMMENDATIONS_ROUTE,
+  GET_POPULAR_FLIGHTS_GENERAL,
+  GET_POPULAR_FLIGHTS_ROUTE,
 };
