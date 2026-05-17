@@ -40,30 +40,58 @@ const SELECT_FLIGHTS = (dk, gioiHan, viTri) =>
    ORDER BY f.departure_time ASC
    LIMIT $${gioiHan} OFFSET $${viTri}`;
 
+// ── Admin: Flight CRUD ─────────────────────────────────────────────────────────
+
+const INSERT_FLIGHT = `
+  INSERT INTO flights
+    (flight_number, airline_id, departure_airport_id, arrival_airport_id,
+     departure_time, arrival_time, duration_minutes)
+  VALUES ($1, $2, $3, $4, $5, $6, $7)
+  RETURNING *
+`;
+
+const UPDATE_FLIGHT_FIELDS = (fields, idx) =>
+  `UPDATE flights SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`;
+
+const FIND_FLIGHT_SEAT = `
+  SELECT * FROM flight_seats
+  WHERE flight_id = $1 AND class = $2
+`;
+
+const UPDATE_FLIGHT_SEAT_FIELDS = (seatFields, sidx) =>
+  `UPDATE flight_seats SET ${seatFields.join(', ')}
+   WHERE flight_id = $${sidx} AND class = $${sidx + 1}`;
+
+const INSERT_FLIGHT_SEAT_UPSERT = `
+  INSERT INTO flight_seats
+    (flight_id, class, total_seats, available_seats, base_price,
+     baggage_included_kg, carry_on_kg, extra_baggage_price)
+  VALUES ($1, $2, $3, $3, $4, $5, $6, $7)
+  ON CONFLICT (flight_id, class) DO UPDATE SET
+    total_seats         = EXCLUDED.total_seats,
+    base_price          = EXCLUDED.base_price,
+    baggage_included_kg = EXCLUDED.baggage_included_kg,
+    carry_on_kg         = EXCLUDED.carry_on_kg,
+    extra_baggage_price = EXCLUDED.extra_baggage_price,
+    updated_at          = NOW()
+  RETURNING *
+`;
+
+const UPDATE_FLIGHT_STATUS = `
+  UPDATE flights SET status = $1, updated_at = NOW()
+  WHERE id = $2
+  RETURNING id, flight_number, status
+`;
+
+const FIND_FLIGHT_VISIBILITY = `
+  SELECT id, flight_number, is_active FROM flights WHERE id = $1
+`;
+
+const SET_FLIGHT_VISIBILITY = `
+  UPDATE flights SET is_active = $1, updated_at = NOW() WHERE id = $2
+`;
+
 // ── Seats ─────────────────────────────────────────────────────────────────────
-
-const SELECT_SEAT_INFO = `
-  SELECT 
-    fs.*, 
-    f.departure_time, f.status
-  FROM flight_seats fs
-  JOIN flights f ON f.id = fs.flight_id
-  WHERE fs.flight_id = $1 AND fs.class = $2
-`;
-
-const DECREASE_AVAILABLE_SEATS = `
-  UPDATE flight_seats
-  SET available_seats = available_seats - $1, updated_at = NOW()
-  WHERE flight_id = $2 AND class = $3
-  RETURNING *
-`;
-
-const INCREASE_AVAILABLE_SEATS = `
-  UPDATE flight_seats
-  SET available_seats = available_seats + $1, updated_at = NOW()
-  WHERE flight_id = $2 AND class = $3
-  RETURNING *
-`;
 
 const INSERT_FLIGHT_SEAT = `
   INSERT INTO flight_seats (flight_id, class, total_seats, available_seats, base_price, baggage_included_kg, carry_on_kg, extra_baggage_price)
@@ -84,18 +112,10 @@ const SELECT_FLIGHT_SEAT_CLASS_INFO = `
   ${1 ? "AND ($2::text IS NULL OR fs.class = $2)" : ""}
 `;
 
-const SELECT_OCCUPIED_SEATS = `
-  SELECT seat_number, status
-  FROM flight_seat_assignments
-  WHERE flight_id = $1
-    AND ($2::text IS NULL OR class = $2)
-    AND status = 'occupied'
-`;
-
 // ── Flight by ID ──────────────────────────────────────────────────────────────
 
 const SELECT_FLIGHT_BY_ID = `
-  SELECT 
+  SELECT
     f.*,
     al.code AS airline_code, al.name AS airline_name,
     dep.code AS departure_code, dep.city AS departure_city, dep.name AS departure_name,
@@ -107,8 +127,10 @@ const SELECT_FLIGHT_BY_ID = `
   WHERE f.id = $1
 `;
 
+const FIND_FLIGHT_BY_ID = SELECT_FLIGHT_BY_ID;
+
 const SELECT_FLIGHTS_BY_IDS = `
-  SELECT 
+  SELECT
     f.*,
     al.code AS airline_code, al.name AS airline_name,
     dep.code AS departure_code, dep.city AS departure_city,
@@ -120,10 +142,10 @@ const SELECT_FLIGHTS_BY_IDS = `
   WHERE f.id = ANY($1)
 `;
 
-// ── Search Flights ───────────────────────────────────────────────────────────
+// ── Search Flights ────────────────────────────────────────────────────────────
 
 const SEARCH_FLIGHTS = (conditions, orderBy) => `
-  SELECT 
+  SELECT
     f.id AS flight_id,
     f.flight_number,
     f.departure_time,
@@ -133,6 +155,7 @@ const SEARCH_FLIGHTS = (conditions, orderBy) => `
     al.id AS airline_id,
     al.code AS airline_code,
     al.name AS airline_name,
+    al.logo_url AS airline_logo,
     dep.id AS departure_airport_id,
     dep.code AS departure_code,
     dep.city AS departure_city,
@@ -158,7 +181,7 @@ const SEARCH_FLIGHTS = (conditions, orderBy) => `
 `;
 
 const SEARCH_FLIGHTS_BASE = `
-  SELECT 
+  SELECT
     f.id AS flight_id,
     f.flight_number,
     f.departure_time,
@@ -201,7 +224,7 @@ const SEARCH_FLIGHTS_BASE = `
 // ── Alternative Flights ───────────────────────────────────────────────────────
 
 const SEARCH_ALTERNATIVE_FLIGHTS = `
-  SELECT 
+  SELECT
     f.id AS flight_id,
     f.flight_number,
     f.departure_time,
@@ -236,10 +259,10 @@ const SEARCH_ALTERNATIVE_FLIGHTS = `
   LIMIT 5
 `;
 
-// ── Price Calendar ───────────────────────────────────────────────────────────
+// ── Price Calendar ────────────────────────────────────────────────────────────
 
 const GET_MIN_PRICES_CALENDAR = `
-  SELECT 
+  SELECT
     DATE(f.departure_time) AS flight_date,
     MIN(fs.base_price) AS min_price
   FROM flights f
@@ -258,7 +281,7 @@ const GET_MIN_PRICES_CALENDAR = `
   ORDER BY DATE(f.departure_time)
 `;
 
-// ── Airports & Airlines ──────────────────────────────────────────────────────
+// ── Airports & Airlines ───────────────────────────────────────────────────────
 
 const SELECT_ALL_AIRPORTS = `
   SELECT id, code, name, city, country
@@ -277,13 +300,13 @@ const SELECT_ALL_AIRLINES = `
 // ── Recommendation Queries ────────────────────────────────────────────────────
 
 const GET_USER_BOOKED_FLIGHT_IDS = `
-  SELECT DISTINCT outbound_flight_id 
-  FROM bookings 
+  SELECT DISTINCT outbound_flight_id
+  FROM bookings
   WHERE user_id = $1 AND status = 'confirmed'
 `;
 
 const GET_HISTORY_RECOMMENDATIONS_GENERAL = `
-  SELECT 
+  SELECT
     f.*,
     a.name as airline_name,
     dep.code as departure_code,
@@ -302,7 +325,7 @@ const GET_HISTORY_RECOMMENDATIONS_GENERAL = `
 `;
 
 const GET_HISTORY_RECOMMENDATIONS_ROUTE = `
-  SELECT 
+  SELECT
     f.*,
     a.name as airline_name,
     dep.code as departure_code,
@@ -312,7 +335,7 @@ const GET_HISTORY_RECOMMENDATIONS_ROUTE = `
   JOIN airlines a ON f.airline_id = a.id
   JOIN airports dep ON f.departure_airport_id = dep.id
   JOIN airports arr ON f.arrival_airport_id = arr.id
-  WHERE dep.code = $1 
+  WHERE dep.code = $1
     AND arr.code = $2
     AND f.id != ALL($3)
     AND f.status = 'scheduled'
@@ -323,7 +346,7 @@ const GET_HISTORY_RECOMMENDATIONS_ROUTE = `
 `;
 
 const GET_POPULAR_FLIGHTS_GENERAL = `
-  SELECT 
+  SELECT
     f.*,
     a.name as airline_name,
     dep.code as departure_code,
@@ -343,7 +366,7 @@ const GET_POPULAR_FLIGHTS_GENERAL = `
 `;
 
 const GET_POPULAR_FLIGHTS_ROUTE = `
-  SELECT 
+  SELECT
     f.*,
     a.name as airline_name,
     dep.code as departure_code,
@@ -354,7 +377,7 @@ const GET_POPULAR_FLIGHTS_ROUTE = `
   JOIN airports dep ON f.departure_airport_id = dep.id
   JOIN airports arr ON f.arrival_airport_id = arr.id
   LEFT JOIN bookings b ON b.outbound_flight_id = f.id
-  WHERE dep.code = $1 
+  WHERE dep.code = $1
     AND arr.code = $2
     AND f.status = 'scheduled'
     AND f.is_active = true
@@ -364,13 +387,8 @@ const GET_POPULAR_FLIGHTS_ROUTE = `
   LIMIT $3
 `;
 
-// ── Module Exports ────────────────────────────────────────────────────────────
+// ── Occupied Seats ────────────────────────────────────────────────────────────
 
-// ── Module Exports ────────────────────────────────────────────────────────────
-/**
- * Lấy danh sách ghế đã được gán (occupied) cho chuyến bay theo class
- * $1=flight_id, $2=seat_class (optional)
- */
 const SELECT_OCCUPIED_SEATS =
   `SELECT seat_number, class, status
    FROM flight_seat_assignments
@@ -378,12 +396,8 @@ const SELECT_OCCUPIED_SEATS =
      AND ($2::VARCHAR IS NULL OR class = $2)
    ORDER BY seat_number`;
 
-// ── Public: Flight Position / Tracker (SB-04) ────────────────────────────────
+// ── Flight Position / Tracker ─────────────────────────────────────────────────
 
-/**
- * Lấy tọa độ 2 sân bay và thông tin thời gian để tính vị trí máy bay realtime
- * $1 = flight_id
- */
 const SELECT_FLIGHT_POSITION =
   `SELECT
      f.id,
@@ -404,7 +418,7 @@ const SELECT_FLIGHT_POSITION =
    JOIN airports arr ON arr.id = f.arrival_airport_id
    WHERE f.id = $1`;
 
-// ── Booking: Seat info ─────────────────────────────────────────────────────────
+// ── Booking: Seat info ────────────────────────────────────────────────────────
 
 const SELECT_SEAT_INFO =
   `SELECT fs.base_price, fs.available_seats, fs.total_seats,
@@ -424,39 +438,29 @@ const INCREASE_AVAILABLE_SEATS =
    SET available_seats = available_seats + $1, updated_at = NOW()
    WHERE flight_id = $2 AND class = $3`;
 
+// ── Module Exports ────────────────────────────────────────────────────────────
+
 module.exports = {
-  // Admin
+  // Admin - list
   COUNT_FLIGHTS,
   SELECT_FLIGHTS,
 
-  // Seats
-  FIND_FLIGHT_BY_ID,
+  // Admin - flight CRUD
   INSERT_FLIGHT,
-  INSERT_FLIGHT_SEAT,
   UPDATE_FLIGHT_FIELDS,
+  FIND_FLIGHT_BY_ID,
   FIND_FLIGHT_SEAT,
   UPDATE_FLIGHT_SEAT_FIELDS,
   INSERT_FLIGHT_SEAT_UPSERT,
   UPDATE_FLIGHT_STATUS,
   FIND_FLIGHT_VISIBILITY,
   SET_FLIGHT_VISIBILITY,
-  SEARCH_FLIGHTS,
-  SELECT_FLIGHT_BY_ID,
-  SELECT_ORIGINAL_FLIGHT,
-  SELECT_SAME_ROUTE_ALTERNATIVES,
-  SELECT_LAYOVER_FLIGHTS,
-  SELECT_PRICE_CALENDAR,
-  SELECT_FLIGHT_SEAT_CLASS_INFO,
-  SELECT_OCCUPIED_SEATS,
-  SELECT_FLIGHT_POSITION,
-  SELECT_SEAT_INFO,
-  DECREASE_AVAILABLE_SEATS,
-  INCREASE_AVAILABLE_SEATS,
+
+  // Admin - seats
   INSERT_FLIGHT_SEAT,
   SELECT_FLIGHT_SEAT_CLASS_INFO,
-  SELECT_OCCUPIED_SEATS,
 
-  // Flight by ID
+  // Flight lookup
   SELECT_FLIGHT_BY_ID,
   SELECT_FLIGHTS_BY_IDS,
 
@@ -466,7 +470,7 @@ module.exports = {
   SEARCH_ALTERNATIVE_FLIGHTS,
   GET_MIN_PRICES_CALENDAR,
 
-  // Reference
+  // Reference data
   SELECT_ALL_AIRPORTS,
   SELECT_ALL_AIRLINES,
 
@@ -476,4 +480,11 @@ module.exports = {
   GET_HISTORY_RECOMMENDATIONS_ROUTE,
   GET_POPULAR_FLIGHTS_GENERAL,
   GET_POPULAR_FLIGHTS_ROUTE,
+
+  // Booking
+  SELECT_OCCUPIED_SEATS,
+  SELECT_FLIGHT_POSITION,
+  SELECT_SEAT_INFO,
+  DECREASE_AVAILABLE_SEATS,
+  INCREASE_AVAILABLE_SEATS,
 };
