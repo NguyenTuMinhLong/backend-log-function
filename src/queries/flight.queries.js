@@ -64,7 +64,7 @@ const SELECT_FLIGHT_SEAT_CLASS_INFO = `
 // ── Flight by ID ──────────────────────────────────────────────────────────────
 
 const SELECT_FLIGHT_BY_ID = `
-  SELECT 
+  SELECT
     f.*,
     al.code AS airline_code, al.name AS airline_name,
     dep.code AS departure_code, dep.city AS departure_city, dep.name AS departure_name,
@@ -75,6 +75,8 @@ const SELECT_FLIGHT_BY_ID = `
   JOIN airports arr ON arr.id = f.arrival_airport_id
   WHERE f.id = $1
 `;
+
+const FIND_FLIGHT_BY_ID = SELECT_FLIGHT_BY_ID;
 
 const SELECT_FLIGHTS_BY_IDS = `
   SELECT 
