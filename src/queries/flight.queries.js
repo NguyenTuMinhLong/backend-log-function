@@ -42,29 +42,6 @@ const SELECT_FLIGHTS = (dk, gioiHan, viTri) =>
 
 // ── Seats ─────────────────────────────────────────────────────────────────────
 
-const SELECT_SEAT_INFO = `
-  SELECT 
-    fs.*, 
-    f.departure_time, f.status
-  FROM flight_seats fs
-  JOIN flights f ON f.id = fs.flight_id
-  WHERE fs.flight_id = $1 AND fs.class = $2
-`;
-
-const DECREASE_AVAILABLE_SEATS = `
-  UPDATE flight_seats
-  SET available_seats = available_seats - $1, updated_at = NOW()
-  WHERE flight_id = $2 AND class = $3
-  RETURNING *
-`;
-
-const INCREASE_AVAILABLE_SEATS = `
-  UPDATE flight_seats
-  SET available_seats = available_seats + $1, updated_at = NOW()
-  WHERE flight_id = $2 AND class = $3
-  RETURNING *
-`;
-
 const INSERT_FLIGHT_SEAT = `
   INSERT INTO flight_seats (flight_id, class, total_seats, available_seats, base_price, baggage_included_kg, carry_on_kg, extra_baggage_price)
   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
