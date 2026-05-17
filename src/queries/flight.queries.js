@@ -367,6 +367,62 @@ const GET_POPULAR_FLIGHTS_ROUTE = `
 // ── Module Exports ────────────────────────────────────────────────────────────
 
 // ── Module Exports ────────────────────────────────────────────────────────────
+/**
+ * Lấy danh sách ghế đã được gán (occupied) cho chuyến bay theo class
+ * $1=flight_id, $2=seat_class (optional)
+ */
+const SELECT_OCCUPIED_SEATS =
+  `SELECT seat_number, class, status
+   FROM flight_seat_assignments
+   WHERE flight_id = $1
+     AND ($2::VARCHAR IS NULL OR class = $2)
+   ORDER BY seat_number`;
+
+// ── Public: Flight Position / Tracker (SB-04) ────────────────────────────────
+
+/**
+ * Lấy tọa độ 2 sân bay và thông tin thời gian để tính vị trí máy bay realtime
+ * $1 = flight_id
+ */
+const SELECT_FLIGHT_POSITION =
+  `SELECT
+     f.id,
+     f.flight_number,
+     f.departure_time,
+     f.duration_minutes,
+     f.status,
+     dep.code AS dep_code,
+     dep.city AS dep_city,
+     dep.lat  AS dep_lat,
+     dep.lng  AS dep_lng,
+     arr.code AS arr_code,
+     arr.city AS arr_city,
+     arr.lat  AS arr_lat,
+     arr.lng  AS arr_lng
+   FROM flights f
+   JOIN airports dep ON dep.id = f.departure_airport_id
+   JOIN airports arr ON arr.id = f.arrival_airport_id
+   WHERE f.id = $1`;
+
+// ── Booking: Seat info ─────────────────────────────────────────────────────────
+
+const SELECT_SEAT_INFO =
+  `SELECT fs.base_price, fs.available_seats, fs.total_seats,
+          fs.baggage_included_kg, fs.carry_on_kg, fs.extra_baggage_price,
+          f.status, f.departure_time
+   FROM flight_seats fs
+   JOIN flights f ON f.id = fs.flight_id
+   WHERE fs.flight_id = $1 AND fs.class = $2`;
+
+const DECREASE_AVAILABLE_SEATS =
+  `UPDATE flight_seats
+   SET available_seats = available_seats - $1, updated_at = NOW()
+   WHERE flight_id = $2 AND class = $3`;
+
+const INCREASE_AVAILABLE_SEATS =
+  `UPDATE flight_seats
+   SET available_seats = available_seats + $1, updated_at = NOW()
+   WHERE flight_id = $2 AND class = $3`;
 
 module.exports = {
   // Admin
@@ -374,6 +430,25 @@ module.exports = {
   SELECT_FLIGHTS,
 
   // Seats
+  FIND_FLIGHT_BY_ID,
+  INSERT_FLIGHT,
+  INSERT_FLIGHT_SEAT,
+  UPDATE_FLIGHT_FIELDS,
+  FIND_FLIGHT_SEAT,
+  UPDATE_FLIGHT_SEAT_FIELDS,
+  INSERT_FLIGHT_SEAT_UPSERT,
+  UPDATE_FLIGHT_STATUS,
+  FIND_FLIGHT_VISIBILITY,
+  SET_FLIGHT_VISIBILITY,
+  SEARCH_FLIGHTS,
+  SELECT_FLIGHT_BY_ID,
+  SELECT_ORIGINAL_FLIGHT,
+  SELECT_SAME_ROUTE_ALTERNATIVES,
+  SELECT_LAYOVER_FLIGHTS,
+  SELECT_PRICE_CALENDAR,
+  SELECT_FLIGHT_SEAT_CLASS_INFO,
+  SELECT_OCCUPIED_SEATS,
+  SELECT_FLIGHT_POSITION,
   SELECT_SEAT_INFO,
   DECREASE_AVAILABLE_SEATS,
   INCREASE_AVAILABLE_SEATS,

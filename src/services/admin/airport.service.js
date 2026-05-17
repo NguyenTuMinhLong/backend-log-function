@@ -1,5 +1,6 @@
-const pool = require("../../config/db");
-const Q    = require("../../queries/airport.queries");
+const pool        = require("../../config/db");
+const Q           = require("../../queries/airport.queries");
+const { getCoords } = require("../../utils/geocoding");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -83,8 +84,21 @@ const createAirport = async (data) => {
     throw new Error(`Sân bay với code "${code.toUpperCase()}" đã tồn tại`);
   }
 
-  const result = await pool.query(Q.INSERT_AIRPORT, [code, name, city, country, timezone]);
-  return result.rows[0];
+  const result  = await pool.query(Q.INSERT_AIRPORT, [code, name, city, country, timezone]);
+  const airport = result.rows[0];
+
+  // Tự động lấy tọa độ từ Nominatim
+  const coords = await getCoords(name, city, country);
+  if (coords) {
+    await pool.query(
+      `UPDATE airports SET lat = $1, lng = $2 WHERE id = $3`,
+      [coords.lat, coords.lng, airport.id]
+    );
+    airport.lat = coords.lat;
+    airport.lng = coords.lng;
+  }
+
+  return airport;
 };
 
 /**
