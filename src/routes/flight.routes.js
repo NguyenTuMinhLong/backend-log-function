@@ -7,9 +7,9 @@ router.get("/airports",        flightController.getAirports);
 router.get("/airlines",        flightController.getAirlines);
 router.get("/alternatives",    flightController.getAlternativeFlights);
 router.get("/price-calendar",  flightController.getPriceCalendar);
-router.get("/:id/seat-map",    flightController.getSeatMap);
-// router.get("/:id/position",    flightController.getFlightPosition); // lấy vị trí máy bay
-router.get("/:id",             flightController.getFlightById);
 router.get("/recommendations", flightController.getFlightRecommendations);
+router.get("/:id/seat-map",    flightController.getSeatMap);
+router.get("/:id/position",    flightController.getFlightPosition);
+router.get("/:id",             flightController.getFlightById);
 
 module.exports = router;
