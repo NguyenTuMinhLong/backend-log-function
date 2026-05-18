@@ -110,8 +110,13 @@ const syncWishlist = async (userId, localItems = []) => {
       }
 
       // Insert, bỏ qua nếu đã có (ON CONFLICT DO NOTHING)
-      await pool.query(Q.SYNC_WISHLIST_GUEST_TO_USER, [userId, flightIdInt, normalizedClass]);
-      synced++;
+      // rowCount = 0 nghĩa là đã tồn tại → skipped, rowCount = 1 → synced mới
+      const insertResult = await pool.query(Q.SYNC_WISHLIST_GUEST_TO_USER, [userId, flightIdInt, normalizedClass]);
+      if (insertResult.rowCount > 0) {
+        synced++;
+      } else {
+        skipped++; // Đã có trong wishlist rồi
+      }
     } catch {
       skipped++;
     }
