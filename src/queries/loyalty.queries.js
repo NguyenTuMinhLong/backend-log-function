@@ -30,9 +30,11 @@ const GET_USER_LOYALTY = `
     ul.lifetime_points,
     ul.tier_points,
     ul.current_points,
-    lt.name       AS tier_name,
+    lt.name                  AS tier_name,
     lt.multiplier,
-    lt.benefits
+    lt.benefits,
+    lt.rank_bages_url_light  AS badge_url_light,
+    lt.rank_bages_url_dark   AS badge_url_dark
 
   FROM user_loyalty ul
   JOIN loyalty_tiers lt

@@ -142,7 +142,9 @@ exports.getMembershipInfo = async (userId, lang = 'vi') => {
     multiplier: parseFloat(data.multiplier),
     next_tier,
     progress,
-    benefits: (TIER_BENEFITS[data.tier_name]?.[lang]) || data.benefits || [],
+    benefits:       (TIER_BENEFITS[data.tier_name]?.[lang]) || data.benefits || [],
+    badge_url_light: data.badge_url_light || null,
+    badge_url_dark:  data.badge_url_dark  || null,
   };
 };
 
