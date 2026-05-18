@@ -80,7 +80,20 @@ const INSERT_FLIGHT_SEAT_UPSERT = `
 const UPDATE_FLIGHT_STATUS = `
   UPDATE flights SET status = $1, updated_at = NOW()
   WHERE id = $2
-  RETURNING id, flight_number, status
+  RETURNING id, flight_number, status, departure_time, arrival_time
+`;
+
+const GET_AFFECTED_BOOKINGS_BY_FLIGHT = `
+  SELECT DISTINCT
+    b.id            AS booking_id,
+    b.booking_code,
+    b.user_id,
+    b.contact_email,
+    b.contact_name,
+    b.status        AS booking_status
+  FROM bookings b
+  WHERE (b.outbound_flight_id = $1 OR b.return_flight_id = $1)
+    AND b.status IN ('pending', 'confirmed')
 `;
 
 const FIND_FLIGHT_VISIBILITY = `
@@ -453,6 +466,7 @@ module.exports = {
   UPDATE_FLIGHT_SEAT_FIELDS,
   INSERT_FLIGHT_SEAT_UPSERT,
   UPDATE_FLIGHT_STATUS,
+  GET_AFFECTED_BOOKINGS_BY_FLIGHT,
   FIND_FLIGHT_VISIBILITY,
   SET_FLIGHT_VISIBILITY,
 

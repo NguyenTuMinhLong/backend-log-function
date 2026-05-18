@@ -50,12 +50,13 @@ const updateFlight = async (req, res) => {
  */
 const updateFlightStatus = async (req, res) => {
   try {
-    const { status } = req.body;
+    const { status, reason = "" } = req.body;
     if (!status) return res.status(400).json({ error: "status là bắt buộc" });
 
     const result = await adminFlightService.updateFlightStatus(
       req.params.id,
       status,
+      reason,  // Lý do delay/cancel → gửi kèm trong socket + email
     );
     res.json({ message: result.message, data: result });
   } catch (err) {
