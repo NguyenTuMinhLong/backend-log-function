@@ -23,7 +23,8 @@ router.get('/membership', authenticateOptional, async (req, res) => {
       });
     }
 
-    const data = await loyaltyService.getMembershipInfo(userId);
+    const lang = req.query.lang || req.headers['accept-language']?.slice(0, 2) || 'vi';
+    const data = await loyaltyService.getMembershipInfo(userId, lang);
 
     return res.json({
       success: true,

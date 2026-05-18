@@ -80,9 +80,31 @@ const calcNextTierAndProgress = (currentTierName, tierPoints) => {
 
 
 // =========================================================
+// BENEFITS — song ngữ, fallback sang DB nếu tier không khớp
+// =========================================================
+const TIER_BENEFITS = {
+  Member: {
+    vi: ["Tích điểm không giới hạn", "Ưu đãi 5% cho chuyến bay tiếp theo", "Truy cập ưu tiên vào khuyến mãi"],
+    en: ["Unlimited point earning", "5% discount on your next flight", "Priority access to promotions"],
+  },
+  Silver: {
+    vi: ["Nhân 1.25x điểm tích lũy", "Ưu đãi 10% cho chuyến bay", "Hỗ trợ khách hàng ưu tiên", "Hoàn vé ưu đãi hơn"],
+    en: ["1.25x point multiplier", "10% flight discount", "Priority customer support", "Better refund terms"],
+  },
+  Gold: {
+    vi: ["Nhân 1.5x điểm tích lũy", "Ưu đãi 15% cho chuyến bay", "Hành lý miễn phí thêm 10kg", "Đổi vé miễn phí 1 lần/năm"],
+    en: ["1.5x point multiplier", "15% flight discount", "Free extra 10kg baggage", "1 free ticket change/year"],
+  },
+  Platinum: {
+    vi: ["Nhân 1.75x điểm tích lũy", "Ưu đãi 20% cho chuyến bay", "Hành lý miễn phí thêm 20kg", "Hỗ trợ VIP 24/7", "Đổi vé không giới hạn"],
+    en: ["1.75x point multiplier", "20% flight discount", "Free extra 20kg baggage", "VIP 24/7 support", "Unlimited ticket changes"],
+  },
+};
+
+// =========================================================
 // GET MEMBERSHIP INFO
 // =========================================================
-exports.getMembershipInfo = async (userId) => {
+exports.getMembershipInfo = async (userId, lang = 'vi') => {
 
   let result = await db.query(queries.GET_USER_LOYALTY, [userId]);
 
@@ -120,7 +142,7 @@ exports.getMembershipInfo = async (userId) => {
     multiplier: parseFloat(data.multiplier),
     next_tier,
     progress,
-    benefits: data.benefits || [],
+    benefits: (TIER_BENEFITS[data.tier_name]?.[lang]) || data.benefits || [],
   };
 };
 
