@@ -140,13 +140,14 @@ const GET_AVAILABLE_REWARDS = `
     description,
     points_required,
     discount_amount,
-    is_active
+    is_active,
+    COALESCE(category, 'voucher') AS category
 
   FROM loyalty_rewards
 
   WHERE is_active = true
 
-  ORDER BY points_required ASC
+  ORDER BY category ASC, points_required ASC
 `;
 
 const GET_REWARD_BY_ID = `
