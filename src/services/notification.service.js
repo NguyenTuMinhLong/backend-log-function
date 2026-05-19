@@ -308,7 +308,7 @@ const sendEmail = async (to, subject, body) => {
 // =========================================================
 
 const createRefundNotification = async (data) => {
-  const { event, refund, booking, userId } = data;
+  const { event, refund, booking, userId, guestEmail } = data;
 
   if (!NOTIFICATIONS.email.enabled) return;
 
@@ -323,8 +323,8 @@ const createRefundNotification = async (data) => {
 
   if (!eventConfig[event]) return;
 
-  // Get recipient email
-  const recipientEmail = refund?.user_email || booking?.contact_email;
+  // Get recipient email - priority: guestEmail > refund.guest_email > refund.user_email > booking.contact_email
+  const recipientEmail = guestEmail || refund?.guest_email || refund?.user_email || booking?.contact_email;
   if (!recipientEmail) {
     console.warn('[Notification] No recipient email found');
     return;

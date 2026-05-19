@@ -23,9 +23,11 @@ const INSERT_REFUND = `
     status,
     reason,
     user_notes,
-    requested_by
+    requested_by,
+    is_guest,
+    guest_email
   )
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
   RETURNING *
 `;
 
@@ -230,6 +232,69 @@ const CHECK_PENDING_REFUND_FOR_BOOKING = `
 `;
 
 // =========================================================
+// GUEST SESSION QUERIES
+// =========================================================
+
+const SELECT_GUEST_REFUNDS_BY_SESSION = `
+  SELECT
+    r.*,
+    b.booking_code,
+    b.outbound_flight_id,
+    f.flight_number AS outbound_flight_number,
+    dep.code AS departure_code,
+    arr.code AS arrival_code,
+    b.total_price AS booking_total_price
+  FROM refunds r
+  JOIN bookings b ON r.booking_id = b.id
+  JOIN flights f ON b.outbound_flight_id = f.id
+  JOIN airports dep ON f.departure_airport_id = dep.id
+  JOIN airports arr ON f.arrival_airport_id = arr.id
+  WHERE r.guest_session_id = $1
+  ORDER BY r.created_at DESC
+`;
+
+const SELECT_GUEST_REFUNDS_BY_EMAIL = `
+  SELECT
+    r.*,
+    b.booking_code,
+    b.outbound_flight_id,
+    f.flight_number AS outbound_flight_number,
+    dep.code AS departure_code,
+    arr.code AS arrival_code,
+    b.total_price AS booking_total_price
+  FROM refunds r
+  JOIN bookings b ON r.booking_id = b.id
+  JOIN flights f ON b.outbound_flight_id = f.id
+  JOIN airports dep ON f.departure_airport_id = dep.id
+  JOIN airports arr ON f.arrival_airport_id = arr.id
+  WHERE r.guest_email = $1 AND r.requested_by IS NULL
+  ORDER BY r.created_at DESC
+`;
+
+const LINK_GUEST_REFUNDS_TO_USER = `
+  UPDATE refunds
+  SET
+    requested_by = $1,
+    is_linked = true,
+    linked_at = NOW(),
+    updated_at = NOW()
+  WHERE
+    (guest_session_id = $2 OR guest_email = $3)
+    AND requested_by IS NULL
+    AND is_guest = true
+  RETURNING *
+`;
+
+const COUNT_GUEST_REFUNDS_FOR_LINK = `
+  SELECT COUNT(*) as count
+  FROM refunds
+  WHERE
+    (guest_session_id = $1 OR guest_email = $2)
+    AND requested_by IS NULL
+    AND is_guest = true
+`;
+
+// =========================================================
 // EXPORTS
 // =========================================================
 
@@ -257,4 +322,10 @@ module.exports = {
   // Checks
   CHECK_REFUND_EXISTS_BY_CODE,
   CHECK_PENDING_REFUND_FOR_BOOKING,
+
+  // Guest Session
+  SELECT_GUEST_REFUNDS_BY_SESSION,
+  SELECT_GUEST_REFUNDS_BY_EMAIL,
+  LINK_GUEST_REFUNDS_TO_USER,
+  COUNT_GUEST_REFUNDS_FOR_LINK,
 };

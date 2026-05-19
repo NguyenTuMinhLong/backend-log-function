@@ -255,6 +255,8 @@ const requestRefund = async (userId, bookingCode, data) => {
       reason,
       user_notes,
       userId,
+      false, // is_guest
+      null,  // guest_email
     ]);
 
     const refund = refundResult.rows[0];
@@ -802,13 +804,286 @@ const getBookingRefunds = async (bookingCode) => {
 };
 
 // =========================================================
+// GUEST REFUND REQUEST
+// =========================================================
+
+/**
+ * Xử lý yêu cầu refund từ guest (không cần đăng nhập)
+ * Guest cần xác thực bằng booking_id + email hoặc phone
+ * 
+ * Flow:
+ * 1. Verify booking tồn tại
+ * 2. Verify guest email/phone khớp với booking
+ * 3. Kiểm tra booking chưa bị refund
+ * 4. Tính refund amount & tạo request
+ * 
+ * @param {string} bookingCode - Mã booking
+ * @param {string} guestEmail - Email của guest để xác thực
+ * @param {object} data - { refund_type, requested_items, reason, user_notes }
+ * @param {object} options - { guestSessionId } (optional)
+ * @returns {object} - Thông tin refund request
+ */
+const requestGuestRefund = async (bookingCode, guestEmail, data, options = {}) => {
+  const {
+    refund_type = 'full',
+    requested_items = null,
+    reason,
+    user_notes = null,
+  } = data;
+  const { guestSessionId } = options;
+
+  // Validate required fields
+  if (VALIDATION.requireReason) {
+    if (!reason || reason.trim().length < VALIDATION.minReasonLength) {
+      throw new Error(`Lý do yêu cầu refund phải có ít nhất ${VALIDATION.minReasonLength} ký tự`);
+    }
+  }
+
+  // Validate refund type
+  if (!['full', 'partial_leg', 'partial_passenger'].includes(refund_type)) {
+    throw new Error('refund_type phải là: full, partial_leg, hoặc partial_passenger');
+  }
+
+  // Validate guest email format
+  if (!guestEmail || !guestEmail.includes('@')) {
+    throw new Error('Email xác thực không hợp lệ');
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Get booking info (bằng booking code)
+    const bookingResult = await client.query(QB.SELECT_BOOKING_DETAIL, [bookingCode]);
+    if (bookingResult.rows.length === 0) throw new Error('Không tìm thấy booking');
+
+    const booking = bookingResult.rows[0];
+
+    // 2. Verify guest email khớp với booking
+    // Cho phép guest_email hoặc contact_email
+    const isEmailMatch = 
+      (booking.guest_email && booking.guest_email.toLowerCase() === guestEmail.toLowerCase()) ||
+      (booking.contact_email && booking.contact_email.toLowerCase() === guestEmail.toLowerCase());
+    
+    if (!isEmailMatch) {
+      throw new Error('Email xác thực không khớp với thông tin booking');
+    }
+
+    // 3. Guest không có user_id, nên bỏ qua ownership check
+    // (ownership check đã handle trong requestRefund bằng cách check userId)
+
+    // 4. Get payment info
+    const paymentResult = await client.query(QP.SELECT_PAYMENT_BY_BOOKING, [booking.id]);
+    if (paymentResult.rows.length === 0) throw new Error('Không tìm thấy thông tin thanh toán');
+
+    const payment = paymentResult.rows[0];
+
+    // 5. Validate refund request
+    validateRefundRequest(booking, payment, null);
+
+    // 6. Check duplicate request
+    const existingRefund = await client.query(QR.CHECK_PENDING_REFUND_FOR_BOOKING, [booking.id]);
+    if (existingRefund.rows.length > 0) {
+      throw new Error('Đã có yêu cầu refund đang chờ xử lý cho booking này');
+    }
+
+    // 7. Calculate hours until departure & find policy
+    const hoursLeft = calculateHoursUntilDeparture(booking.outbound_departure_time);
+    const policy = findPolicy(hoursLeft);
+
+    // 8. Check policy allows refund
+    if (policy.refundPercent === 0) {
+      throw new Error(`Không thể refund: Yêu cầu phải được gửi trước ${POLICIES[0].hoursBefore} tiếng trước giờ khởi hành`);
+    }
+
+    // 9. Calculate refund amount
+    const refundCalc = calculateRefundAmount(booking, payment, policy, refund_type, requested_items);
+
+    // 10. Check minimum refund amount
+    if (refundCalc.net_refund_amount < VALIDATION.minRefundAmount) {
+      throw new Error(`Số tiền hoàn (${refundCalc.net_refund_amount}) không đủ để xử lý`);
+    }
+
+    // 11. Generate refund code
+    let refundCode;
+    let isUnique = false;
+    while (!isUnique) {
+      refundCode = generateRefundCode();
+      const check = await client.query(QR.CHECK_REFUND_EXISTS_BY_CODE, [refundCode]);
+      if (check.rows.length === 0) isUnique = true;
+    }
+
+    // 12. Create refund request với is_guest = true
+    const refundResult = await client.query(QR.INSERT_REFUND, [
+      refundCode,
+      booking.id,
+      refund_type,
+      requested_items ? JSON.stringify(requested_items) : null,
+      refundCalc.refund_amount,
+      refundCalc.admin_fee,
+      refundCalc.net_refund_amount,
+      JSON.stringify(refundCalc.policy),
+      'pending',
+      reason,
+      user_notes,
+      null,     // requested_by = null cho guest
+      true,     // is_guest = true
+      guestEmail,
+    ]);
+
+    const refund = refundResult.rows[0];
+
+    // 13. Update booking status to refund_pending
+    await client.query(QB.UPDATE_BOOKING_STATUS, ['refund_pending', booking.id]);
+
+    // 14. Send notification (sẽ gửi qua email của guest)
+    try {
+      await createRefundNotification({
+        event: 'REFUND_REQUESTED',
+        refund,
+        booking,
+        userId: null,
+        guestEmail,
+      });
+    } catch (notifErr) {
+      console.error('[Refund] Guest notification error:', notifErr.message);
+    }
+
+    await client.query('COMMIT');
+
+    return {
+      success: true,
+      refund_code: refund.refund_code,
+      status: refund.status,
+      refund_type,
+      refund_preview: {
+        refund_amount: refundCalc.refund_amount,
+        admin_fee: refundCalc.admin_fee,
+        net_refund_amount: refundCalc.net_refund_amount,
+        policy_applied: refundCalc.policy,
+      },
+      message: `Yêu cầu hoàn tiền đã được tiếp nhận. Mã yêu cầu: ${refund.refund_code}. Vui lòng giữ mã này để theo dõi.`,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// =========================================================
+// GET GUEST REFUND BY CODE (Verify ownership)
+// =========================================================
+
+/**
+ * Lấy chi tiết refund cho guest
+ * Guest cần có refund_code và email để verify
+ * 
+ * @param {string} refundCode - Mã refund
+ * @param {string} guestEmail - Email để verify ownership
+ * @returns {object} - Thông tin refund
+ */
+const getGuestRefundDetail = async (refundCode, guestEmail) => {
+  // Lấy refund info
+  const result = await pool.query(QR.SELECT_REFUND_BY_CODE, [refundCode]);
+  if (result.rows.length === 0) throw new Error('Không tìm thấy yêu cầu hoàn tiền');
+
+  const refund = result.rows[0];
+
+  // Verify guest ownership bằng email
+  // Chỉ guest refund mới cần verify
+  if (refund.is_guest) {
+    if (!guestEmail || refund.guest_email.toLowerCase() !== guestEmail.toLowerCase()) {
+      throw new Error('Email xác thực không khớp');
+    }
+  }
+
+  // Get passengers affected
+  const passengersResult = await pool.query(
+    'SELECT id, full_name, passenger_type, flight_type FROM passengers WHERE booking_id = $1',
+    [refund.booking_id]
+  );
+
+  return {
+    ...refund,
+    passengers: refund.requested_items?.passenger_ids
+      ? passengersResult.rows.filter(p => refund.requested_items.passenger_ids.includes(p.id))
+      : passengersResult.rows,
+  };
+};
+
+// =========================================================
+// GUEST SESSION FUNCTIONS
+// =========================================================
+
+/**
+ * Link guest refunds to user account after login
+ * @param {string} userId - User ID to link to
+ * @param {string} guestEmail - Guest email to match
+ * @param {string} guestSessionId - Guest session ID (optional)
+ * @returns {object} - Number of linked refunds
+ */
+const linkGuestRefundsToUser = async (userId, guestEmail, guestSessionId) => {
+  if (!guestEmail && !guestSessionId) {
+    throw new Error('Cần cung cấp guestEmail hoặc guestSessionId');
+  }
+
+  // Check if there are refunds to link
+  const countResult = await pool.query(QR.COUNT_GUEST_REFUNDS_FOR_LINK, [
+    guestSessionId || null,
+    guestEmail || null,
+  ]);
+  const count = parseInt(countResult.rows[0]?.count || 0);
+
+  if (count === 0) {
+    return { count: 0, message: 'Không có refunds nào để link' };
+  }
+
+  // Link refunds
+  const result = await pool.query(QR.LINK_GUEST_REFUNDS_TO_USER, [
+    userId,
+    guestSessionId || null,
+    guestEmail || null,
+  ]);
+
+  return {
+    count: result.rowCount,
+    linkedRefunds: result.rows,
+    message: `Đã link ${result.rowCount} refunds với tài khoản của bạn`,
+  };
+};
+
+/**
+ * Get guest refunds by session ID
+ * @param {string} guestSessionId - Guest session ID
+ * @returns {Array} - List of refunds
+ */
+const getGuestRefundsBySession = async (guestSessionId) => {
+  const result = await pool.query(QR.SELECT_GUEST_REFUNDS_BY_SESSION, [guestSessionId]);
+  return result.rows;
+};
+
+/**
+ * Get guest refunds by email (for unlinked refunds)
+ * @param {string} guestEmail - Guest email
+ * @returns {Array} - List of refunds
+ */
+const getGuestRefundsByEmail = async (guestEmail) => {
+  const result = await pool.query(QR.SELECT_GUEST_REFUNDS_BY_EMAIL, [guestEmail.toLowerCase()]);
+  return result.rows;
+};
+
+// =========================================================
 // EXPORTS
 // =========================================================
 
 module.exports = {
   // Core functions
   requestRefund,
+  requestGuestRefund,
   getRefundDetail,
+  getGuestRefundDetail,
   getUserRefunds,
   getBookingRefunds,
 
@@ -829,4 +1104,9 @@ module.exports = {
 
   // Payment
   reversePayment,
+
+  // Guest session
+  linkGuestRefundsToUser,
+  getGuestRefundsBySession,
+  getGuestRefundsByEmail,
 };
