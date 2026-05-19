@@ -3,7 +3,8 @@ const router = express.Router();
 const bookingController = require("../controllers/booking.controller");
 const flightController = require("../controllers/flight.controller");
 const refundController = require("../controllers/refund.controller");
-const dateChangeController = require("../controllers/date-change.controller");
+const dateChangeController  = require("../controllers/date-change.controller");
+const ancillaryController   = require("../controllers/ancillary.controller");
 const { authenticate, authenticateOptional } = require("../middlewares/auth.middleware");
 
 // ==================== STATIC ROUTES ====================
@@ -30,6 +31,20 @@ router.post("/:bookingCode/change-flight", authenticate, dateChangeController.re
 
 // Xem date changes của 1 booking
 router.get("/:bookingCode/date-changes", authenticateOptional, dateChangeController.getBookingDateChanges);
+
+// ==================== ANCILLARY ROUTES ====================
+
+// SB-04: Xem dịch vụ bổ sung đã chọn của booking
+router.get("/:bookingCode/ancillaries", authenticateOptional, ancillaryController.getBookingAncillaries);
+
+// SB-04: Thêm dịch vụ bổ sung cho hành khách
+router.post("/:bookingCode/ancillaries", authenticateOptional, ancillaryController.addAncillary);
+
+// SB-04: Huỷ 1 dịch vụ bổ sung
+router.delete("/:bookingCode/ancillaries/:ancillaryId", authenticateOptional, ancillaryController.removeAncillary);
+
+// SB-04: Tổng tiền booking + ancillaries
+router.get("/:bookingCode/total", authenticateOptional, ancillaryController.getBookingTotal);
 
 // ==================== DYNAMIC ROUTES (phải để sau) ====================
 
