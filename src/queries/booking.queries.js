@@ -31,6 +31,7 @@ const SELECT_BOOKING_DETAIL =
      f_out.duration_minutes AS outbound_duration,
      al_out.name            AS outbound_airline_name,
      al_out.code            AS outbound_airline_code,
+     al_out.logo_url        AS outbound_airline_logo,
      dep_out.code AS outbound_dep_code, dep_out.city AS outbound_dep_city,
      arr_out.code AS outbound_arr_code, arr_out.city AS outbound_arr_city,
      f_ret.flight_number    AS return_flight_number,
@@ -39,6 +40,7 @@ const SELECT_BOOKING_DETAIL =
      f_ret.duration_minutes AS return_duration,
      al_ret.name            AS return_airline_name,
      al_ret.code            AS return_airline_code,
+     al_ret.logo_url        AS return_airline_logo,
      dep_ret.code AS return_dep_code, dep_ret.city AS return_dep_city,
      arr_ret.code AS return_arr_code, arr_ret.city AS return_arr_city
    FROM bookings b
