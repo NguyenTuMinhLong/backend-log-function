@@ -244,6 +244,11 @@ const STATS_OVERVIEW = (locNgay) =>
   `SELECT
      COUNT(*) FILTER (WHERE status IN ('confirmed','pending'))         AS total_bookings,
      SUM(total_price) FILTER (WHERE status IN ('confirmed','pending')) AS total_revenue,
+     COALESCE((
+       SELECT SUM(r.net_refund_amount)
+       FROM refunds r
+       WHERE r.status = 'completed'
+     ), 0)                                                             AS total_refunded,
      COUNT(*) FILTER (WHERE status = 'confirmed')                      AS confirmed,
      COUNT(*) FILTER (WHERE status = 'pending')                        AS pending,
      COUNT(*) FILTER (WHERE status = 'cancelled')                      AS cancelled,

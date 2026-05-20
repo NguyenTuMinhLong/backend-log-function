@@ -13,6 +13,7 @@ const adminFlightCancellationController = require("../controllers/admin/flight-c
 
 const adminUserController = require("../controllers/admin/user.controller");
 const adminChatController = require("../controllers/admin/chat.controller");
+const adminCronController = require("../controllers/admin/cron.controller");
 
 // Tất cả routes admin: phải đăng nhập + role = 'admin'
 router.use(authenticate, authorize("admin"));
@@ -86,6 +87,11 @@ router.get("/date-changes/:requestCode", adminDateChangeController.getDateChange
 router.post("/date-changes/:requestCode/approve", adminDateChangeController.approveDateChange);
 router.post("/date-changes/:requestCode/reject", adminDateChangeController.rejectDateChange);
 router.delete("/date-changes/:requestCode", adminDateChangeController.cancelDateChange);
+
+// A-11: Cronjob Manual Trigger
+router.post("/cron/run",              adminCronController.runCron);
+router.post("/cron/expired-bookings", adminCronController.runExpiredBookings);
+router.post("/loyalty/recalculate",   adminCronController.recalculateLoyalty);
 
 // A-10: Admin Chat
 router.get("/chat/config", adminChatController.getChatConfig);

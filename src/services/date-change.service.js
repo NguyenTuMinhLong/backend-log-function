@@ -13,8 +13,17 @@ const pool = require('../config/db');
 const QCD = require('../queries/date-change.queries');
 const QB = require('../queries/booking.queries');
 const QF = require('../queries/flight.queries');
+const QR = require('../queries/refund.queries');
 const { DATE_CHANGE } = require('../config/refund.config');
 const { createDateChangeNotification } = require('./notification.service');
+
+const generateRefundCode = () => {
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let s = '';
+  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return `REF-DC-${date}-${s}`;
+};
 
 // =========================================================
 // HELPERS
@@ -272,13 +281,32 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
     // 8. Handle price difference
     let paymentResult = null;
     if (request.price_difference > 0) {
-      // User phải trả thêm
-      // TODO: Create payment request
-      paymentResult = { action: 'charge', amount: request.price_difference };
+      // User phải trả thêm — tạm ghi nhận, admin sẽ xử lý thu tiền thủ công
+      paymentResult = { action: 'charge', amount: request.price_difference, note: 'Cần thu thêm từ user' };
     } else if (request.price_difference < 0) {
-      // User được hoàn
-      // TODO: Create refund request
-      paymentResult = { action: 'refund', amount: Math.abs(request.price_difference) };
+      // User được hoàn vì chuyến mới rẻ hơn — tạo refund record tự động
+      const refundAmount = Math.abs(request.price_difference);
+      const refundCode = generateRefundCode();
+
+      await client.query(QR.INSERT_REFUND, [
+        refundCode,                              // $1 refund_code
+        request.booking_id,                      // $2 booking_id
+        'date_change_refund',                    // $3 refund_type
+        null,                                    // $4 requested_items
+        refundAmount,                            // $5 refund_amount
+        0,                                       // $6 admin_fee
+        refundAmount,                            // $7 net_refund_amount
+        'date_change',                           // $8 refund_policy_applied
+        'approved',                              // $9 status — auto-approve vì admin đã duyệt date change
+        `Hoàn tiền chênh lệch giá do đổi chuyến bay (mã: ${requestCode})`, // $10 reason
+        null,                                    // $11 user_notes
+        request.user_id || null,                 // $12 requested_by
+        !request.user_id,                        // $13 is_guest
+        null,                                    // $14 guest_email
+      ]);
+
+      paymentResult = { action: 'refund', amount: refundAmount, refund_code: refundCode };
+      console.log(`[DateChange] Tạo auto-refund ${refundCode} — ${refundAmount.toLocaleString('vi-VN')} VNĐ`);
     }
 
     // 9. Send notification

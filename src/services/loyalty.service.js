@@ -604,6 +604,51 @@ const syncTierAfterChange = async (userId, direction = 'both') => {
 exports.syncTierAfterChange = syncTierAfterChange;
 
 // =========================================================
+// RECALCULATE ALL TIERS — sync tier_id cho toàn bộ user
+// dựa trên tier_points hiện tại
+// Dùng khi: admin chạy thủ công, sau khi có bug fix
+// =========================================================
+exports.recalculateAllTiers = async () => {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: members } = await client.query(`
+      SELECT ul.user_id, ul.tier_points, lt.name AS current_tier
+      FROM user_loyalty ul
+      JOIN loyalty_tiers lt ON ul.tier_id = lt.id
+    `);
+
+    let updated = 0;
+    for (const m of members) {
+      const correctTier = resolveTier(parseInt(m.tier_points));
+      if (correctTier.name === m.current_tier) continue;
+
+      const { rows } = await client.query(
+        `SELECT id FROM loyalty_tiers WHERE name = $1`, [correctTier.name]
+      );
+      if (!rows.length) continue;
+
+      await client.query(
+        `UPDATE user_loyalty SET tier_id = $1, updated_at = NOW() WHERE user_id = $2`,
+        [rows[0].id, m.user_id]
+      );
+      updated++;
+      console.log(`[Loyalty] Recalc: user ${m.user_id} ${m.current_tier} → ${correctTier.name}`);
+    }
+
+    await client.query('COMMIT');
+    console.log(`[Loyalty] Recalculate xong: ${updated}/${members.length} users được cập nhật tier`);
+    return { total: members.length, updated };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// =========================================================
 // TEST HELPERS — TẠO BOOKING GIẢ ĐỂ TEST
 // =========================================================
 exports.createFakeBooking = async (userId, totalPrice) => {
