@@ -82,5 +82,5 @@ const sendOTPEmail = async (to, otp) => {
   }
 };
 
-// 🔥 QUAN TRỌNG
+// QUAN TRỌNG
 module.exports = { sendOTPEmail };
