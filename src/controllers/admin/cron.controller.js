@@ -23,11 +23,17 @@ const runCron = async (req, res) => {
         });
 
       case 'all':
-        await loyaltyService.triggerAnnualReset();
+        // KHÔNG chạy annual reset ở đây — annual reset chỉ chạy tự động 1/1
+        // hoặc admin chủ động chọn type='loyalty_annual_reset'
         const r2 = await loyaltyService.recalculateAllTiers();
+        const { rows: expiredRows } = await require('../../config/db').query(`
+          UPDATE bookings SET status='expired', updated_at=NOW()
+          WHERE status='pending' AND held_until IS NOT NULL AND held_until < NOW()
+          RETURNING id
+        `);
         return res.json({
-          message: 'Đã chạy tất cả cronjob',
-          data: { loyalty_reset: true, tiers_recalculated: r2 },
+          message: `Đã chạy: sync tier (${r2.updated} users) + expire bookings (${expiredRows.length} bookings)`,
+          data: { tiers_recalculated: r2, expired_bookings: expiredRows.length },
         });
 
       default:
