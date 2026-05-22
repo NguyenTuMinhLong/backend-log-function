@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS refunds (
   -- Liên kết booking (bắt buộc)
   booking_id            BIGINT         NOT NULL,
 
-  -- Liên kết payment (nullable - không có FK vì có thể bookings không có payment)
+  -- Liên kết payment (nullable)
   payment_id            BIGINT         NULL,
 
   -- Loại refund
@@ -54,6 +54,13 @@ CREATE TABLE IF NOT EXISTS refunds (
   requested_by         BIGINT         NULL,
   processed_by         BIGINT         NULL,
 
+  -- Guest support
+  is_guest             BOOLEAN       DEFAULT FALSE,
+  guest_email          VARCHAR(255)  NULL,
+  guest_session_id     VARCHAR(100)  NULL,
+  is_linked            BOOLEAN       DEFAULT FALSE,
+  linked_at            TIMESTAMP     NULL,
+
   -- Thời gian
   processed_at         TIMESTAMP      NULL,
   completed_at         TIMESTAMP      NULL,
@@ -72,12 +79,9 @@ CREATE TABLE IF NOT EXISTS refunds (
     CHECK (net_refund_amount >= 0)
 );
 
--- Add FK constraints sau khi bảng đã tồn tại
+-- Add FK constraint
 ALTER TABLE refunds ADD CONSTRAINT refunds_booking_id_fkey 
   FOREIGN KEY (booking_id) REFERENCES bookings(id);
-
--- payment_id có thể null, nên chỉ add FK nếu cần thiết
--- Bỏ qua payment_id FK vì không phải lúc nào cũng có payment
 
 -- Indexes cho refunds
 CREATE INDEX IF NOT EXISTS idx_refunds_booking_id ON refunds (booking_id);
@@ -85,6 +89,8 @@ CREATE INDEX IF NOT EXISTS idx_refunds_status ON refunds (status);
 CREATE INDEX IF NOT EXISTS idx_refunds_requested_by ON refunds (requested_by);
 CREATE INDEX IF NOT EXISTS idx_refunds_created_at ON refunds (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_refunds_payment_id ON refunds (payment_id);
+CREATE INDEX IF NOT EXISTS idx_refunds_guest_session ON refunds (guest_session_id);
+CREATE INDEX IF NOT EXISTS idx_refunds_guest_email ON refunds (guest_email);
 
 -- Unique constraint để prevent duplicate pending refunds
 CREATE UNIQUE INDEX IF NOT EXISTS idx_refunds_unique_pending
