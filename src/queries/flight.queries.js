@@ -168,7 +168,9 @@ const SEARCH_FLIGHTS = (conditions, orderBy) => `
     al.id AS airline_id,
     al.code AS airline_code,
     al.name AS airline_name,
-    al.logo_url AS airline_logo,
+    al.logo_url   AS airline_logo,
+    al.logo_dark  AS airline_logo_dark,
+    al.logo_light AS airline_logo_light,
     dep.id AS departure_airport_id,
     dep.code AS departure_code,
     dep.city AS departure_city,
@@ -304,7 +306,7 @@ const SELECT_ALL_AIRPORTS = `
 `;
 
 const SELECT_ALL_AIRLINES = `
-  SELECT id, code, name, logo_url
+  SELECT id, code, name, logo_url, logo_dark, logo_light
   FROM airlines
   WHERE is_active = true
   ORDER BY name

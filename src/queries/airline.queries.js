@@ -9,7 +9,7 @@ const COUNT_AIRLINES = (dk) =>
   `SELECT COUNT(*) FROM airlines ${dk}`;
 
 const SELECT_AIRLINES = (dk, gioiHan, viTri) =>
-  `SELECT id, code, name, logo_url, is_active, created_at
+  `SELECT id, code, name, logo_url, logo_dark, logo_light, is_active, created_at
    FROM airlines
    ${dk}
    ORDER BY name ASC
@@ -29,13 +29,13 @@ const FIND_ACTIVE_AIRLINE_BY_ID =
   `SELECT id FROM airlines WHERE id = $1 AND is_active = TRUE`;
 
 const INSERT_AIRLINE =
-  `INSERT INTO airlines (code, name, logo_url)
+  `INSERT INTO airlines (code, name, logo_url, logo_dark, logo_light)
    VALUES (UPPER($1), $2, $3)
    RETURNING *`;
 
 // Dùng bởi admin.flight.service.js (không UPPER code)
 const INSERT_AIRLINE_SIMPLE =
-  `INSERT INTO airlines (code, name, logo_url) VALUES ($1, $2, $3) RETURNING *`;
+  `INSERT INTO airlines (code, name, logo_url, logo_dark, logo_light) VALUES ($1, $2, $3, $4, $5) RETURNING *`;
 
 const UPDATE_AIRLINE_FIELDS = (truong, stt) =>
   `UPDATE airlines SET ${truong.join(", ")} WHERE id = $${stt} RETURNING *`;
@@ -50,7 +50,7 @@ const TOGGLE_AIRLINE_STATUS =
 
 // Public - chỉ lấy hãng đang hoạt động
 const SELECT_ACTIVE_AIRLINES =
-  `SELECT id, code, name, logo_url
+  `SELECT id, code, name, logo_url, logo_dark, logo_light
    FROM airlines WHERE is_active = TRUE ORDER BY name ASC`;
 
 module.exports = {
