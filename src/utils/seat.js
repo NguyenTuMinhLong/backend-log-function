@@ -69,8 +69,20 @@ const getNextAvailableSeat = async (client, flightId, seatClass, totalSeats) => 
  * @param {number} bookingId
  * @returns {string} seat_number được gán
  */
-const assignSeat = async (client, flightId, seatClass, totalSeats, passengerId, bookingId) => {
-  const seatNumber = await getNextAvailableSeat(client, flightId, seatClass, totalSeats);
+const assignSeat = async (client, flightId, seatClass, totalSeats, passengerId, bookingId, preferredSeat = null) => {
+  let seatNumber;
+
+  if (preferredSeat) {
+    // Kiểm tra ghế user chọn có còn trống không
+    const occupied = await client.query(QS.SELECT_OCCUPIED_SEATS, [flightId, seatClass]);
+    const occupiedSet = new Set(occupied.rows.map(r => r.seat_number));
+    if (occupiedSet.has(preferredSeat)) {
+      throw new Error(`Ghế ${preferredSeat} vừa được người khác đặt. Vui lòng chọn ghế khác.`);
+    }
+    seatNumber = preferredSeat;
+  } else {
+    seatNumber = await getNextAvailableSeat(client, flightId, seatClass, totalSeats);
+  }
 
   if (!seatNumber) throw new Error(`Không còn ghế trống hạng ${seatClass} cho chuyến bay ID ${flightId}`);
 

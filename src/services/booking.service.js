@@ -200,7 +200,7 @@ const createBooking = async (data, userId = null) => {
           : parseInt(returnSeat?.total_seats || 0);
 
         if (flightId && seatClass && totalSeats > 0) {
-          const seatNumber = await assignSeat(client, flightId, seatClass, totalSeats, passengerId, booking.id);
+          const seatNumber = await assignSeat(client, flightId, seatClass, totalSeats, passengerId, booking.id, p.seat_number || null);
           assignedSeats[flightType].push({ passenger: p.full_name, seat: seatNumber });
         }
       }
