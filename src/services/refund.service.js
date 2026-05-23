@@ -928,7 +928,8 @@ const requestGuestRefund = async (bookingCode, guestEmail, data, options = {}) =
       user_notes,
       null,     // requested_by = null cho guest
       true,     // is_guest = true
-      guestEmail,
+      guestEmail.toLowerCase(), // guest_email
+      guestSessionId || null,  // guest_session_id
     ]);
 
     const refund = refundResult.rows[0];
@@ -1075,6 +1076,73 @@ const getGuestRefundsByEmail = async (guestEmail) => {
 };
 
 // =========================================================
+// GUEST CANCEL REFUND
+// =========================================================
+
+/**
+ * Guest hủy yêu cầu refund của mình (không cần đăng nhập)
+ * @param {string} refundCode - Mã refund
+ * @param {string} guestEmail - Email để verify ownership
+ * @returns {object} - Kết quả hủy
+ */
+const cancelGuestRefundRequest = async (refundCode, guestEmail) => {
+  if (!guestEmail || !guestEmail.includes('@')) {
+    throw new Error('Email xác thực không hợp lệ');
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Get refund info
+    const refundResult = await client.query(QR.SELECT_REFUND_BY_CODE, [refundCode]);
+    if (refundResult.rows.length === 0) throw new Error('Không tìm thấy yêu cầu hoàn tiền');
+
+    const refund = refundResult.rows[0];
+
+    // 2. Verify this is a guest refund
+    if (!refund.is_guest) {
+      throw new Error('Yêu cầu này không phải của guest. Vui lòng đăng nhập để hủy.');
+    }
+
+    // 3. Verify email matches
+    if (refund.guest_email.toLowerCase() !== guestEmail.toLowerCase()) {
+      throw new Error('Email xác thực không khớp');
+    }
+
+    // 4. Validate status (chỉ pending/approved mới cancel được)
+    if (!['pending', 'approved'].includes(refund.status)) {
+      throw new Error(`Không thể hủy yêu cầu có trạng thái "${refund.status}"`);
+    }
+
+    // 5. Update status to cancelled
+    await client.query(QR.UPDATE_REFUND_STATUS, [
+      'cancelled',
+      null,
+      'Guest cancelled request',
+      refundCode,
+    ]);
+
+    // 6. Revert booking status back to confirmed
+    await client.query(QB.UPDATE_BOOKING_STATUS, ['confirmed', refund.booking_id]);
+
+    await client.query('COMMIT');
+
+    return {
+      success: true,
+      refund_code: refundCode,
+      status: 'cancelled',
+      message: 'Yêu cầu hoàn tiền đã được hủy thành công',
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// =========================================================
 // EXPORTS
 // =========================================================
 
@@ -1109,4 +1177,7 @@ module.exports = {
   linkGuestRefundsToUser,
   getGuestRefundsBySession,
   getGuestRefundsByEmail,
+
+  // Guest cancel
+  cancelGuestRefundRequest,
 };

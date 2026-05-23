@@ -262,6 +262,38 @@ const linkGuestRefunds = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/refunds/guest/cancel
+ * Guest hủy yêu cầu refund của mình (không cần đăng nhập)
+ * Body: { refundCode, guestEmail }
+ */
+const cancelGuestRefund = async (req, res) => {
+  try {
+    const { refundCode, guestEmail } = req.body;
+
+    if (!refundCode) {
+      return res.status(400).json({ error: 'Mã refund là bắt buộc' });
+    }
+    if (!guestEmail) {
+      return res.status(400).json({ error: 'Email xác thực là bắt buộc' });
+    }
+
+    const result = await refundService.cancelGuestRefundRequest(
+      refundCode.toUpperCase(),
+      guestEmail
+    );
+
+    res.json({
+      message: 'Hủy yêu cầu hoàn tiền thành công',
+      data: result,
+    });
+  } catch (err) {
+    console.error('[CancelGuestRefund]', err.message);
+    const statusCode = err.message.includes('không tìm thấy') ? 404 : 400;
+    res.status(statusCode).json({ error: err.message });
+  }
+};
+
 // =========================================================
 // EXPORTS
 // =========================================================
@@ -276,4 +308,5 @@ module.exports = {
   requestGuestRefund,
   getGuestRefundDetail,
   linkGuestRefunds,
+  cancelGuestRefund,
 };

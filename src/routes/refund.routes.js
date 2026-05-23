@@ -75,6 +75,13 @@ const guestRateLimiter = rateLimiter({ windowMs: 1 * 60 * 1000, max: 3 });
 router.post('/guest', guestRateLimiter, refundController.requestGuestRefund);
 
 /**
+ * POST /api/refund/guest/cancel
+ * Guest hủy yêu cầu refund của mình
+ * Body: { refundCode, guestEmail }
+ */
+router.post('/guest/cancel', guestRateLimiter, refundController.cancelGuestRefund);
+
+/**
  * GET /api/refund/guest/:refundCode
  * Xem chi tiết refund của guest (cần verify email)
  * Query: ?email=guest@email.com

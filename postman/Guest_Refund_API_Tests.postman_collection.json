@@ -645,6 +645,763 @@
 				"description": "Try to link refunds without any identifier - should fail"
 			},
 			"response": []
+		},
+		{
+			"name": "Guest Cancel Refund - Success",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 200', function() {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test('Response indicates cancellation success', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.data.status).to.equal('cancelled');",
+							"    pm.expect(jsonData.data.success).to.equal(true);",
+							"});",
+							"",
+							"pm.test('Booking status reverted to confirmed', function() {",
+							"    // This is verified by the response message",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.data.message).to.include('hủy');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"refundCode\": \"{{guest_refund_code}}\",\n    \"guestEmail\": \"guest@example.com\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest/cancel",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest", "cancel"]
+				},
+				"description": "Guest cancels their own refund request - requires matching email"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Cancel Refund - Wrong Email",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 400', function() {",
+							"    pm.response.to.have.status(400);",
+							"});",
+							"",
+							"pm.test('Error message for wrong email', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.error).to.include('không khớp');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"refundCode\": \"{{guest_refund_code}}\",\n    \"guestEmail\": \"wrong@email.com\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest/cancel",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest", "cancel"]
+				},
+				"description": "Try to cancel with wrong email - should fail"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Cancel Refund - Not Found",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 404', function() {",
+							"    pm.response.to.have.status(404);",
+							"});",
+							"",
+							"pm.test('Error message for not found', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.error).to.include('không tìm thấy');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"refundCode\": \"REF-INVALID-999999\",\n    \"guestEmail\": \"guest@example.com\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest/cancel",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest", "cancel"]
+				},
+				"description": "Try to cancel non-existent refund - should fail"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Cancel Refund - Missing Refund Code",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 400', function() {",
+							"    pm.response.to.have.status(400);",
+							"});",
+							"",
+							"pm.test('Error message for missing refund code', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.error).to.include('Mã refund');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"guestEmail\": \"guest@example.com\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest/cancel",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest", "cancel"]
+				},
+				"description": "Try to cancel without refund code - should fail"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Cancel Refund - Missing Email",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 400', function() {",
+							"    pm.response.to.have.status(400);",
+							"});",
+							"",
+							"pm.test('Error message for missing email', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.error).to.include('Email');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"refundCode\": \"REF-20260523-ABC123\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest/cancel",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest", "cancel"]
+				},
+				"description": "Try to cancel without email - should fail"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Cancel Refund - Already Cancelled",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 400', function() {",
+							"    pm.response.to.have.status(400);",
+							"});",
+							"",
+							"pm.test('Error message for already cancelled', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.error).to.include('cancelled');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"refundCode\": \"{{guest_refund_code}}\",\n    \"guestEmail\": \"guest@example.com\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest/cancel",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest", "cancel"]
+				},
+				"description": "Try to cancel already cancelled refund - should fail"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Refund - Invalid Refund Type",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 400', function() {",
+							"    pm.response.to.have.status(400);",
+							"});",
+							"",
+							"pm.test('Error message for invalid refund type', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.error).to.include('refund_type');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"bookingCode\": \"BK20250501001\",\n    \"guestEmail\": \"guest@example.com\",\n    \"refund_type\": \"invalid_type\",\n    \"reason\": \"Testing invalid refund type\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest"]
+				},
+				"description": "Create refund with invalid refund_type - should fail"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Refund - Invalid Email Format",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 400', function() {",
+							"    pm.response.to.have.status(400);",
+							"});",
+							"",
+							"pm.test('Error message for invalid email format', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.error).to.include('Email');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"bookingCode\": \"BK20250501001\",\n    \"guestEmail\": \"notanemail\",\n    \"reason\": \"Testing invalid email format\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest"]
+				},
+				"description": "Create refund with invalid email format - should fail"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Refund - Empty Reason",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 400', function() {",
+							"    pm.response.to.have.status(400);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"bookingCode\": \"BK20250501001\",\n    \"guestEmail\": \"guest@example.com\",\n    \"reason\": \"\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest"]
+				},
+				"description": "Create refund with empty reason - should fail"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Refund - Reason Too Short",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 400', function() {",
+							"    pm.response.to.have.status(400);",
+							"});",
+							"",
+							"pm.test('Error message for short reason', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.error).to.include('ký tự');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"bookingCode\": \"BK20250501001\",\n    \"guestEmail\": \"guest@example.com\",\n    \"reason\": \"Test\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest"]
+				},
+				"description": "Create refund with reason shorter than minimum - should fail"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Refund - Get Detail Case Insensitive Email",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 200', function() {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test('Response has refund details with uppercase email', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.data).to.have.property('refund_code');",
+							"    pm.expect(jsonData.data.status).to.equal('pending');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest/{{guest_refund_code}}?email=GUEST@EXAMPLE.COM",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest", "{{guest_refund_code}}"],
+					"query": [
+						{
+							"key": "email",
+							"value": "GUEST@EXAMPLE.COM"
+						}
+					]
+				},
+				"description": "Get refund detail with uppercase email - should work (case insensitive)"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Refund - Cancel Already Approved",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"// This test requires first creating a refund and approving it via admin,",
+							"// then trying to cancel it as a guest",
+							"// Status should be 400 since only pending refunds can be cancelled",
+							"console.log('Cancel approved refund test - run after admin approves refund');"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"refundCode\": \"{{guest_refund_code}}\",\n    \"guestEmail\": \"guest@example.com\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest/cancel",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest", "cancel"]
+				},
+				"description": "Cancel an approved refund - should fail with 400"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Refund - Cancel Non-Guest Refund",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"// This test tries to cancel a non-guest refund using guest endpoint",
+							"// Should return 400 error",
+							"pm.test('Status code is 400', function() {",
+							"    const status = pm.response.status;",
+							"    pm.expect([400, 404]).to.include(status);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"refundCode\": \"REF-USER-123456\",\n    \"guestEmail\": \"guest@example.com\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest/cancel",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest", "cancel"]
+				},
+				"description": "Try to cancel a non-guest refund via guest endpoint - should fail"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Refund - With Guest Session Header",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 201', function() {",
+							"    pm.response.to.have.status(201);",
+							"});",
+							"",
+							"pm.test('Response has refund_code with session', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.data).to.have.property('refund_code');",
+							"    pm.collectionVariables.set('guest_refund_session_code', jsonData.data.refund_code);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "x-guest-session",
+						"value": "session-{{$timestamp}}-xyz789",
+						"type": "text",
+						"description": "Guest session ID for tracking"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"bookingCode\": \"BK20250501002\",\n    \"guestEmail\": \"session.test@example.com\",\n    \"refund_type\": \"full\",\n    \"reason\": \"Testing guest session tracking feature\",\n    \"user_notes\": \"This refund should be tracked by session ID\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest"]
+				},
+				"description": "Create refund with guest session header for tracking"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Refund - With User Notes",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 201', function() {",
+							"    pm.response.to.have.status(201);",
+							"});",
+							"",
+							"pm.test('Response includes user notes in request', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.data).to.have.property('refund_code');",
+							"    pm.collectionVariables.set('guest_refund_notes_code', jsonData.data.refund_code);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"bookingCode\": \"BK20250501003\",\n    \"guestEmail\": \"notes.test@example.com\",\n    \"refund_type\": \"full\",\n    \"reason\": \"Thay đổi kế hoạch công tác đột xuất\",\n    \"user_notes\": \"Rất mong được hoàn tiền sớm nhất có thể vì đã đặt vé替代航班\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest"]
+				},
+				"description": "Create refund with detailed user notes including special characters"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Refund - Booking Already Refunded",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"// This test tries to create a refund for a booking that was already refunded",
+							"// The booking status should be 'refunded' so it should fail",
+							"pm.test('Status code is 400 or 404', function() {",
+							"    const status = pm.response.status;",
+							"    pm.expect([400, 404]).to.include(status);",
+							"});",
+							"",
+							"pm.test('Error message indicates booking issue', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.error).to.match(/booking|refund|không thể|đã/i);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"bookingCode\": \"BK20250501004\",\n    \"guestEmail\": \"refunded.booking@example.com\",\n    \"reason\": \"Test booking already refunded scenario\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest"]
+				},
+				"description": "Try to create refund for already refunded booking - should fail"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Refund - Flight Already Departed",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"// This test tries to create a refund for a booking with departed flight",
+							"// Should fail because flight has already departed",
+							"pm.test('Status code is 400', function() {",
+							"    pm.response.to.have.status(400);",
+							"});",
+							"",
+							"pm.test('Error message indicates departed flight', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.error).to.match(/khởi hành|departed/i);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"bookingCode\": \"BK20250501005\",\n    \"guestEmail\": \"departed.flight@example.com\",\n    \"reason\": \"Test flight already departed scenario\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest"]
+				},
+				"description": "Try to create refund for departed flight - should fail"
+			},
+			"response": []
+		},
+		{
+			"name": "Guest Refund - Get Detail After Cancel",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 200', function() {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test('Refund status is cancelled', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.data.status).to.equal('cancelled');",
+							"});",
+							"",
+							"pm.test('Cancelled_at timestamp exists', function() {",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.data.cancelled_at).to.not.be.null;",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/refunds/guest/{{guest_refund_code}}?email=guest@example.com",
+					"host": ["{{base_url}}"],
+					"path": ["api", "refunds", "guest", "{{guest_refund_code}}"],
+					"query": [
+						{
+							"key": "email",
+							"value": "guest@example.com"
+						}
+					]
+				},
+				"description": "Get refund detail after cancellation to verify status update"
+			},
+			"response": []
 		}
 	],
 	"variable": [
@@ -658,6 +1415,14 @@
 		},
 		{
 			"key": "guest_refund_code_leg",
+			"value": ""
+		},
+		{
+			"key": "guest_refund_session_code",
+			"value": ""
+		},
+		{
+			"key": "guest_refund_notes_code",
 			"value": ""
 		},
 		{

@@ -5,6 +5,7 @@
 This Postman collection tests the **Guest Refund API** functionality including:
 - Creating refund requests without authentication
 - Viewing refund details with email verification
+- Cancelling refund requests (guest can cancel their own refunds)
 - Rate limiting protection
 - Linking guest refunds to user accounts
 
@@ -73,6 +74,13 @@ SELECT booking_id, status FROM payments WHERE booking_id = <booking_id>;
    - Success case
    - Without authentication
    - Missing parameters
+
+5. **Cancel Refund (Guest)**
+   - Success case
+   - Wrong email
+   - Not found
+   - Missing parameters
+   - Already cancelled
 
 ## Running Tests
 
@@ -143,6 +151,7 @@ To test rate limiting:
 |--------|----------|------|-------------|
 | POST | `/api/refunds/guest` | No | Create guest refund |
 | GET | `/api/refunds/guest/:refundCode?email=` | No | Get refund detail |
+| POST | `/api/refunds/guest/cancel` | No | Cancel guest refund |
 | POST | `/api/refunds/link-guest-refunds` | Yes | Link refunds to user |
 
 ## Troubleshooting
