@@ -505,28 +505,27 @@ const updateFlightStatus = async (flightId, status, reason = "") => {
             : `Thông báo: Chuyến bay ${flight.flight_number} bị trễ - Booking ${booking.booking_code}`;
 
         const body =
-          status === "cancelled" ?
-            `Xin chào ${booking.contact_name},
+          status === "cancelled"
+            ? `Xin chào ${booking.contact_name},
 
-            Chúng tôi rất tiếc phải thông báo rằng chuyến bay ${flight.flight_number} đã bị hủy.
+Chúng tôi rất tiếc phải thông báo rằng chuyến bay ${flight.flight_number} đã bị hủy.
 
-            Mã booking của bạn: ${booking.booking_code}
-            ${reason ? "Lý do: " + reason + "" : ""}
-            Chúng tôi sẽ liên hệ để hỗ trợ hoàn tiền hoặc đổi vé.
+Mã booking của bạn: ${booking.booking_code}
+${reason ? "Lý do: " + reason + "" : ""}
+Chúng tôi sẽ liên hệ để hỗ trợ hoàn tiền hoặc đổi vé.
 
-            Trân trọng,
-            Đội ngũ hỗ trợ`:
-            
-            `Xin chào ${booking.contact_name},
+Trân trọng,
+Đội ngũ hỗ trợ`
+            : `Xin chào ${booking.contact_name},
 
-            Chuyến bay ${flight.flight_number} của bạn đang bị trễ.
+Chuyến bay ${flight.flight_number} của bạn đang bị trễ.
 
-            Mã booking: ${booking.booking_code}
-            ${reason ? "Lý do: " + reason + "" : ""}
-            Chúng tôi xin lỗi về sự bất tiện này.
-                  
-            Trân trọng,
-            Đội ngũ hỗ trợ`;
+Mã booking: ${booking.booking_code}
+${reason ? "Lý do: " + reason + "" : ""}
+Chúng tôi xin lỗi về sự bất tiện này.
+
+Trân trọng,
+Đội ngũ hỗ trợ`;
 
         // Fire-and-forget — không await để không block response
         sendEmail(booking.contact_email, subject, body).catch((e) =>

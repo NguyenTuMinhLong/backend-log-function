@@ -32,7 +32,7 @@ const SELECT_WISHLIST_BY_USER =
      f.id AS flight_id, f.flight_number,
      f.departure_time, f.arrival_time, f.duration_minutes,
      f.status AS flight_status,
-     al.code AS airline_code, al.name AS airline_name, al.logo_url,
+     al.code AS airline_code, al.name AS airline_name, al.logo_url, al.logo_dark, al.logo_light,
      dep.code AS dep_code, dep.city AS dep_city,
      arr.code AS arr_code, arr.city AS arr_city,
      fs.base_price, fs.available_seats

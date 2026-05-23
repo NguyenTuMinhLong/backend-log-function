@@ -17,7 +17,9 @@ const formatItem = (row) => ({
     airline: {
       code:     row.airline_code,
       name:     row.airline_name,
-      logo_url: row.logo_url,
+      logo_url:   row.logo_url,
+      logo_dark:  row.logo_dark,
+      logo_light: row.logo_light,
     },
     departure:       { code: row.dep_code, city: row.dep_city },
     arrival:         { code: row.arr_code, city: row.arr_city },
