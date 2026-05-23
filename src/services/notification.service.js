@@ -14,6 +14,10 @@ Gửi email khi có sự kiện liên quan đến:
 
 const { NOTIFICATIONS } = require('../config/refund.config');
 
+// Email sender address
+const FROM_EMAIL = NOTIFICATIONS.email.from || 'no-reply@n4minhlong.io.vn';
+const FROM_NAME = NOTIFICATIONS.email.fromName || 'Airline Booking System';
+
 // =========================================================
 // EMAIL TEMPLATES
 // =========================================================
@@ -282,7 +286,7 @@ const generateFlightCancellationEmailContent = (data) => {
 // SEND EMAIL (MOCK - Cần implement với provider thực tế)
 // =========================================================
 
-const sendEmail = async (to, subject, body) => {
+const sendEmail = async (to, subject, body, options = {}) => {
   // TODO: Implement với email provider thực tế
   // Ví dụ: SendGrid, Mailgun, AWS SES, Nodemailer, etc.
 
@@ -293,6 +297,7 @@ const sendEmail = async (to, subject, body) => {
 
   // Mock implementation
   console.log('[Email] Sending email:');
+  console.log(`  From: ${FROM_NAME} <${FROM_EMAIL}>`);
   console.log(`  To: ${to}`);
   console.log(`  Subject: ${subject}`);
   console.log(`  Body: ${body.substring(0, 100)}...`);
