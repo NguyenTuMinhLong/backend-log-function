@@ -221,12 +221,12 @@ const STATS_BOOKING_SUMMARY = (locNgay) =>
 const STATS_DAILY_REVENUE = (locNgay) =>
   `SELECT DATE(created_at) AS date,
           COUNT(*) AS bookings,
+          COUNT(*) FILTER (WHERE status IN ('confirmed','pending')) AS valid_bookings,
           SUM(total_price) FILTER (WHERE status IN ('confirmed','pending')) AS revenue
    FROM bookings
-   WHERE created_at >= NOW() - INTERVAL '7 days'
-   ${locNgay ? `AND created_at BETWEEN $1 AND $2` : ""}
+   WHERE ${locNgay ? `created_at BETWEEN $1 AND $2` : `created_at >= CURRENT_DATE - INTERVAL '6 days'`}
    GROUP BY DATE(created_at)
-   ORDER BY date DESC`;
+   ORDER BY date ASC`;
 
 const STATS_POPULAR_FLIGHTS = (locNgayDat) =>
   `SELECT f.flight_number,
@@ -251,7 +251,9 @@ const STATS_OVERVIEW = (locNgay) =>
      COALESCE((
        SELECT SUM(r.net_refund_amount)
        FROM refunds r
+       JOIN bookings rb ON rb.id = r.booking_id
        WHERE r.status = 'completed'
+       ${locNgay ? `AND rb.created_at BETWEEN $1 AND $2` : ""}
      ), 0)                                                             AS total_refunded,
      COUNT(*) FILTER (WHERE status = 'confirmed')                      AS confirmed,
      COUNT(*) FILTER (WHERE status = 'pending')                        AS pending,
