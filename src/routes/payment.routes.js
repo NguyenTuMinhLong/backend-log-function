@@ -25,11 +25,20 @@ router.post("/", authenticateOptional, async (req, res) => {
 // Init payment with gateway (BANK_QR/PayOS, MoMo, PayPal)
 router.post("/init", authenticateOptional, async (req, res) => {
   try {
+    let booking_code = req.body.booking_code;
+
+    // Hỗ trợ frontend gửi booking_id thay vì booking_code
+    if (!booking_code && req.body.booking_id) {
+      const pool = require('../config/db');
+      const r = await pool.query('SELECT booking_code FROM bookings WHERE id = $1', [req.body.booking_id]);
+      booking_code = r.rows[0]?.booking_code;
+    }
+
     const result = await paymentService.initPayment({
-      booking_code: req.body.booking_code,
+      booking_code,
       payment_method: req.body.payment_method,
-      voucher_code: req.body.voucher_code,
-      userId: req.user?.id,
+      voucher_code:   req.body.voucher_code,
+      userId:         req.user?.id,
     });
     res.json({ success: true, data: result });
   } catch (error) {
