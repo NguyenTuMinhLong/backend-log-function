@@ -221,8 +221,8 @@ const STATS_BOOKING_SUMMARY = (locNgay) =>
 const STATS_DAILY_REVENUE = (locNgay) =>
   `SELECT DATE(created_at) AS date,
           COUNT(*) AS bookings,
-          COUNT(*) FILTER (WHERE status IN ('confirmed','pending','refund_pending','refunded')) AS valid_bookings,
-          SUM(total_price) FILTER (WHERE status IN ('confirmed','pending','refund_pending','refunded')) AS revenue
+          COUNT(*) FILTER (WHERE status IN ('confirmed','refund_pending','refunded')) AS valid_bookings,
+          SUM(total_price) FILTER (WHERE status IN ('confirmed','refund_pending','refunded')) AS revenue
    FROM bookings
    WHERE ${locNgay ? `created_at BETWEEN $1 AND $2` : `created_at >= CURRENT_DATE - INTERVAL '6 days'`}
    GROUP BY DATE(created_at)
@@ -239,15 +239,15 @@ const STATS_POPULAR_FLIGHTS = (locNgayDat) =>
    JOIN airlines al  ON al.id  = f.airline_id
    JOIN airports dep ON dep.id = f.departure_airport_id
    JOIN airports arr ON arr.id = f.arrival_airport_id
-   WHERE b.status IN ('confirmed','pending','refund_pending','refunded') ${locNgayDat}
+   WHERE b.status IN ('confirmed','refund_pending','refunded') ${locNgayDat}
    GROUP BY f.id, f.flight_number, al.name, dep.city, arr.city
    ORDER BY total_bookings DESC
    LIMIT 5`;
 
 const STATS_OVERVIEW = (locNgay) =>
   `SELECT
-     COUNT(*) FILTER (WHERE status IN ('confirmed','pending','refund_pending','refunded')) AS total_bookings,
-     SUM(total_price) FILTER (WHERE status IN ('confirmed','pending','refund_pending','refunded')) AS total_revenue,
+     COUNT(*) FILTER (WHERE status IN ('confirmed','refund_pending','refunded')) AS total_bookings,
+     SUM(total_price) FILTER (WHERE status IN ('confirmed','refund_pending','refunded')) AS total_revenue,
      COALESCE((
        SELECT SUM(r.net_refund_amount)
        FROM refunds r

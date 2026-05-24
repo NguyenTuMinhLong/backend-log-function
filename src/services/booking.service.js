@@ -4,6 +4,7 @@ const { rollbackReservedVoucherUsageForBooking } = require("./payment.service");
 const QB = require("../queries/booking.queries");
 const QF = require("../queries/flight.queries");
 const QP = require("../queries/payment.queries");
+const QAnc = require("../queries/ancillary.queries");
 const QB2 = { SELECT_MY_BOOKINGS: QB.SELECT_MY_BOOKINGS };
 
 // ====================== THÊM LOYALTY SERVICE ======================
@@ -273,14 +274,20 @@ const getBookingDetail = async (bookingCode, userId = null) => {
   const passResult = await pool.query(QB.SELECT_PASSENGERS_BY_BOOKING, [b.id]);
 
   let paymentInfo = null;
+  let ancillaryTotal = 0;
   try {
-    const payResult = await pool.query(QB.SELECT_BOOKING_PAYMENT_INFO, [b.id]);
+    const [payResult, ancResult] = await Promise.all([
+      pool.query(QB.SELECT_BOOKING_PAYMENT_INFO, [b.id]),
+      pool.query(QAnc.GET_ANCILLARY_TOTAL, [b.id]),
+    ]);
     if (payResult.rows.length > 0) paymentInfo = payResult.rows[0];
+    ancillaryTotal = parseFloat(ancResult.rows[0]?.ancillary_total || 0);
   } catch (_) {}
 
   const totalPrice  = parseFloat(b.total_price);
   const finalAmount = paymentInfo ? parseFloat(paymentInfo.final_amount || totalPrice) : totalPrice;
   const discountAmt = paymentInfo ? parseFloat(paymentInfo.discount_amount || 0) : 0;
+  const grandTotal  = totalPrice + ancillaryTotal;
 
   return {
     booking_code: b.booking_code,
@@ -319,6 +326,8 @@ const getBookingDetail = async (bookingCode, userId = null) => {
     price: {
       base_price:      parseFloat(b.base_price),
       total_price:     totalPrice,
+      ancillary_total: ancillaryTotal,
+      grand_total:     grandTotal,
       final_amount:    finalAmount,
       discount_amount: discountAmt,
     },
