@@ -260,7 +260,7 @@ const STATS_OVERVIEW = (locNgay) =>
      COUNT(*) FILTER (WHERE status = 'cancelled')                      AS cancelled,
      COUNT(*) FILTER (WHERE status = 'expired')                        AS expired,
      SUM(total_adults + total_children + total_infants)
-       FILTER (WHERE status IN ('confirmed','pending'))                 AS total_passengers
+       FILTER (WHERE status = 'confirmed')                              AS total_passengers
    FROM bookings
    WHERE 1=1 ${locNgay}`;
 
