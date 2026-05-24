@@ -3,6 +3,7 @@ const assistantChatService = require("./admin/chat.service");
 const {
   emitAiConversationChanged,
   emitSupportConversationChanged,
+  emitSupportReadByAdmin,
 } = require("../socket");
 const Q = require("../queries/chat.queries");
 
@@ -479,7 +480,8 @@ const getSupportConversationForAdmin = async (conversationId, adminUser) => {
     await client.query("COMMIT");
 
     const payloadData = { conversation: mapConversation(conversation), messages };
-    emitSupportConversationChanged(
+    // Chỉ thông báo user (customer), không broadcast admins để tránh vòng lặp refresh
+    emitSupportReadByAdmin(
       { userId: conversation.user_id ? Number(conversation.user_id) : null, guestSessionId: conversation.guest_session_id || null },
       { conversationId: Number(conversationId), type: "support", userId: conversation.user_id ? Number(conversation.user_id) : null, guestSessionId: conversation.guest_session_id || null }
     );
