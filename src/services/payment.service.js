@@ -440,7 +440,33 @@ const initPayment = async ({ booking_code, payment_method, voucher_code, userId 
 
   // Fetch updated payment
   const updatedPayment = await getPaymentByCodeRow(payment.payment_code);
-  return mapPayment(updatedPayment || payment, providerPayload);
+
+  // Fire-and-forget: gửi email thông báo payment vừa được tạo
+  const paymentForEmail = updatedPayment || payment;
+  setImmediate(async () => {
+    try {
+      const { sendPaymentInitiatedEmail } = require("../utils/mailer");
+      const contactRes = await pool.query(
+        `SELECT contact_email, contact_name FROM bookings WHERE id = $1`,
+        [paymentForEmail.booking_id]
+      );
+      const contact = contactRes.rows[0];
+      if (!contact?.contact_email) return;
+
+      await sendPaymentInitiatedEmail(contact.contact_email, {
+        contactName:     contact.contact_name,
+        paymentCode:     paymentForEmail.payment_code,
+        paymentMethod:   payment_method,
+        finalAmount:     paymentForEmail.final_amount,
+        expiresAt:       paymentForEmail.expires_at,
+        gatewayResponse: providerPayload,
+      });
+    } catch (emailErr) {
+      console.error("❌ Payment initiated email error:", emailErr);
+    }
+  });
+
+  return mapPayment(paymentForEmail, providerPayload);
 };
 
 // ── Confirm Payment ────────────────────────────────────────────────────────────

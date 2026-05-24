@@ -257,4 +257,126 @@ const sendOTPEmail = async (to, otp) => {
   }
 };
 
-module.exports = { sendOTPEmail, sendBookingConfirmedEmail };
+const buildGatewayDetailsBox = (paymentMethod, gatewayResponse = {}) => {
+  const rows = [];
+
+  if (paymentMethod === "PAYPAL") {
+    if (gatewayResponse.order_id) rows.push(["Order ID", gatewayResponse.order_id]);
+    if (gatewayResponse.amount) rows.push(["Số tiền (USD)", `${gatewayResponse.amount} USD`]);
+    if (gatewayResponse.currency) rows.push(["Tiền tệ", gatewayResponse.currency]);
+    if (gatewayResponse.approve_url) {
+      rows.push(["Checkout URL", `<a href="${gatewayResponse.approve_url}" style="color:#1a56db;">Mở PayPal thanh toán</a>`]);
+    }
+  } else if (paymentMethod === "MOMO") {
+    if (gatewayResponse.pay_url) {
+      rows.push(["Thanh toán MoMo", `<a href="${gatewayResponse.pay_url}" style="color:#a21caf;">Mở MoMo thanh toán</a>`]);
+    }
+  } else if (paymentMethod === "BANK_QR" || paymentMethod === "BANK_TRANSFER") {
+    if (gatewayResponse.checkout_url) {
+      rows.push(["Checkout URL", `<a href="${gatewayResponse.checkout_url}" style="color:#1a56db;">Mở trang thanh toán</a>`]);
+    }
+    if (gatewayResponse.bank_account) rows.push(["Số tài khoản", gatewayResponse.bank_account]);
+    if (gatewayResponse.description) rows.push(["Nội dung CK", `<strong>${gatewayResponse.description}</strong>`]);
+  }
+
+  if (!rows.length) return "";
+
+  const bgColor = paymentMethod === "MOMO" ? "#fdf4ff" : "#fff7ed";
+  const borderColor = paymentMethod === "MOMO" ? "#e9d5ff" : "#fed7aa";
+
+  return `
+    <div style="background:${bgColor};border:1px solid ${borderColor};border-radius:8px;padding:16px;margin-top:20px;">
+      <table style="width:100%;border-collapse:collapse;">
+        ${rows.map(([label, value]) => `
+          <tr>
+            <td style="padding:5px 0;font-size:13px;color:#6b7280;white-space:nowrap;width:40%;">${label}</td>
+            <td style="padding:5px 0;font-size:13px;color:#111827;word-break:break-all;">${value}</td>
+          </tr>
+        `).join("")}
+      </table>
+    </div>
+  `;
+};
+
+const sendPaymentInitiatedEmail = async (to, { contactName, paymentCode, paymentMethod, finalAmount, expiresAt, gatewayResponse }) => {
+  try {
+    const expiryMinutes = (() => {
+      if (!expiresAt) return 15;
+      const diffMs = new Date(expiresAt) - new Date();
+      return Math.max(1, Math.round(diffMs / 60000));
+    })();
+
+    const methodLabel = PAYMENT_METHOD_LABEL[paymentMethod] || paymentMethod || "--";
+    const gatewayBox = buildGatewayDetailsBox(paymentMethod, gatewayResponse || {});
+
+    const html = `
+      <div style="max-width:560px;margin:auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;background:#ffffff;">
+        <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.06);">
+          <!-- Header -->
+          <div style="background:#f9fafb;padding:24px;text-align:center;border-bottom:1px solid #e5e7eb;">
+            <img src="https://iili.io/qvDF3Kl.png" width="64" style="margin-bottom:8px;" />
+            <h2 style="color:#1a56db;font-size:20px;margin:0;">Vivudee</h2>
+            <p style="color:#6b7280;font-size:13px;margin:4px 0 0;">Your Journey Starts Here</p>
+          </div>
+
+          <!-- Body -->
+          <div style="padding:28px 24px;">
+            <h3 style="font-size:16px;color:#111827;text-align:center;margin:0 0 20px;">
+              Hoàn tất thanh toán trong vòng <span style="color:#dc2626;">${expiryMinutes} phút</span>
+            </h3>
+
+            <p style="color:#6b7280;font-size:14px;margin:0 0 20px;">
+              Xin chào <strong style="color:#111827;">${contactName || "Quý khách"}</strong>,<br/>
+              Giao dịch thanh toán của bạn đã được tạo thành công.
+            </p>
+
+            <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;">
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;width:40%;">Mã thanh toán</td>
+                <td style="padding:10px 14px;font-size:13px;color:#111827;font-weight:600;border-bottom:1px solid #f3f4f6;word-break:break-all;">${paymentCode}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;">Phương thức</td>
+                <td style="padding:10px 14px;font-size:13px;color:#111827;border-bottom:1px solid #f3f4f6;">${methodLabel}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;">Số tiền</td>
+                <td style="padding:10px 14px;font-size:15px;color:#1a56db;font-weight:700;border-bottom:1px solid #f3f4f6;">${fmtCurrency(finalAmount)}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#6b7280;">Hết hạn lúc</td>
+                <td style="padding:10px 14px;font-size:13px;color:#dc2626;">${fmtDateTime(expiresAt)}</td>
+              </tr>
+            </table>
+
+            ${gatewayBox}
+
+            <p style="color:#9ca3af;font-size:12px;text-align:center;margin:24px 0 0;">
+              Nếu bạn đã hoàn tất thanh toán, vui lòng bỏ qua email này.<br/>
+              Nếu bạn không thực hiện giao dịch này, cũng hãy bỏ qua email này.
+            </p>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const { data, error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM,
+      to,
+      subject: `Hoàn tất thanh toán — ${paymentCode}`,
+      html,
+    });
+
+    if (error) {
+      console.error("❌ sendPaymentInitiatedEmail error:", error);
+      return false;
+    }
+    console.log("✅ sendPaymentInitiatedEmail sent:", data?.id);
+    return true;
+  } catch (err) {
+    console.error("❌ sendPaymentInitiatedEmail exception:", err);
+    return false;
+  }
+};
+
+module.exports = { sendOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail };
