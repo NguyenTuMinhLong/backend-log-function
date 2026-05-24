@@ -88,9 +88,15 @@ const buildPaymentResponse = (payment, bookingCode) => ({
   gateway_response: payment.gateway_response || null,
 });
 
+const PAYMENT_WITH_BOOKING_CODE = `
+  SELECT p.*, b.booking_code
+  FROM payments p
+  LEFT JOIN bookings b ON b.id = p.booking_id
+`;
+
 const getPaymentByCodeRow = async (paymentCode) => {
   const { rows } = await pool.query(
-    'SELECT * FROM payments WHERE payment_code = $1 LIMIT 1',
+    `${PAYMENT_WITH_BOOKING_CODE} WHERE p.payment_code = $1 LIMIT 1`,
     [paymentCode]
   );
   return rows[0] || null;
@@ -98,7 +104,7 @@ const getPaymentByCodeRow = async (paymentCode) => {
 
 const getPaymentByIdRow = async (id) => {
   const { rows } = await pool.query(
-    'SELECT * FROM payments WHERE id::text = $1 LIMIT 1',
+    `${PAYMENT_WITH_BOOKING_CODE} WHERE p.id::text = $1 LIMIT 1`,
     [String(id)]
   );
   return rows[0] || null;
@@ -106,9 +112,9 @@ const getPaymentByIdRow = async (id) => {
 
 const getPaymentByGatewayOrderId = async (orderId) => {
   const { rows } = await pool.query(
-    `SELECT * FROM payments
-     WHERE gateway_response ->> 'order_id' = $1
-     ORDER BY created_at DESC LIMIT 1`,
+    `${PAYMENT_WITH_BOOKING_CODE}
+     WHERE p.gateway_response ->> 'order_id' = $1
+     ORDER BY p.created_at DESC LIMIT 1`,
     [orderId]
   );
   return rows[0] || null;
@@ -572,24 +578,25 @@ const processMomoCallback = async (body = {}, source = 'ipn') => {
     return { ok: false, resultCode: 1, message: 'Amount mismatch', payment_code: paymentCode };
   }
 
+  const bookingCode = payment.booking_code || '';
+
   if (Number(body.resultCode) === 0) {
     if (isTerminalPaidStatus(payment.status)) {
-      return { ok: true, resultCode: 0, message: 'Already processed', payment_code: paymentCode, payment: mapPayment(payment) };
+      return { ok: true, resultCode: 0, message: 'Already processed', payment_code: paymentCode, booking_code: bookingCode };
     }
-    const confirmed = await confirmPayment(paymentCode);
-    return { ok: true, resultCode: 0, message: 'Success', payment_code: paymentCode, payment: confirmed };
+    await confirmPayment(paymentCode);
+    return { ok: true, resultCode: 0, message: 'Success', payment_code: paymentCode, booking_code: bookingCode };
   }
 
-  let cancelled = mapPayment(payment);
   if (!isTerminalCancelledStatus(payment.status) && !isTerminalPaidStatus(payment.status)) {
-    cancelled = await cancelPayment({ payment_code: paymentCode });
+    await cancelPayment({ payment_code: paymentCode });
   }
   return {
     ok: true,
     resultCode: 0,
     message: body.message || 'Received',
     payment_code: paymentCode,
-    payment: cancelled,
+    booking_code: bookingCode,
     return_status: isMomoCancelResult(body.resultCode, body.message) ? 'cancel' : 'error',
   };
 };
@@ -701,6 +708,7 @@ const handlePaypalCancel = async (query = {}) => {
     status: 'cancel',
     message: 'Buyer cancelled PayPal checkout',
     payment_code: payment?.payment_code || paymentCode,
+    booking_code: payment?.booking_code || '',
     order_id: orderId,
   };
 };
@@ -802,54 +810,51 @@ const handlePayosReturn = async (returnStatus = 'success', query = {}) => {
   const orderCode = String(gatewayResp.order_code || query.orderCode || '');
   const paymentLinkId = String(gatewayResp.payment_link_id || query.id || '');
 
+  const bookingCode = payment.booking_code || '';
+
   if (isTerminalPaidStatus(payment.status)) {
-    return { status: 'success', message: 'Already processed', payment_code: payment.payment_code };
+    return { status: 'success', message: 'Already processed', payment_code: payment.payment_code, booking_code: bookingCode };
   }
 
   if (normalizedReturnStatus === 'cancel') {
     const cancelledPayment = isTerminalCancelledStatus(payment.status)
       ? payment
       : await cancelPayment({ payment_code: payment.payment_code });
-    return { status: 'cancel', message: 'Buyer cancelled payOS checkout', payment: cancelledPayment };
+    return { status: 'cancel', message: 'Buyer cancelled payOS checkout', payment_code: payment.payment_code, booking_code: bookingCode };
   }
 
   if (!orderCode) {
-    return { status: 'error', message: 'Missing payOS order code', payment_code: payment.payment_code };
+    return { status: 'error', message: 'Missing payOS order code', payment_code: payment.payment_code, booking_code: bookingCode };
   }
 
   let paymentLink;
   try {
     paymentLink = await getPayosPaymentLink(orderCode);
   } catch (error) {
-    return { status: 'pending', message: error?.message || 'Waiting for payOS confirmation', payment_code: payment.payment_code };
+    return { status: 'pending', message: error?.message || 'Waiting for payOS confirmation', payment_code: payment.payment_code, booking_code: bookingCode };
   }
 
   const payosStatus = String(paymentLink.status || '').toUpperCase();
-  const latestPaymentLinkId = paymentLink.id || paymentLinkId;
 
   if (payosStatus === 'PAID') {
     const expectedAmount = getPaymentChargeAmount(payment);
     const paidAmount = Number(paymentLink.amountPaid || paymentLink.amount || 0);
     if (paidAmount !== expectedAmount) {
-      return { status: 'error', message: `Amount mismatch`, payment_code: payment.payment_code };
+      return { status: 'error', message: `Amount mismatch`, payment_code: payment.payment_code, booking_code: bookingCode };
     }
 
-    const transaction = Array.isArray(paymentLink.transactions)
-      ? paymentLink.transactions[0]
-      : null;
-
-    const confirmed = await confirmPayment(payment.payment_code);
-    return { status: 'success', message: 'Success', payment: confirmed };
+    await confirmPayment(payment.payment_code);
+    return { status: 'success', message: 'Success', payment_code: payment.payment_code, booking_code: bookingCode };
   }
 
   if (['CANCELLED', 'FAILED', 'EXPIRED'].includes(payosStatus)) {
-    const cancelledPayment = isTerminalCancelledStatus(payment.status)
-      ? payment
-      : await cancelPayment({ payment_code: payment.payment_code });
-    return { status: payosStatus === 'CANCELLED' ? 'cancel' : 'error', message: `payOS status: ${payosStatus}`, payment: cancelledPayment };
+    if (!isTerminalCancelledStatus(payment.status)) {
+      await cancelPayment({ payment_code: payment.payment_code });
+    }
+    return { status: payosStatus === 'CANCELLED' ? 'cancel' : 'error', message: `payOS status: ${payosStatus}`, payment_code: payment.payment_code, booking_code: bookingCode };
   }
 
-  return { status: 'pending', message: `payOS status: ${payosStatus || 'PENDING'}`, payment_code: payment.payment_code };
+  return { status: 'pending', message: `payOS status: ${payosStatus || 'PENDING'}`, payment_code: payment.payment_code, booking_code: bookingCode };
 };
 
 // ── Exports ───────────────────────────────────────────────────────────────────

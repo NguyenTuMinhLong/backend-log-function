@@ -100,12 +100,12 @@ const createPayosPaymentInstruction = async (payment) => {
 
   const returnUrl = resolveUrl({
     providedUrl: config.payos.returnUrl,
-    fallbackPath: '/payments/payos/return/success',
+    fallbackPath: '/api/payments/return/payos/success',
     paymentCode,
   });
   const cancelUrl = resolveUrl({
     providedUrl: config.payos.cancelUrl,
-    fallbackPath: '/payments/payos/return/cancel',
+    fallbackPath: '/api/payments/return/payos/cancel',
     paymentCode,
   });
 
