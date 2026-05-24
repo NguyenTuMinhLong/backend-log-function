@@ -14,7 +14,7 @@ const loyaltyRoutes = require('./routes/loyalty.routes');
 const refundRoutes = require('./routes/refund.routes');
 const dateChangeRoutes = require('./routes/date-change.routes');
 
-const { expireHeldBookings }   = require("./services/booking.service");
+const { expireHeldBookings, autoCompleteFlights } = require("./services/booking.service");
 const { autoGenerateFlights }  = require("./services/admin/flight.service");
 const { checkAndAlertSLABreach } = require("./services/notification.service");
 require("./scripts/Loyalty.cron"); // Loyalty annual reset cron job

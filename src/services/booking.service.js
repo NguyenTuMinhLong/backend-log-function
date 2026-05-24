@@ -437,4 +437,83 @@ const expireHeldBookings = async () => {
   // ... (giữ nguyên)
 };
 
-module.exports = { createBooking, getBookingDetail, getMyBookings, cancelBooking, expireHeldBookings };
+
+/**
+ * CẤP 2 — Auto-complete chuyến bay đã bay + hủy booking của chuyến cancelled
+ * Chạy mỗi phút qua cron trong app.js
+ */
+const autoCompleteFlights = async () => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1. Chuyển tất cả chuyến bay đã khởi hành sang "completed"
+    //    Buffer 3 tiếng — khớp với cấp 3 ở search query
+    const completedResult = await client.query(`
+      UPDATE flights
+      SET    status     = 'completed',
+             updated_at = NOW()
+      WHERE  departure_time < NOW() - INTERVAL '3 hours'
+        AND  status NOT IN ('cancelled', 'completed')
+      RETURNING id, flight_number
+    `);
+
+    if (completedResult.rows.length > 0) {
+      console.log(
+        `[AutoComplete] Đã hoàn thành ${completedResult.rows.length} chuyến bay:`,
+        completedResult.rows.map(r => r.flight_number).join(", ")
+      );
+
+      // 2. Tự động expire các booking "pending" của chuyến đã completed
+      //    (user giữ ghế nhưng chưa thanh toán, chuyến đã bay → hủy luôn)
+      for (const flight of completedResult.rows) {
+        const expiredBookings = await client.query(`
+          SELECT id, total_adults, total_children,
+                 outbound_flight_id, outbound_seat_class,
+                 return_flight_id,   return_seat_class
+          FROM bookings
+          WHERE (outbound_flight_id = $1 OR return_flight_id = $1)
+            AND status = 'pending'
+        `, [flight.id]);
+
+        for (const booking of expiredBookings.rows) {
+          const seats = booking.total_adults + booking.total_children;
+
+          // Hoàn ghế chuyến đi
+          await client.query(`
+            UPDATE flight_seats
+            SET available_seats = available_seats + $1, updated_at = NOW()
+            WHERE flight_id = $2 AND class = $3
+          `, [seats, booking.outbound_flight_id, booking.outbound_seat_class]);
+
+          // Hoàn ghế chuyến về (nếu có)
+          if (booking.return_flight_id) {
+            await client.query(`
+              UPDATE flight_seats
+              SET available_seats = available_seats + $1, updated_at = NOW()
+              WHERE flight_id = $2 AND class = $3
+            `, [seats, booking.return_flight_id, booking.return_seat_class]);
+          }
+
+          // Đánh dấu booking là expired
+          await client.query(`
+            UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1
+          `, [booking.id]);
+        }
+
+        if (expiredBookings.rows.length > 0) {
+          console.log(`[AutoComplete] Đã expire ${expiredBookings.rows.length} booking pending của chuyến ${flight.flight_number}`);
+        }
+      }
+    }
+
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("[AutoComplete] Lỗi:", err.message);
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = { createBooking, getBookingDetail, getMyBookings, cancelBooking, expireHeldBookings, autoCompleteFlights };
