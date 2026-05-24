@@ -177,6 +177,8 @@ const createBooking = async (data, userId = null) => {
 
     // ... (toàn bộ phần insert passenger, assign seat, decrease seats giữ nguyên)
 
+    let firstOutboundPassengerId = null;
+
     for (const p of passengers) {
       const flightType       = p.flight_type || "outbound";
       const isInfant         = p.passenger_type === "infant";
@@ -192,6 +194,10 @@ const createBooking = async (data, userId = null) => {
       ]);
 
       const passengerId = passResult.rows[0].id;
+
+      if (flightType === 'outbound' && !firstOutboundPassengerId) {
+        firstOutboundPassengerId = passengerId;
+      }
 
       if (!isInfant) {
         const flightId   = flightType === "outbound" ? outbound_flight_id : return_flight_id;
@@ -211,6 +217,19 @@ const createBooking = async (data, userId = null) => {
 
     if (trip_type === "round_trip" && return_flight_id) {
       await client.query(QF.DECREASE_AVAILABLE_SEATS, [seatsNeeded, return_flight_id, return_seat_class]);
+    }
+
+    // Lưu ancillary_options vào booking_ancillaries
+    const ancillaryOptions = data.ancillary_options || [];
+    if (ancillaryOptions.length > 0 && firstOutboundPassengerId) {
+      for (const opt of ancillaryOptions) {
+        const qty       = parseInt(opt.quantity) || 1;
+        const unitPrice = Number(opt.unit_price) || 0;
+        await client.query(QAnc.INSERT_ANCILLARY, [
+          booking.id, firstOutboundPassengerId, opt.ancillary_option_id,
+          'outbound', qty, unitPrice, unitPrice * qty,
+        ]);
+      }
     }
 
         // ====================== HOOK LOYALTY - DEBUG (tạm thời) ======================
@@ -285,6 +304,8 @@ const getBookingDetail = async (bookingCode, userId = null) => {
   } catch (_) {}
 
   const totalPrice  = parseFloat(b.total_price);
+  const basePrice   = parseFloat(b.base_price);
+  const baggageTotal = Math.max(totalPrice - basePrice, 0);
   const finalAmount = paymentInfo ? parseFloat(paymentInfo.final_amount || totalPrice) : totalPrice;
   const discountAmt = paymentInfo ? parseFloat(paymentInfo.discount_amount || 0) : 0;
   const grandTotal  = totalPrice + ancillaryTotal;
@@ -323,9 +344,13 @@ const getBookingDetail = async (bookingCode, userId = null) => {
       infants:  b.total_infants,
       list:     passResult.rows,
     },
+    baggage: {
+      extra_baggage_total: baggageTotal,
+    },
     price: {
-      base_price:      parseFloat(b.base_price),
+      base_price:      basePrice,
       total_price:     totalPrice,
+      baggage_total:   baggageTotal,
       ancillary_total: ancillaryTotal,
       grand_total:     grandTotal,
       final_amount:    finalAmount,
