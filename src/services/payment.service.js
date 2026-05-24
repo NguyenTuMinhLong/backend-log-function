@@ -485,7 +485,69 @@ const confirmPayment = async (paymentCode, userId = null, bypassAuth = false) =>
     }
 
     await client.query("COMMIT");
-    return buildPaymentResponse(paymentUpdate.rows[0], payment.booking_code);
+
+    // Fire-and-forget: gửi email xác nhận sau khi transaction hoàn tất
+    const confirmedPayment = paymentUpdate.rows[0];
+    const bookingIdForEmail = payment.booking_id;
+    setImmediate(async () => {
+      try {
+        const { sendBookingConfirmedEmail } = require("../utils/mailer");
+
+        const bookingRes = await pool.query(
+          `SELECT b.booking_code, b.contact_email, b.contact_name,
+                  b.trip_type, b.outbound_seat_class, b.return_seat_class,
+                  f_out.flight_number AS outbound_flight_number,
+                  f_out.departure_time AS outbound_departure_time,
+                  f_out.arrival_time   AS outbound_arrival_time,
+                  al_out.name          AS outbound_airline_name,
+                  dep_out.code AS outbound_dep_code, dep_out.city AS outbound_dep_city,
+                  arr_out.code AS outbound_arr_code, arr_out.city AS outbound_arr_city,
+                  f_ret.flight_number AS return_flight_number,
+                  f_ret.departure_time AS return_departure_time,
+                  f_ret.arrival_time   AS return_arrival_time,
+                  al_ret.name          AS return_airline_name,
+                  dep_ret.code AS return_dep_code, dep_ret.city AS return_dep_city,
+                  arr_ret.code AS return_arr_code, arr_ret.city AS return_arr_city
+           FROM bookings b
+           JOIN flights  f_out   ON f_out.id  = b.outbound_flight_id
+           JOIN airlines al_out  ON al_out.id = f_out.airline_id
+           JOIN airports dep_out ON dep_out.id = f_out.departure_airport_id
+           JOIN airports arr_out ON arr_out.id = f_out.arrival_airport_id
+           LEFT JOIN flights  f_ret   ON f_ret.id  = b.return_flight_id
+           LEFT JOIN airlines al_ret  ON al_ret.id = f_ret.airline_id
+           LEFT JOIN airports dep_ret ON dep_ret.id = f_ret.departure_airport_id
+           LEFT JOIN airports arr_ret ON arr_ret.id = f_ret.arrival_airport_id
+           WHERE b.id = $1`,
+          [bookingIdForEmail]
+        );
+
+        const bookingDetail = bookingRes.rows[0];
+        if (!bookingDetail?.contact_email) return;
+
+        const passRes = await pool.query(
+          `SELECT full_name, passenger_type, date_of_birth, gender,
+                  nationality, passport_number, seat_number,
+                  baggage_kg, extra_baggage_kg, flight_type
+           FROM passengers WHERE booking_id = $1
+           ORDER BY flight_type, passenger_type`,
+          [bookingIdForEmail]
+        );
+
+        await sendBookingConfirmedEmail(bookingDetail.contact_email, {
+          bookingCode:   bookingDetail.booking_code,
+          contactName:   bookingDetail.contact_name,
+          finalAmount:   confirmedPayment.final_amount,
+          paymentMethod: confirmedPayment.payment_method,
+          paidAt:        confirmedPayment.paid_at,
+          booking:       bookingDetail,
+          passengers:    passRes.rows,
+        });
+      } catch (emailErr) {
+        console.error("❌ Post-payment email error:", emailErr);
+      }
+    });
+
+    return buildPaymentResponse(confirmedPayment, payment.booking_code);
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
