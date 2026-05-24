@@ -148,20 +148,47 @@ router.get("/return/payos/:status", async (req, res) => {
 
 // PayPal Return & Cancel
 router.get("/return/paypal", async (req, res) => {
+  const config = require('../config/payment.config');
+  const frontendBase = config.paypal.frontendUrl || '';
+  const resultPage = `${frontendBase}/payment/paypal/result`;
+
   try {
     const result = await paymentService.handlePaypalReturn(req.query);
-    res.json({ success: true, data: result });
+    const params = new URLSearchParams({
+      status: result.status || 'success',
+      paymentCode: result.payment_code || '',
+      bookingCode: result.booking_code || '',
+      orderId: result.order_id || '',
+    });
+    return res.redirect(`${resultPage}?${params.toString()}`);
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    const params = new URLSearchParams({
+      status: 'error',
+      message: error.message || 'PayPal return failed',
+    });
+    return res.redirect(`${resultPage}?${params.toString()}`);
   }
 });
 
 router.get("/cancel/paypal", async (req, res) => {
+  const config = require('../config/payment.config');
+  const frontendBase = config.paypal.frontendUrl || '';
+  const resultPage = `${frontendBase}/payment/paypal/result`;
+
   try {
     const result = await paymentService.handlePaypalCancel(req.query);
-    res.json({ success: true, data: result });
+    const params = new URLSearchParams({
+      status: 'cancel',
+      paymentCode: result.payment_code || '',
+      orderId: result.order_id || '',
+    });
+    return res.redirect(`${resultPage}?${params.toString()}`);
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    const params = new URLSearchParams({
+      status: 'cancel',
+      message: error.message || '',
+    });
+    return res.redirect(`${resultPage}?${params.toString()}`);
   }
 });
 

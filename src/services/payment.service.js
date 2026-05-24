@@ -673,11 +673,12 @@ const handlePaypalReturn = async (query = {}) => {
     };
   }
 
-  const confirmed = await confirmPayment(payment.payment_code);
+  await confirmPayment(payment.payment_code);
   return {
     status: 'success',
     message: 'Success',
     payment_code: payment.payment_code,
+    booking_code: payment.booking_code || '',
     order_id: orderId,
     capture_id: captureItem.id || '',
   };
