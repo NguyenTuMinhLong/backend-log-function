@@ -772,7 +772,7 @@ const toggleAirlineStatus = async (airlineId) => {
 // ══════════════════════════════════════════════════════
 
 const getBookings = async (params) => {
-  const { page = 1, limit = 10, status, trip_type, search } = params;
+  const { page = 1, limit = 10, status, trip_type, search, from_date, to_date } = params;
   const offset = (parseInt(page) - 1) * parseInt(limit);
   const conditions = [];
   const values = [];
@@ -792,6 +792,11 @@ const getBookings = async (params) => {
     );
     idx++;
     values.push(`%${search}%`);
+  }
+  if (from_date && to_date) {
+    conditions.push(`DATE(b.created_at) BETWEEN $${idx} AND $${idx + 1}`);
+    idx += 2;
+    values.push(from_date, to_date);
   }
 
   const dk = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
