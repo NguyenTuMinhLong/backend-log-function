@@ -445,7 +445,7 @@ const initPayment = async ({ booking_code, payment_method, voucher_code, userId 
 
 // ── Confirm Payment ────────────────────────────────────────────────────────────
 
-const confirmPayment = async (paymentCode, userId = null) => {
+const confirmPayment = async (paymentCode, userId = null, bypassAuth = false) => {
   const normalizedPaymentCode = String(paymentCode || "").trim().toUpperCase();
   if (!normalizedPaymentCode) throw new Error("paymentCode là bắt buộc");
 
@@ -458,9 +458,11 @@ const confirmPayment = async (paymentCode, userId = null) => {
 
     const payment = result.rows[0];
 
-    if (payment.booking_user_id && !userId) throw new Error("Bạn cần đăng nhập để xác nhận payment này");
-    if (payment.booking_user_id && userId && Number(payment.booking_user_id) !== Number(userId)) {
-      throw new Error("Bạn không có quyền thao tác payment này");
+    if (!bypassAuth) {
+      if (payment.booking_user_id && !userId) throw new Error("Bạn cần đăng nhập để xác nhận payment này");
+      if (payment.booking_user_id && userId && Number(payment.booking_user_id) !== Number(userId)) {
+        throw new Error("Bạn không có quyền thao tác payment này");
+      }
     }
 
     if (payment.status === "SUCCESS") {
@@ -584,7 +586,7 @@ const processMomoCallback = async (body = {}, source = 'ipn') => {
     if (isTerminalPaidStatus(payment.status)) {
       return { ok: true, resultCode: 0, message: 'Already processed', payment_code: paymentCode, booking_code: bookingCode };
     }
-    await confirmPayment(paymentCode);
+    await confirmPayment(paymentCode, null, true);
     return { ok: true, resultCode: 0, message: 'Success', payment_code: paymentCode, booking_code: bookingCode };
   }
 
@@ -680,7 +682,7 @@ const handlePaypalReturn = async (query = {}) => {
     };
   }
 
-  await confirmPayment(payment.payment_code);
+  await confirmPayment(payment.payment_code, null, true);
   return {
     status: 'success',
     message: 'Success',
@@ -843,7 +845,7 @@ const handlePayosReturn = async (returnStatus = 'success', query = {}) => {
       return { status: 'error', message: `Amount mismatch`, payment_code: payment.payment_code, booking_code: bookingCode };
     }
 
-    await confirmPayment(payment.payment_code);
+    await confirmPayment(payment.payment_code, null, true);
     return { status: 'success', message: 'Success', payment_code: payment.payment_code, booking_code: bookingCode };
   }
 
