@@ -15,6 +15,8 @@ const recommendFlights = async ({ userId, fromAirport, toAirport, limit = 15 }) 
       al.code           AS airline_code,
       al.name           AS airline_name,
       al.logo_url       AS airline_logo,
+      al.logo_dark      AS airline_logo_dark,
+      al.logo_light     AS airline_logo_light,
       dep.id            AS departure_airport_id,
       dep.code          AS departure_code,
       dep.city          AS departure_city,
@@ -85,7 +87,8 @@ const formatFlights = (rows, adults, children, infants) =>
       flight_number: r.flight_number,
       status:        r.status,
       airline: {
-        id: r.airline_id, code: r.airline_code, name: r.airline_name, logo_url: r.airline_logo,
+        id: r.airline_id, code: r.airline_code, name: r.airline_name,
+        logo_url: r.airline_logo, logo_dark: r.airline_logo_dark, logo_light: r.airline_logo_light,
       },
       departure: {
         airport_id: r.departure_airport_id, code: r.departure_code,
