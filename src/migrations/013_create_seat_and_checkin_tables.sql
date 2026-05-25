@@ -1,14 +1,9 @@
-'use strict';
-
-/*
-=========================================================
-MIGRATION: 013_create_seat_and_checkin_tables
-=========================================================
-Tao bang seat_pricing va checkins cho chuc nang:
-- Seat selection (chon ghe tra phi them)
-- Check-in online hien thi boarding pass
-=========================================================
-*/
+-- =========================================================
+-- MIGRATION: 013_create_seat_and_checkin_tables
+-- Tao bang seat_pricing va checkins cho chuc nang:
+-- - Seat selection (chon ghe tra phi them)
+-- - Check-in online hien thi boarding pass
+-- =========================================================
 
 -- =========================================================
 -- 1. Bang seat_pricing - Luu gia tri them cho tung loai ghe
@@ -105,5 +100,3 @@ FROM (
 WHERE NOT EXISTS (
   SELECT 1 FROM seat_pricing WHERE flight_id IS NULL
 );
-
-console.log('Migration 013: Seat pricing and checkin tables created successfully');

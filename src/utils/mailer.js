@@ -178,7 +178,9 @@ const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAm
 };
 
 const sendOTPEmail = async (to, otp) => {
+  console.log(`[MAILER] sendOTPEmail called with to: ${to}, otp: ${otp}`);
   try {
+    console.log(`[MAILER] Sending via Resend with key: ${process.env.RESEND_API_KEY ? 'SET' : 'NOT SET'}`);
     const { data, error } = await resend.emails.send({
       from: process.env.EMAIL_FROM,
       to: to,
@@ -257,5 +259,14 @@ const sendOTPEmail = async (to, otp) => {
   }
 };
 
+// Refund OTP - alias cua sendOTPEmail
+const sendRefundOTPEmail = async (to, otp, expiresIn = 5) => {
+  console.log(`[MAILER] sendRefundOTPEmail called`);
+  return await sendOTPEmail(to, otp);
+};
+
 // 🔥 QUAN TRỌNG
-module.exports = { sendOTPEmail };
+module.exports = { 
+  sendOTPEmail,
+  sendRefundOTPEmail
+};

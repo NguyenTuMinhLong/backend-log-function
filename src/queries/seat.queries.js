@@ -131,9 +131,10 @@ const SELECT_CHECKIN_BY_CODE = `
     c.checked_in_at, c.status, c.gate, c.boarding_time,
     p.id as passenger_id, p.full_name, p.seat_number, p.passenger_type,
     b.booking_code, b.trip_type,
-    f.flight_number, f.departure_city, f.arrival_city,
+    f.flight_number,
+    dep.city as departure_city, arr.city as arrival_city,
     f.departure_time, f.arrival_time,
-    f.departure_airport, f.arrival_airport
+    dep.code as departure_airport, arr.code as arrival_airport
   FROM checkins c
   JOIN passengers p ON p.id = c.passenger_id
   JOIN bookings b ON b.id = c.booking_id
@@ -141,6 +142,8 @@ const SELECT_CHECKIN_BY_CODE = `
     WHEN c.flight_type = 'outbound' THEN b.outbound_flight_id 
     ELSE b.return_flight_id
   END
+  JOIN airports dep ON dep.id = f.departure_airport_id
+  JOIN airports arr ON arr.id = f.arrival_airport_id
   WHERE c.boarding_pass_code = $1`;
 
 const CHECK_BOOKING_CHECKIN_STATUS = `
@@ -148,13 +151,14 @@ const CHECK_BOOKING_CHECKIN_STATUS = `
     b.id as booking_id,
     b.booking_code,
     b.status as booking_status,
-    b.departure_time,
+    f.departure_time,
     COUNT(p.id) as total_passengers,
     COUNT(CASE WHEN p.checked_in = true THEN 1 END) as checked_in_passengers
   FROM bookings b
+  LEFT JOIN flights f ON f.id = b.outbound_flight_id
   LEFT JOIN passengers p ON p.booking_id = b.id
   WHERE b.booking_code = $1
-  GROUP BY b.id`;
+  GROUP BY b.id, f.departure_time`;
 
 const CHECK_PASSENGER_CHECKIN = `
   SELECT checked_in, seat_number 
@@ -173,22 +177,26 @@ const GET_BOOKING_DETAILS_FOR_CHECKIN = `
     b.outbound_seat_class, b.return_seat_class,
     b.gate, b.boarding_time,
     f_out.flight_number as outbound_flight_number,
-    f_out.departure_city as outbound_departure,
-    f_out.arrival_city as outbound_arrival,
+    dep_out.city as outbound_departure,
+    arr_out.city as outbound_arrival,
     f_out.departure_time as outbound_departure_time,
     f_out.arrival_time as outbound_arrival_time,
-    f_out.departure_airport as outbound_departure_airport,
-    f_out.arrival_airport as outbound_arrival_airport,
+    dep_out.code as outbound_departure_airport,
+    arr_out.code as outbound_arrival_airport,
     f_ret.flight_number as return_flight_number,
-    f_ret.departure_city as return_departure,
-    f_ret.arrival_city as return_arrival,
+    dep_ret.city as return_departure,
+    arr_ret.city as return_arrival,
     f_ret.departure_time as return_departure_time,
     f_ret.arrival_time as return_arrival_time,
-    f_ret.departure_airport as return_departure_airport,
-    f_ret.arrival_airport as return_arrival_airport
+    dep_ret.code as return_departure_airport,
+    arr_ret.code as return_arrival_airport
   FROM bookings b
   LEFT JOIN flights f_out ON f_out.id = b.outbound_flight_id
+  LEFT JOIN airports dep_out ON dep_out.id = f_out.departure_airport_id
+  LEFT JOIN airports arr_out ON arr_out.id = f_out.arrival_airport_id
   LEFT JOIN flights f_ret ON f_ret.id = b.return_flight_id
+  LEFT JOIN airports dep_ret ON dep_ret.id = f_ret.departure_airport_id
+  LEFT JOIN airports arr_ret ON arr_ret.id = f_ret.arrival_airport_id
   WHERE b.booking_code = $1`;
 
 const GET_PASSENGERS_FOR_CHECKIN = `

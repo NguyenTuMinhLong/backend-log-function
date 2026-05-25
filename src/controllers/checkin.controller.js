@@ -129,7 +129,7 @@ const getBoardingPass = async (req, res) => {
 
 /**
  * GET /api/checkin/:boardingPassCode/qr
- * Generate QR code cho boarding pass
+ * Generate QR code image cho boarding pass
  */
 const getBoardingPassQR = async (req, res) => {
   try {
@@ -142,20 +142,17 @@ const getBoardingPassQR = async (req, res) => {
     // Get boarding pass data
     const boardingPass = await checkinService.getBoardingPass(boardingPassCode.toUpperCase());
 
-    // Generate QR code (simple implementation - in production use qrcode library)
-    // Here we just return the data that should be encoded in QR
+    // Generate QR code image
+    const QRCode = require('qrcode');
     const qrData = JSON.stringify(boardingPass.qr_data);
+    const qrImage = await QRCode.toDataURL(qrData);
 
-    // Return QR data for client-side generation
     res.json({
       success: true,
       data: {
         boarding_pass_code: boardingPassCode,
         qr_data: qrData,
-        // In production, use a QR code library:
-        // const QRCode = require('qrcode');
-        // const qrImage = await QRCode.toDataURL(qrData);
-        qr_image_url: `/api/checkin/${boardingPassCode}/qr-image`
+        qr_image: qrImage // Base64 encoded QR image
       }
     });
   } catch (err) {

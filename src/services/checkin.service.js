@@ -14,7 +14,7 @@ Quy trinh:
 =========================================================
 */
 
-const db = require('../config/database');
+const db = require('../config/db');
 const SQ = require('../queries/seat.queries');
 
 // =========================================================
@@ -47,7 +47,7 @@ const generateBoardingPassCode = (bookingCode, passengerIndex) => {
  * Get next sequence number
  */
 const getNextSequenceNumber = async (bookingId, flightType) => {
-  const pool = db.getPool();
+  const pool = db;
   const result = await pool.query(SQ.GET_NEXT_SEQUENCE_NUMBER, [bookingId, flightType]);
   return result.rows[0]?.next_seq || 1;
 };
@@ -77,7 +77,7 @@ const formatTime = (dateString) => {
  * Check booking status for checkin
  */
 const checkBookingCheckinStatus = async (bookingCode) => {
-  const pool = db.getPool();
+  const pool = db;
   
   const result = await pool.query(SQ.CHECK_BOOKING_CHECKIN_STATUS, [bookingCode]);
   
@@ -116,7 +116,7 @@ const checkBookingCheckinStatus = async (bookingCode) => {
  * Get all passengers for a booking
  */
 const getPassengersForCheckin = async (bookingId, flightType) => {
-  const pool = db.getPool();
+  const pool = db;
   
   const result = await pool.query(SQ.GET_PASSENGERS_FOR_CHECKIN, [bookingId, flightType]);
   
@@ -127,7 +127,7 @@ const getPassengersForCheckin = async (bookingId, flightType) => {
  * Get booking details for boarding pass
  */
 const getBookingDetailsForCheckin = async (bookingCode) => {
-  const pool = db.getPool();
+  const pool = db;
   
   const result = await pool.query(SQ.GET_BOOKING_DETAILS_FOR_CHECKIN, [bookingCode]);
   
@@ -142,7 +142,7 @@ const getBookingDetailsForCheckin = async (bookingCode) => {
  * Check-in cho 1 passenger cu the
  */
 const checkinPassenger = async (bookingCode, passengerId, flightType) => {
-  const pool = db.getPool();
+  const pool = db;
   const client = await pool.connect();
   
   try {
@@ -253,7 +253,7 @@ const checkinPassenger = async (bookingCode, passengerId, flightType) => {
  * Check-in tat ca passengers cua 1 booking cho 1 flight
  */
 const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
-  const pool = db.getPool();
+  const pool = db;
   const client = await pool.connect();
   
   try {
@@ -382,7 +382,7 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
  * Get boarding pass info
  */
 const getBoardingPass = async (boardingPassCode) => {
-  const pool = db.getPool();
+  const pool = db;
   
   const result = await pool.query(SQ.SELECT_CHECKIN_BY_CODE, [boardingPassCode]);
   
@@ -445,7 +445,7 @@ const getBoardingPass = async (boardingPassCode) => {
  * Get checkin status cho 1 booking
  */
 const getCheckinStatus = async (bookingCode) => {
-  const pool = db.getPool();
+  const pool = db;
   
   // Get booking
   const bookingResult = await pool.query(
@@ -507,7 +507,7 @@ const getCheckinStatus = async (bookingCode) => {
  * Update gate for booking
  */
 const updateGate = async (bookingId, gate) => {
-  const pool = db.getPool();
+  const pool = db;
   
   await pool.query(SQ.UPDATE_BOOKING_GATE, [gate, bookingId]);
   

@@ -113,7 +113,7 @@ const generateOTPCode = () => {
  * @returns {boolean}
  */
 const isOTPRequired = (netRefundAmount) => {
-  return OTP_CONFIG.enabled && netRefundAmount > OTP_CONFIG.threshold;
+  return OTP_CONFIG.enabled && netRefundAmount >= OTP_CONFIG.threshold;
 };
 
 /**
@@ -163,7 +163,6 @@ const requestUserOTP = async (email, bookingCode) => {
     email: normalizedEmail,
     expiresIn: OTP_CONFIG.expiresInMinutes * 60,
     message: `Mã OTP đã được gửi đến ${normalizedEmail}. Mã có hiệu lực trong ${OTP_CONFIG.expiresInMinutes} phút.`,
-    _debug_code: code,
   };
 };
 
@@ -200,8 +199,10 @@ const requestGuestOTP = async (email, bookingCode) => {
   });
 
   // Send OTP email using Resend
+  console.log(`[OTP] Preparing to send email to: ${normalizedEmail}`);
   try {
-    await sendRefundOTPEmail(normalizedEmail, code, OTP_CONFIG.expiresInMinutes);
+    const emailResult = await sendRefundOTPEmail(normalizedEmail, code, OTP_CONFIG.expiresInMinutes);
+    console.log(`[OTP] Email send result: ${emailResult}`);
   } catch (emailErr) {
     console.error('[OTP] Failed to send email:', emailErr.message);
     // Continue anyway - OTP is still valid, just email failed
@@ -214,8 +215,6 @@ const requestGuestOTP = async (email, bookingCode) => {
     email: normalizedEmail,
     expiresIn: OTP_CONFIG.expiresInMinutes * 60,
     message: `Mã OTP đã được gửi đến ${normalizedEmail}. Mã có hiệu lực trong ${OTP_CONFIG.expiresInMinutes} phút.`,
-    // NOTE: Trong production, không trả về code
-    _debug_code: code, // Xóa trong production!
   };
 };
 

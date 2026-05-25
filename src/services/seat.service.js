@@ -16,6 +16,7 @@ Chi tiet:
 =========================================================
 */
 
+// db = pool directly
 const db = require('../config/db');
 const SQ = require('../queries/seat.queries');
 const QB = require('../queries/booking.queries');
@@ -38,7 +39,7 @@ const getSeatPosition = (seatNumber) => {
  * Tinh phi them cho ghe da chon
  */
 const calculateExtraFee = async (flightId, seatClass, position) => {
-  const pool = db.getPool();
+  const pool = db;
   const result = await pool.query(SQ.SELECT_SEAT_PRICING_BY_CLASS, [flightId, seatClass]);
   
   const pricing = result.rows.find(p => p.position === position);
@@ -49,7 +50,7 @@ const calculateExtraFee = async (flightId, seatClass, position) => {
  * Get random available seat
  */
 const getRandomAvailableSeat = async (flightId, seatClass) => {
-  const pool = db.getPool();
+  const pool = db;
   
   // Lay tat ca ghe trong của class
   const allSeats = await pool.query(SQ.SELECT_SEAT_MAP, [flightId, seatClass]);
@@ -80,7 +81,7 @@ const getRandomAvailableSeat = async (flightId, seatClass) => {
  * @param {string} seatClass - Loai ghe (economy, business, first)
  */
 const getSeatMap = async (flightId, seatClass) => {
-  const pool = db.getPool();
+  const pool = db;
   
   // Lay seat map
   const seatResult = await pool.query(SQ.SELECT_SEAT_MAP, [flightId, seatClass]);
@@ -138,7 +139,7 @@ const getAllSeatMaps = async (flightId) => {
  * Validate seat selection
  */
 const validateSeatSelection = async (flightId, seatClass, seatNumber) => {
-  const pool = db.getPool();
+  const pool = db;
   
   // Check flight exists
   const flightResult = await pool.query(
@@ -170,7 +171,7 @@ const validateSeatSelection = async (flightId, seatClass, seatNumber) => {
  * Assign seat cho 1 passenger
  */
 const assignSeat = async (flightId, seatClass, seatNumber, passengerId, bookingId) => {
-  const pool = db.getPool();
+  const pool = db;
   const client = await pool.connect();
   
   try {
@@ -209,7 +210,7 @@ const assignSeat = async (flightId, seatClass, seatNumber, passengerId, bookingI
  * @param {Array} selections - [{ passenger_id, flight_type, seat_number }]
  */
 const selectSeats = async (bookingCode, selections) => {
-  const pool = db.getPool();
+  const pool = db;
   const client = await pool.connect();
   
   try {
@@ -253,8 +254,12 @@ const selectSeats = async (bookingCode, selections) => {
         'occupied', selection.passenger_id, booking.id, flightId, selection.seat_number
       ]);
       
-      // Update passenger
-      await client.query(SQ.UPDATE_PASSENGER_SEAT, [selection.seat_number, selection.passenger_id]);
+      // Update passenger - dung field dung cho flight_type
+      const seatField = selection.flight_type === 'return' ? 'return_seat_number' : 'seat_number';
+      await client.query(
+        `UPDATE passengers SET ${seatField} = $1 WHERE id = $2`,
+        [selection.seat_number, selection.passenger_id]
+      );
       
       totalExtraFee += extraFee;
       
@@ -288,7 +293,7 @@ const selectSeats = async (bookingCode, selections) => {
  * Auto-assign random seats cho tat ca passengers cua 1 booking
  */
 const autoAssignSeats = async (bookingCode) => {
-  const pool = db.getPool();
+  const pool = db;
   const client = await pool.connect();
   
   try {
@@ -392,7 +397,7 @@ const autoAssignSeats = async (bookingCode) => {
  * Release a seat (when cancelling booking)
  */
 const releaseSeat = async (flightId, seatNumber) => {
-  const pool = db.getPool();
+  const pool = db;
   
   await pool.query(SQ.RELEASE_SEAT, [flightId, seatNumber]);
   
