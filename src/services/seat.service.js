@@ -16,7 +16,7 @@ Chi tiet:
 =========================================================
 */
 
-const db = require('../config/database');
+const db = require('../config/db');
 const SQ = require('../queries/seat.queries');
 const QB = require('../queries/booking.queries');
 
