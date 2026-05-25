@@ -142,7 +142,10 @@ const COUNT_BOOKINGS = (dk) =>
 const SELECT_BOOKINGS_ADMIN = (dk, gioiHan, viTri) =>
   `SELECT b.id, b.booking_code, b.status, b.trip_type,
      b.total_adults, b.total_children, b.total_infants,
-     b.total_price, b.held_until, b.created_at,
+     b.total_price,
+     COALESCE(anc.ancillary_total, 0) AS ancillary_total,
+     b.total_price + COALESCE(anc.ancillary_total, 0) AS grand_total,
+     b.held_until, b.created_at,
      b.contact_name, b.contact_email, b.contact_phone,
      b.user_id,
      f_out.flight_number  AS outbound_flight,
@@ -153,12 +156,19 @@ const SELECT_BOOKINGS_ADMIN = (dk, gioiHan, viTri) =>
    JOIN flights  f_out   ON f_out.id   = b.outbound_flight_id
    JOIN airports dep_out ON dep_out.id = f_out.departure_airport_id
    JOIN airports arr_out ON arr_out.id = f_out.arrival_airport_id
+   LEFT JOIN (
+     SELECT booking_id, COALESCE(SUM(total_price), 0) AS ancillary_total
+     FROM booking_ancillaries WHERE status != 'cancelled'
+     GROUP BY booking_id
+   ) anc ON anc.booking_id = b.id
    ${dk}
    ORDER BY b.created_at DESC
    LIMIT $${gioiHan} OFFSET $${viTri}`;
 
 const SELECT_BOOKING_DETAIL_ADMIN =
   `SELECT b.*,
+     COALESCE(anc.ancillary_total, 0) AS ancillary_total,
+     b.total_price + COALESCE(anc.ancillary_total, 0) AS grand_total,
      f_out.flight_number AS outbound_flight_number,
      f_out.departure_time AS outbound_dep_time, f_out.arrival_time AS outbound_arr_time,
      al_out.name AS outbound_airline, dep_out.code AS from_code, arr_out.code AS to_code,
@@ -170,6 +180,11 @@ const SELECT_BOOKING_DETAIL_ADMIN =
    JOIN airports dep_out ON dep_out.id = f_out.departure_airport_id
    JOIN airports arr_out ON arr_out.id = f_out.arrival_airport_id
    LEFT JOIN flights f_ret ON f_ret.id = b.return_flight_id
+   LEFT JOIN (
+     SELECT booking_id, COALESCE(SUM(total_price), 0) AS ancillary_total
+     FROM booking_ancillaries WHERE status != 'cancelled'
+     GROUP BY booking_id
+   ) anc ON anc.booking_id = b.id
    WHERE b.id = $1`;
 
 // ── Passengers ─────────────────────────────────────────────────────────────────
@@ -213,20 +228,32 @@ const EXPIRE_SEAT_ASSIGNMENTS =
 // ── Statistics ─────────────────────────────────────────────────────────────────
 
 const STATS_BOOKING_SUMMARY = (locNgay) =>
-  `SELECT status, COUNT(*) AS count, SUM(total_price) AS revenue
-   FROM bookings
+  `SELECT b.status, COUNT(*) AS count,
+     SUM(b.total_price + COALESCE(anc.ancillary_total, 0)) AS revenue
+   FROM bookings b
+   LEFT JOIN (
+     SELECT booking_id, COALESCE(SUM(total_price), 0) AS ancillary_total
+     FROM booking_ancillaries WHERE status != 'cancelled'
+     GROUP BY booking_id
+   ) anc ON anc.booking_id = b.id
    WHERE 1=1 ${locNgay}
-   GROUP BY status ORDER BY status`;
+   GROUP BY b.status ORDER BY b.status`;
 
 const STATS_DAILY_REVENUE = (locNgay) =>
-  `SELECT DATE(created_at) AS date,
+  `SELECT DATE(b.created_at) AS date,
           COUNT(*) AS bookings,
-          SUM(total_price) FILTER (WHERE status IN ('confirmed','pending')) AS revenue
-   FROM bookings
-   WHERE created_at >= NOW() - INTERVAL '7 days'
-   ${locNgay ? `AND created_at BETWEEN $1 AND $2` : ""}
-   GROUP BY DATE(created_at)
-   ORDER BY date DESC`;
+          COUNT(*) FILTER (WHERE b.status IN ('confirmed','refund_pending','refunded')) AS valid_bookings,
+          SUM(b.total_price + COALESCE(anc.ancillary_total, 0))
+            FILTER (WHERE b.status IN ('confirmed','refund_pending','refunded')) AS revenue
+   FROM bookings b
+   LEFT JOIN (
+     SELECT booking_id, COALESCE(SUM(total_price), 0) AS ancillary_total
+     FROM booking_ancillaries WHERE status != 'cancelled'
+     GROUP BY booking_id
+   ) anc ON anc.booking_id = b.id
+   WHERE ${locNgay ? `b.created_at BETWEEN $1 AND $2` : `b.created_at >= CURRENT_DATE - INTERVAL '6 days'`}
+   GROUP BY DATE(b.created_at)
+   ORDER BY date ASC`;
 
 const STATS_POPULAR_FLIGHTS = (locNgayDat) =>
   `SELECT f.flight_number,
@@ -239,27 +266,35 @@ const STATS_POPULAR_FLIGHTS = (locNgayDat) =>
    JOIN airlines al  ON al.id  = f.airline_id
    JOIN airports dep ON dep.id = f.departure_airport_id
    JOIN airports arr ON arr.id = f.arrival_airport_id
-   WHERE b.status IN ('confirmed','pending') ${locNgayDat}
+   WHERE b.status IN ('confirmed','refund_pending','refunded') ${locNgayDat}
    GROUP BY f.id, f.flight_number, al.name, dep.city, arr.city
    ORDER BY total_bookings DESC
    LIMIT 5`;
 
 const STATS_OVERVIEW = (locNgay) =>
   `SELECT
-     COUNT(*) FILTER (WHERE status IN ('confirmed','pending'))         AS total_bookings,
-     SUM(total_price) FILTER (WHERE status IN ('confirmed','pending')) AS total_revenue,
+     COUNT(*) FILTER (WHERE b.status IN ('confirmed','refund_pending','refunded')) AS total_bookings,
+     SUM(b.total_price + COALESCE(anc.ancillary_total, 0))
+       FILTER (WHERE b.status IN ('confirmed','refund_pending','refunded'))        AS total_revenue,
      COALESCE((
        SELECT SUM(r.net_refund_amount)
        FROM refunds r
+       JOIN bookings rb ON rb.id = r.booking_id
        WHERE r.status = 'completed'
-     ), 0)                                                             AS total_refunded,
-     COUNT(*) FILTER (WHERE status = 'confirmed')                      AS confirmed,
-     COUNT(*) FILTER (WHERE status = 'pending')                        AS pending,
-     COUNT(*) FILTER (WHERE status = 'cancelled')                      AS cancelled,
-     COUNT(*) FILTER (WHERE status = 'expired')                        AS expired,
-     SUM(total_adults + total_children + total_infants)
-       FILTER (WHERE status IN ('confirmed','pending'))                 AS total_passengers
-   FROM bookings
+       ${locNgay ? `AND rb.created_at BETWEEN $1 AND $2` : ""}
+     ), 0)                                                                         AS total_refunded,
+     COUNT(*) FILTER (WHERE b.status = 'confirmed')                               AS confirmed,
+     COUNT(*) FILTER (WHERE b.status = 'pending')                                 AS pending,
+     COUNT(*) FILTER (WHERE b.status = 'cancelled')                               AS cancelled,
+     COUNT(*) FILTER (WHERE b.status = 'expired')                                 AS expired,
+     SUM(b.total_adults + b.total_children + b.total_infants)
+       FILTER (WHERE b.status = 'confirmed')                                       AS total_passengers
+   FROM bookings b
+   LEFT JOIN (
+     SELECT booking_id, COALESCE(SUM(total_price), 0) AS ancillary_total
+     FROM booking_ancillaries WHERE status != 'cancelled'
+     GROUP BY booking_id
+   ) anc ON anc.booking_id = b.id
    WHERE 1=1 ${locNgay}`;
 
 module.exports = {

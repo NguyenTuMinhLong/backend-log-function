@@ -88,9 +88,15 @@ const buildPaymentResponse = (payment, bookingCode) => ({
   gateway_response: payment.gateway_response || null,
 });
 
+const PAYMENT_WITH_BOOKING_CODE = `
+  SELECT p.*, b.booking_code
+  FROM payments p
+  LEFT JOIN bookings b ON b.id = p.booking_id
+`;
+
 const getPaymentByCodeRow = async (paymentCode) => {
   const { rows } = await pool.query(
-    'SELECT * FROM payments WHERE payment_code = $1 LIMIT 1',
+    `${PAYMENT_WITH_BOOKING_CODE} WHERE p.payment_code = $1 LIMIT 1`,
     [paymentCode]
   );
   return rows[0] || null;
@@ -98,7 +104,7 @@ const getPaymentByCodeRow = async (paymentCode) => {
 
 const getPaymentByIdRow = async (id) => {
   const { rows } = await pool.query(
-    'SELECT * FROM payments WHERE id::text = $1 LIMIT 1',
+    `${PAYMENT_WITH_BOOKING_CODE} WHERE p.id::text = $1 LIMIT 1`,
     [String(id)]
   );
   return rows[0] || null;
@@ -106,9 +112,9 @@ const getPaymentByIdRow = async (id) => {
 
 const getPaymentByGatewayOrderId = async (orderId) => {
   const { rows } = await pool.query(
-    `SELECT * FROM payments
-     WHERE gateway_response ->> 'order_id' = $1
-     ORDER BY created_at DESC LIMIT 1`,
+    `${PAYMENT_WITH_BOOKING_CODE}
+     WHERE p.gateway_response ->> 'order_id' = $1
+     ORDER BY p.created_at DESC LIMIT 1`,
     [orderId]
   );
   return rows[0] || null;
@@ -150,6 +156,17 @@ const getBookingForPayment = async (client, bookingCode, userId, lockRow = false
   if (booking.user_id && userId && Number(booking.user_id) !== Number(userId)) {
     throw new Error("Bạn không có quyền thao tác với booking này");
   }
+
+  // Cộng thêm ancillary total vào total_price để tính đúng số tiền cần thanh toán
+  const ancResult = await client.query(
+    `SELECT COALESCE(SUM(total_price), 0) AS ancillary_total
+     FROM booking_ancillaries
+     WHERE booking_id = $1 AND status != 'cancelled'`,
+    [booking.id]
+  );
+  const ancillaryTotal = parseFloat(ancResult.rows[0].ancillary_total || 0);
+  booking.ticket_price  = parseFloat(booking.total_price);
+  booking.total_price   = booking.ticket_price + ancillaryTotal;
 
   return booking;
 };
@@ -423,12 +440,38 @@ const initPayment = async ({ booking_code, payment_method, voucher_code, userId 
 
   // Fetch updated payment
   const updatedPayment = await getPaymentByCodeRow(payment.payment_code);
-  return mapPayment(updatedPayment || payment, providerPayload);
+
+  // Fire-and-forget: gửi email thông báo payment vừa được tạo
+  const paymentForEmail = updatedPayment || payment;
+  setImmediate(async () => {
+    try {
+      const { sendPaymentInitiatedEmail } = require("../utils/mailer");
+      const contactRes = await pool.query(
+        `SELECT contact_email, contact_name FROM bookings WHERE id = $1`,
+        [paymentForEmail.booking_id]
+      );
+      const contact = contactRes.rows[0];
+      if (!contact?.contact_email) return;
+
+      await sendPaymentInitiatedEmail(contact.contact_email, {
+        contactName:     contact.contact_name,
+        paymentCode:     paymentForEmail.payment_code,
+        paymentMethod:   payment_method,
+        finalAmount:     paymentForEmail.final_amount,
+        expiresAt:       paymentForEmail.expires_at,
+        gatewayResponse: providerPayload,
+      });
+    } catch (emailErr) {
+      console.error("❌ Payment initiated email error:", emailErr);
+    }
+  });
+
+  return mapPayment(paymentForEmail, providerPayload);
 };
 
 // ── Confirm Payment ────────────────────────────────────────────────────────────
 
-const confirmPayment = async (paymentCode, userId = null) => {
+const confirmPayment = async (paymentCode, userId = null, bypassAuth = false) => {
   const normalizedPaymentCode = String(paymentCode || "").trim().toUpperCase();
   if (!normalizedPaymentCode) throw new Error("paymentCode là bắt buộc");
 
@@ -441,9 +484,11 @@ const confirmPayment = async (paymentCode, userId = null) => {
 
     const payment = result.rows[0];
 
-    if (payment.booking_user_id && !userId) throw new Error("Bạn cần đăng nhập để xác nhận payment này");
-    if (payment.booking_user_id && userId && Number(payment.booking_user_id) !== Number(userId)) {
-      throw new Error("Bạn không có quyền thao tác payment này");
+    if (!bypassAuth) {
+      if (payment.booking_user_id && !userId) throw new Error("Bạn cần đăng nhập để xác nhận payment này");
+      if (payment.booking_user_id && userId && Number(payment.booking_user_id) !== Number(userId)) {
+        throw new Error("Bạn không có quyền thao tác payment này");
+      }
     }
 
     if (payment.status === "SUCCESS") {
@@ -466,7 +511,69 @@ const confirmPayment = async (paymentCode, userId = null) => {
     }
 
     await client.query("COMMIT");
-    return buildPaymentResponse(paymentUpdate.rows[0], payment.booking_code);
+
+    // Fire-and-forget: gửi email xác nhận sau khi transaction hoàn tất
+    const confirmedPayment = paymentUpdate.rows[0];
+    const bookingIdForEmail = payment.booking_id;
+    setImmediate(async () => {
+      try {
+        const { sendBookingConfirmedEmail } = require("../utils/mailer");
+
+        const bookingRes = await pool.query(
+          `SELECT b.booking_code, b.contact_email, b.contact_name,
+                  b.trip_type, b.outbound_seat_class, b.return_seat_class,
+                  f_out.flight_number AS outbound_flight_number,
+                  f_out.departure_time AS outbound_departure_time,
+                  f_out.arrival_time   AS outbound_arrival_time,
+                  al_out.name          AS outbound_airline_name,
+                  dep_out.code AS outbound_dep_code, dep_out.city AS outbound_dep_city,
+                  arr_out.code AS outbound_arr_code, arr_out.city AS outbound_arr_city,
+                  f_ret.flight_number AS return_flight_number,
+                  f_ret.departure_time AS return_departure_time,
+                  f_ret.arrival_time   AS return_arrival_time,
+                  al_ret.name          AS return_airline_name,
+                  dep_ret.code AS return_dep_code, dep_ret.city AS return_dep_city,
+                  arr_ret.code AS return_arr_code, arr_ret.city AS return_arr_city
+           FROM bookings b
+           JOIN flights  f_out   ON f_out.id  = b.outbound_flight_id
+           JOIN airlines al_out  ON al_out.id = f_out.airline_id
+           JOIN airports dep_out ON dep_out.id = f_out.departure_airport_id
+           JOIN airports arr_out ON arr_out.id = f_out.arrival_airport_id
+           LEFT JOIN flights  f_ret   ON f_ret.id  = b.return_flight_id
+           LEFT JOIN airlines al_ret  ON al_ret.id = f_ret.airline_id
+           LEFT JOIN airports dep_ret ON dep_ret.id = f_ret.departure_airport_id
+           LEFT JOIN airports arr_ret ON arr_ret.id = f_ret.arrival_airport_id
+           WHERE b.id = $1`,
+          [bookingIdForEmail]
+        );
+
+        const bookingDetail = bookingRes.rows[0];
+        if (!bookingDetail?.contact_email) return;
+
+        const passRes = await pool.query(
+          `SELECT full_name, passenger_type, date_of_birth, gender,
+                  nationality, passport_number, seat_number,
+                  baggage_kg, extra_baggage_kg, flight_type
+           FROM passengers WHERE booking_id = $1
+           ORDER BY flight_type, passenger_type`,
+          [bookingIdForEmail]
+        );
+
+        await sendBookingConfirmedEmail(bookingDetail.contact_email, {
+          bookingCode:   bookingDetail.booking_code,
+          contactName:   bookingDetail.contact_name,
+          finalAmount:   confirmedPayment.final_amount,
+          paymentMethod: confirmedPayment.payment_method,
+          paidAt:        confirmedPayment.paid_at,
+          booking:       bookingDetail,
+          passengers:    passRes.rows,
+        });
+      } catch (emailErr) {
+        console.error("❌ Post-payment email error:", emailErr);
+      }
+    });
+
+    return buildPaymentResponse(confirmedPayment, payment.booking_code);
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -561,24 +668,25 @@ const processMomoCallback = async (body = {}, source = 'ipn') => {
     return { ok: false, resultCode: 1, message: 'Amount mismatch', payment_code: paymentCode };
   }
 
+  const bookingCode = payment.booking_code || '';
+
   if (Number(body.resultCode) === 0) {
     if (isTerminalPaidStatus(payment.status)) {
-      return { ok: true, resultCode: 0, message: 'Already processed', payment_code: paymentCode, payment: mapPayment(payment) };
+      return { ok: true, resultCode: 0, message: 'Already processed', payment_code: paymentCode, booking_code: bookingCode };
     }
-    const confirmed = await confirmPayment(paymentCode);
-    return { ok: true, resultCode: 0, message: 'Success', payment_code: paymentCode, payment: confirmed };
+    await confirmPayment(paymentCode, null, true);
+    return { ok: true, resultCode: 0, message: 'Success', payment_code: paymentCode, booking_code: bookingCode };
   }
 
-  let cancelled = mapPayment(payment);
   if (!isTerminalCancelledStatus(payment.status) && !isTerminalPaidStatus(payment.status)) {
-    cancelled = await cancelPayment({ payment_code: paymentCode });
+    await cancelPayment({ payment_code: paymentCode });
   }
   return {
     ok: true,
     resultCode: 0,
     message: body.message || 'Received',
     payment_code: paymentCode,
-    payment: cancelled,
+    booking_code: bookingCode,
     return_status: isMomoCancelResult(body.resultCode, body.message) ? 'cancel' : 'error',
   };
 };
@@ -662,11 +770,12 @@ const handlePaypalReturn = async (query = {}) => {
     };
   }
 
-  const confirmed = await confirmPayment(payment.payment_code);
+  await confirmPayment(payment.payment_code, null, true);
   return {
     status: 'success',
     message: 'Success',
     payment_code: payment.payment_code,
+    booking_code: payment.booking_code || '',
     order_id: orderId,
     capture_id: captureItem.id || '',
   };
@@ -689,6 +798,7 @@ const handlePaypalCancel = async (query = {}) => {
     status: 'cancel',
     message: 'Buyer cancelled PayPal checkout',
     payment_code: payment?.payment_code || paymentCode,
+    booking_code: payment?.booking_code || '',
     order_id: orderId,
   };
 };
@@ -790,54 +900,51 @@ const handlePayosReturn = async (returnStatus = 'success', query = {}) => {
   const orderCode = String(gatewayResp.order_code || query.orderCode || '');
   const paymentLinkId = String(gatewayResp.payment_link_id || query.id || '');
 
+  const bookingCode = payment.booking_code || '';
+
   if (isTerminalPaidStatus(payment.status)) {
-    return { status: 'success', message: 'Already processed', payment_code: payment.payment_code };
+    return { status: 'success', message: 'Already processed', payment_code: payment.payment_code, booking_code: bookingCode };
   }
 
   if (normalizedReturnStatus === 'cancel') {
     const cancelledPayment = isTerminalCancelledStatus(payment.status)
       ? payment
       : await cancelPayment({ payment_code: payment.payment_code });
-    return { status: 'cancel', message: 'Buyer cancelled payOS checkout', payment: cancelledPayment };
+    return { status: 'cancel', message: 'Buyer cancelled payOS checkout', payment_code: payment.payment_code, booking_code: bookingCode };
   }
 
   if (!orderCode) {
-    return { status: 'error', message: 'Missing payOS order code', payment_code: payment.payment_code };
+    return { status: 'error', message: 'Missing payOS order code', payment_code: payment.payment_code, booking_code: bookingCode };
   }
 
   let paymentLink;
   try {
     paymentLink = await getPayosPaymentLink(orderCode);
   } catch (error) {
-    return { status: 'pending', message: error?.message || 'Waiting for payOS confirmation', payment_code: payment.payment_code };
+    return { status: 'pending', message: error?.message || 'Waiting for payOS confirmation', payment_code: payment.payment_code, booking_code: bookingCode };
   }
 
   const payosStatus = String(paymentLink.status || '').toUpperCase();
-  const latestPaymentLinkId = paymentLink.id || paymentLinkId;
 
   if (payosStatus === 'PAID') {
     const expectedAmount = getPaymentChargeAmount(payment);
     const paidAmount = Number(paymentLink.amountPaid || paymentLink.amount || 0);
     if (paidAmount !== expectedAmount) {
-      return { status: 'error', message: `Amount mismatch`, payment_code: payment.payment_code };
+      return { status: 'error', message: `Amount mismatch`, payment_code: payment.payment_code, booking_code: bookingCode };
     }
 
-    const transaction = Array.isArray(paymentLink.transactions)
-      ? paymentLink.transactions[0]
-      : null;
-
-    const confirmed = await confirmPayment(payment.payment_code);
-    return { status: 'success', message: 'Success', payment: confirmed };
+    await confirmPayment(payment.payment_code, null, true);
+    return { status: 'success', message: 'Success', payment_code: payment.payment_code, booking_code: bookingCode };
   }
 
   if (['CANCELLED', 'FAILED', 'EXPIRED'].includes(payosStatus)) {
-    const cancelledPayment = isTerminalCancelledStatus(payment.status)
-      ? payment
-      : await cancelPayment({ payment_code: payment.payment_code });
-    return { status: payosStatus === 'CANCELLED' ? 'cancel' : 'error', message: `payOS status: ${payosStatus}`, payment: cancelledPayment };
+    if (!isTerminalCancelledStatus(payment.status)) {
+      await cancelPayment({ payment_code: payment.payment_code });
+    }
+    return { status: payosStatus === 'CANCELLED' ? 'cancel' : 'error', message: `payOS status: ${payosStatus}`, payment_code: payment.payment_code, booking_code: bookingCode };
   }
 
-  return { status: 'pending', message: `payOS status: ${payosStatus || 'PENDING'}`, payment_code: payment.payment_code };
+  return { status: 'pending', message: `payOS status: ${payosStatus || 'PENDING'}`, payment_code: payment.payment_code, booking_code: bookingCode };
 };
 
 // ── Exports ───────────────────────────────────────────────────────────────────

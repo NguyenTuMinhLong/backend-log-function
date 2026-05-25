@@ -25,11 +25,20 @@ router.post("/", authenticateOptional, async (req, res) => {
 // Init payment with gateway (BANK_QR/PayOS, MoMo, PayPal)
 router.post("/init", authenticateOptional, async (req, res) => {
   try {
+    let booking_code = req.body.booking_code;
+
+    // Hỗ trợ frontend gửi booking_id thay vì booking_code
+    if (!booking_code && req.body.booking_id) {
+      const pool = require('../config/db');
+      const r = await pool.query('SELECT booking_code FROM bookings WHERE id = $1', [req.body.booking_id]);
+      booking_code = r.rows[0]?.booking_code;
+    }
+
     const result = await paymentService.initPayment({
-      booking_code: req.body.booking_code,
+      booking_code,
       payment_method: req.body.payment_method,
-      voucher_code: req.body.voucher_code,
-      userId: req.user?.id,
+      voucher_code:   req.body.voucher_code,
+      userId:         req.user?.id,
     });
     res.json({ success: true, data: result });
   } catch (error) {
@@ -116,43 +125,88 @@ router.post("/webhook/momo", async (req, res) => {
 
 // MoMo Return (redirect user)
 router.get("/return/momo", async (req, res) => {
+  const config = require('../config/payment.config');
+  const frontendBase = config.momo.frontendUrl || '';
+  const resultPage = `${frontendBase}/payment/momo/result`;
+
   try {
     const result = await paymentService.handleMomoReturn(req.query);
-    if (result.redirect) {
-      return res.redirect(result.redirect);
-    }
-    res.json({ success: true, data: result });
+    const status = result.return_status || (result.ok && result.resultCode === 0 ? 'success' : 'error');
+    const params = new URLSearchParams({
+      status,
+      paymentCode: result.payment_code || '',
+      bookingCode: result.booking_code || '',
+    });
+    return res.redirect(`${resultPage}?${params.toString()}`);
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    const params = new URLSearchParams({ status: 'error', message: error.message || '' });
+    return res.redirect(`${resultPage}?${params.toString()}`);
   }
 });
 
 // PayOS Return
 router.get("/return/payos/:status", async (req, res) => {
+  const config = require('../config/payment.config');
+  const frontendBase = config.payos.frontendUrl || '';
+  const resultPage = `${frontendBase}/payment/payos/result`;
+
   try {
     const result = await paymentService.handlePayosReturn(req.params.status, req.query);
-    res.json({ success: true, data: result });
+    const params = new URLSearchParams({
+      status: result.status || 'pending',
+      paymentCode: result.payment_code || '',
+      bookingCode: result.booking_code || '',
+    });
+    return res.redirect(`${resultPage}?${params.toString()}`);
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    const params = new URLSearchParams({ status: 'error', message: error.message || '' });
+    return res.redirect(`${resultPage}?${params.toString()}`);
   }
 });
 
 // PayPal Return & Cancel
 router.get("/return/paypal", async (req, res) => {
+  const config = require('../config/payment.config');
+  const frontendBase = config.paypal.frontendUrl || '';
+  const resultPage = `${frontendBase}/payment/paypal/result`;
+
   try {
     const result = await paymentService.handlePaypalReturn(req.query);
-    res.json({ success: true, data: result });
+    const params = new URLSearchParams({
+      status: result.status || 'success',
+      paymentCode: result.payment_code || '',
+      bookingCode: result.booking_code || '',
+      orderId: result.order_id || '',
+    });
+    return res.redirect(`${resultPage}?${params.toString()}`);
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    const params = new URLSearchParams({
+      status: 'error',
+      message: error.message || 'PayPal return failed',
+    });
+    return res.redirect(`${resultPage}?${params.toString()}`);
   }
 });
 
 router.get("/cancel/paypal", async (req, res) => {
+  const config = require('../config/payment.config');
+  const frontendBase = config.paypal.frontendUrl || '';
+  const resultPage = `${frontendBase}/payment/paypal/result`;
+
   try {
     const result = await paymentService.handlePaypalCancel(req.query);
-    res.json({ success: true, data: result });
+    const params = new URLSearchParams({
+      status: 'cancel',
+      paymentCode: result.payment_code || '',
+      orderId: result.order_id || '',
+    });
+    return res.redirect(`${resultPage}?${params.toString()}`);
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    const params = new URLSearchParams({
+      status: 'cancel',
+      message: error.message || '',
+    });
+    return res.redirect(`${resultPage}?${params.toString()}`);
   }
 });
 

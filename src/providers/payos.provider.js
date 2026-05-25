@@ -31,14 +31,12 @@ const getPayosClient = () => {
   }
 
   if (!payosClient) {
-    const { PayOS } = require('@payos/node');
-    payosClient = new PayOS({
-      clientId: getRequiredConfig('PAYOS_CLIENT_ID', config.payos.clientId),
-      apiKey: getRequiredConfig('PAYOS_API_KEY', config.payos.apiKey),
-      checksumKey: getRequiredConfig('PAYOS_CHECKSUM_KEY', config.payos.checksumKey),
-      partnerCode: optionalConfig(config.payos.partnerCode),
-      baseURL: optionalPayosBaseUrl(config.payos.baseUrl),
-    });
+    const PayOS = require('@payos/node');
+    payosClient = new PayOS(
+      getRequiredConfig('PAYOS_CLIENT_ID', config.payos.clientId),
+      getRequiredConfig('PAYOS_API_KEY', config.payos.apiKey),
+      getRequiredConfig('PAYOS_CHECKSUM_KEY', config.payos.checksumKey),
+    );
   }
 
   return payosClient;
@@ -102,12 +100,12 @@ const createPayosPaymentInstruction = async (payment) => {
 
   const returnUrl = resolveUrl({
     providedUrl: config.payos.returnUrl,
-    fallbackPath: '/payments/payos/return/success',
+    fallbackPath: '/api/payments/return/payos/success',
     paymentCode,
   });
   const cancelUrl = resolveUrl({
     providedUrl: config.payos.cancelUrl,
-    fallbackPath: '/payments/payos/return/cancel',
+    fallbackPath: '/api/payments/return/payos/cancel',
     paymentCode,
   });
 
@@ -115,7 +113,7 @@ const createPayosPaymentInstruction = async (payment) => {
     throw new Error('payOS redirect URLs are incomplete');
   }
 
-  const response = await payos.paymentRequests.create({
+  const response = await payos.createPaymentLink({
     orderCode,
     amount,
     description: resolveDescription(paymentCode),
@@ -159,17 +157,17 @@ const createPayosPaymentInstruction = async (payment) => {
 
 const verifyPayosWebhookData = async (payload = {}) => {
   const payos = getPayosClient();
-  return payos.webhooks.verify(payload);
+  return payos.verifyPaymentWebhookData(payload);
 };
 
 const getPayosPaymentLink = async (orderCode) => {
   const payos = getPayosClient();
-  return payos.paymentRequests.get(Number(orderCode));
+  return payos.getPaymentLinkInformation(Number(orderCode));
 };
 
 const cancelPayosPaymentLink = async (orderCode, cancellationReason = 'Cancelled by backend') => {
   const payos = getPayosClient();
-  return payos.paymentRequests.cancel(Number(orderCode), cancellationReason);
+  return payos.cancelPaymentLink(Number(orderCode), cancellationReason);
 };
 
 module.exports = {

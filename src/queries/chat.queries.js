@@ -121,16 +121,17 @@ const SELECT_SUPPORT_CONVERSATIONS = (dk, gioiHan, viTri) =>
      u.phone     AS user_phone,
      admin_u.full_name AS assigned_admin_full_name,
      admin_u.email     AS assigned_admin_email,
-     COALESCE((
-       SELECT COUNT(*)
-       FROM chat_messages m
-       WHERE m.conversation_id = c.id
-         AND m.sender_role = 'user'
-         AND m.created_at > COALESCE(c.last_admin_read_at, TO_TIMESTAMP(0))
-     ), 0) AS unread_count
+     COALESCE(unread_agg.unread_count, 0) AS unread_count
    FROM chat_conversations c
    LEFT JOIN users u       ON u.id = c.user_id
    LEFT JOIN users admin_u ON admin_u.id = c.assigned_admin_id
+   LEFT JOIN LATERAL (
+     SELECT COUNT(*) AS unread_count
+     FROM chat_messages m
+     WHERE m.conversation_id = c.id
+       AND m.sender_role = 'user'
+       AND m.created_at > COALESCE(c.last_admin_read_at, TO_TIMESTAMP(0))
+   ) unread_agg ON TRUE
    ${dk}
    ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC
    LIMIT $${gioiHan} OFFSET $${viTri}`;
