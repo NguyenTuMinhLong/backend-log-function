@@ -248,7 +248,9 @@ const STATS_DAILY_REVENUE = (locNgay) =>
           COUNT(*) AS bookings,
           COUNT(*) FILTER (WHERE b.status IN ('confirmed','refund_pending','refunded')) AS valid_bookings,
           SUM(COALESCE(pay.final_amount, b.total_price + COALESCE(anc.ancillary_total, 0)))
-            FILTER (WHERE b.status IN ('confirmed','refund_pending','refunded')) AS revenue
+            FILTER (WHERE b.status IN ('confirmed','refund_pending','refunded')) AS revenue,
+          COALESCE(SUM(ref.net_refunded)
+            FILTER (WHERE b.status IN ('refund_pending','refunded')), 0) AS refunded
    FROM bookings b
    LEFT JOIN (
      SELECT booking_id, COALESCE(SUM(total_price), 0) AS ancillary_total
@@ -260,6 +262,11 @@ const STATS_DAILY_REVENUE = (locNgay) =>
      WHERE booking_id = b.id
      ORDER BY created_at DESC LIMIT 1
    ) pay ON true
+   LEFT JOIN (
+     SELECT booking_id, SUM(net_refund_amount) AS net_refunded
+     FROM refunds WHERE status = 'completed'
+     GROUP BY booking_id
+   ) ref ON ref.booking_id = b.id
    WHERE ${locNgay
      ? `(b.created_at AT TIME ZONE '+07')::date BETWEEN $1::date AND $2::date`
      : `(b.created_at AT TIME ZONE '+07')::date >= (NOW() AT TIME ZONE '+07')::date - INTERVAL '6 days'`}
