@@ -860,8 +860,8 @@ const getStatistics = async (params) => {
 
   if (from_date && to_date) {
     dateValues.push(from_date, to_date);
-    dateFilter = `AND created_at BETWEEN $1 AND $2`;
-    bDateFilter = `AND b.created_at BETWEEN $1 AND $2`;
+    dateFilter  = `AND (created_at  AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN $1::date AND $2::date`;
+    bDateFilter = `AND (b.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN $1::date AND $2::date`;
   }
 
   const bookingSummary = await pool.query(
