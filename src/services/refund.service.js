@@ -535,6 +535,31 @@ const processRefund = async (adminId, refundCode) => {
 
     await client.query('COMMIT');
 
+    setImmediate(async () => {
+      try {
+        const { sendRefundCompletedEmail } = require('../utils/mailer');
+        const contactRes = await pool.query(
+          'SELECT contact_email, contact_name FROM bookings WHERE id = $1',
+          [refund.booking_id]
+        );
+        const contact = contactRes.rows[0];
+        const recipientEmail = contact?.contact_email || refund.guest_email || refund.user_email;
+        if (!recipientEmail) return;
+        await sendRefundCompletedEmail(recipientEmail, {
+          contactName:     contact?.contact_name || refund.user_name || 'Quý khách',
+          refundCode:      refund.refund_code,
+          bookingCode:     refund.booking_code,
+          netRefundAmount: refund.net_refund_amount,
+          originalAmount:  refund.payment_final_amount || refund.payment_amount,
+          adminFee:        refund.admin_fee,
+          refundType:      refund.refund_type,
+          processedAt:     new Date().toISOString(),
+        });
+      } catch (e) {
+        console.error('[Refund] Email error:', e.message);
+      }
+    });
+
     return {
       success: true,
       refund_code: refundCode,

@@ -794,7 +794,7 @@ const getBookings = async (params) => {
     values.push(`%${search}%`);
   }
   if (from_date && to_date) {
-    conditions.push(`DATE(b.created_at) BETWEEN $${idx} AND $${idx + 1}`);
+    conditions.push(`(b.created_at AT TIME ZONE '+07')::date BETWEEN $${idx} AND $${idx + 1}`);
     idx += 2;
     values.push(from_date, to_date);
   }
