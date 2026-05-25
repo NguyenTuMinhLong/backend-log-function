@@ -244,7 +244,7 @@ const STATS_BOOKING_SUMMARY = (locNgay) =>
    GROUP BY b.status ORDER BY b.status`;
 
 const STATS_DAILY_REVENUE = (locNgay) =>
-  `SELECT (b.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date AS date,
+  `SELECT (b.created_at AT TIME ZONE '+07')::date AS date,
           COUNT(*) AS bookings,
           COUNT(*) FILTER (WHERE b.status IN ('confirmed','refund_pending','refunded')) AS valid_bookings,
           SUM(b.total_price + COALESCE(anc.ancillary_total, 0))
@@ -256,9 +256,9 @@ const STATS_DAILY_REVENUE = (locNgay) =>
      GROUP BY booking_id
    ) anc ON anc.booking_id = b.id
    WHERE ${locNgay
-     ? `(b.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN $1::date AND $2::date`
-     : `(b.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date >= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '6 days'`}
-   GROUP BY (b.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+     ? `(b.created_at AT TIME ZONE '+07')::date BETWEEN $1::date AND $2::date`
+     : `(b.created_at AT TIME ZONE '+07')::date >= (NOW() AT TIME ZONE '+07')::date - INTERVAL '6 days'`}
+   GROUP BY (b.created_at AT TIME ZONE '+07')::date
    ORDER BY date ASC`;
 
 const STATS_POPULAR_FLIGHTS = (locNgayDat) =>
@@ -287,7 +287,7 @@ const STATS_OVERVIEW = (locNgay) =>
        FROM refunds r
        JOIN bookings rb ON rb.id = r.booking_id
        WHERE r.status = 'completed'
-       ${locNgay ? `AND (rb.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN $1::date AND $2::date` : ""}
+       ${locNgay ? `AND (rb.created_at AT TIME ZONE '+07')::date BETWEEN $1::date AND $2::date` : ""}
      ), 0)                                                                         AS total_refunded,
      COUNT(*) FILTER (WHERE b.status = 'confirmed')                               AS confirmed,
      COUNT(*) FILTER (WHERE b.status = 'pending')                                 AS pending,

@@ -135,6 +135,7 @@ const getStatistics = async (req, res) => {
     const result = await adminFlightService.getStatistics(req.query);
     res.json({ message: "Lấy thống kê thành công", data: result });
   } catch (err) {
+    console.error("[getStatistics]", err);
     res.status(400).json({ error: err.message });
   }
 };
