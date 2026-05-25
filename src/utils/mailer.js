@@ -21,10 +21,9 @@ const PAYMENT_METHOD_LABEL = {
   PAYPAL: "PayPal",
 };
 
-// Solid airplane SVGs — used in Apple Mail, Samsung Mail; Gmail falls back to emoji text gracefully
-const PLANE_ICON_WHITE = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="white" style="display:inline-block;vertical-align:middle;margin-bottom:4px;"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>`;
-const PLANE_ICON_BLUE  = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="#1a56db" style="display:inline-block;vertical-align:middle;"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>`;
-const PLANE_ICON_GRAY  = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="#9ca3af" style="display:inline-block;vertical-align:middle;"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>`;
+// Gmail strips SVG — use emoji + VML-safe fallback for airplane icons
+const PLANE_EMOJI_HEADER = `✈️`; // shows as solid colored in most email clients
+const PLANE_ARROW_ROUTE  = `&#9992;&#xFE0F;`; // ✈️ variation selector forces colored/solid glyph
 
 // Dark-mode overrides (Apple Mail, Samsung Mail, Outlook iOS support @media prefers-color-scheme)
 const DARK_MODE_STYLE = `
@@ -81,21 +80,25 @@ const buildFlightSection = (prefix, b) => {
   return `
     <div class="em-flight-card" style="border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:12px;">
       <div class="em-flight-label" style="font-size:12px;color:#6b7280;margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">${label}</div>
-      <div class="em-flight-airline" style="font-size:15px;font-weight:700;color:#111827;margin-bottom:4px;">${airline} · ${flightNum}</div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;">
-        <div>
-          <div class="em-flight-code" style="font-size:22px;font-weight:800;color:#1a56db;">${depCode}</div>
-          <div class="em-flight-city" style="font-size:12px;color:#6b7280;">${depCity}</div>
-          <div class="em-flight-time" style="font-size:12px;color:#374151;margin-top:2px;">${depTime}</div>
-        </div>
-        <div style="text-align:center;">${PLANE_ICON_BLUE}</div>
-        <div style="text-align:right;">
-          <div class="em-flight-code" style="font-size:22px;font-weight:800;color:#1a56db;">${arrCode}</div>
-          <div class="em-flight-city" style="font-size:12px;color:#6b7280;">${arrCity}</div>
-          <div class="em-flight-time" style="font-size:12px;color:#374151;margin-top:2px;">${arrTime}</div>
-        </div>
-      </div>
-      ${seatClass ? `<div class="em-flight-seat" style="margin-top:8px;font-size:12px;color:#6b7280;">Hạng ghế: <strong>${seatClass}</strong></div>` : ""}
+      <div class="em-flight-airline" style="font-size:15px;font-weight:700;color:#111827;margin-bottom:10px;">${airline} · ${flightNum}</div>
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+        <tr>
+          <td style="width:42%;vertical-align:top;">
+            <div class="em-flight-code" style="font-size:24px;font-weight:800;color:#1a56db;">${depCode}</div>
+            <div class="em-flight-city" style="font-size:12px;color:#6b7280;margin-top:2px;">${depCity}</div>
+            <div class="em-flight-time" style="font-size:12px;color:#374151;margin-top:3px;">${depTime}</div>
+          </td>
+          <td style="width:16%;text-align:center;vertical-align:middle;font-size:20px;padding:0 4px;">
+            ${PLANE_ARROW_ROUTE}
+          </td>
+          <td style="width:42%;text-align:right;vertical-align:top;">
+            <div class="em-flight-code" style="font-size:24px;font-weight:800;color:#1a56db;">${arrCode}</div>
+            <div class="em-flight-city" style="font-size:12px;color:#6b7280;margin-top:2px;">${arrCity}</div>
+            <div class="em-flight-time" style="font-size:12px;color:#374151;margin-top:3px;">${arrTime}</div>
+          </td>
+        </tr>
+      </table>
+      ${seatClass ? `<div class="em-flight-seat" style="margin-top:10px;font-size:12px;color:#6b7280;">Hạng ghế: <strong>${seatClass}</strong></div>` : ""}
     </div>
   `;
 };
@@ -153,10 +156,8 @@ const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAm
 
       <!-- Header -->
       <div style="background:linear-gradient(135deg,#1a56db,#1e40af);padding:36px 24px;text-align:center;">
-        <img src="https://iili.io/qvDF3Kl.png" width="100" style="margin-bottom:14px;display:block;margin-left:auto;margin-right:auto;" />
-        <h1 style="color:#fff;font-size:22px;margin:0 0 6px;font-weight:700;">
-          Đặt vé thành công! ${PLANE_ICON_WHITE}
-        </h1>
+        <img src="https://iili.io/qvDF3Kl.png" width="110" style="margin-bottom:14px;display:block;margin-left:auto;margin-right:auto;filter:brightness(0) invert(1);" />
+        <h1 style="color:#fff;font-size:22px;margin:0 0 6px;font-weight:700;">Đặt vé thành công! ${PLANE_EMOJI_HEADER}</h1>
         <p style="color:#bfdbfe;font-size:14px;margin:0;">Cảm ơn bạn đã tin tưởng Vivudee</p>
       </div>
 
