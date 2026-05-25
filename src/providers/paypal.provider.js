@@ -1,6 +1,6 @@
 /**
  * PayPal Payment Provider
- * Sử dụng PayPal REST API cho thanh toán
+ * Sử dụng PayPal REST API cho thanh toán vé
  */
 
 const config = require('../config/payment.config');

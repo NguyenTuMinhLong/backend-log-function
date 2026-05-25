@@ -3,6 +3,7 @@ const assistantChatService = require("./admin/chat.service");
 const {
   emitAiConversationChanged,
   emitSupportConversationChanged,
+  emitSupportReadByAdmin,
 } = require("../socket");
 const Q = require("../queries/chat.queries");
 
@@ -238,8 +239,10 @@ const buildAiHistory = async (client, conversationId, maxHistory = 8) => {
 };
 
 const getConversationPayload = async (client, conversationId, unreadFor = "user") => {
-  const conversation = await getConversationDetailById(client, conversationId, unreadFor);
-  const messages     = await getMessagesByConversationId(client, conversationId);
+  const [conversation, messages] = await Promise.all([
+    getConversationDetailById(client, conversationId, unreadFor),
+    getMessagesByConversationId(client, conversationId),
+  ]);
   return { conversation: mapConversation(conversation), messages };
 };
 
@@ -471,10 +474,14 @@ const getSupportConversationForAdmin = async (conversationId, adminUser) => {
 
     await updateConversation(client, conversationId, { assigned_admin_id: adminUser.id, last_admin_read_at: new Date() });
 
+    // Chạy song song: lấy messages ngay trong transaction, tái dùng conversation đã có
+    const messages = await getMessagesByConversationId(client, conversationId);
+
     await client.query("COMMIT");
 
-    const payloadData = await getConversationPayload(client, conversationId, "admin");
-    emitSupportConversationChanged(
+    const payloadData = { conversation: mapConversation(conversation), messages };
+    // Chỉ thông báo user (customer), không broadcast admins để tránh vòng lặp refresh
+    emitSupportReadByAdmin(
       { userId: conversation.user_id ? Number(conversation.user_id) : null, guestSessionId: conversation.guest_session_id || null },
       { conversationId: Number(conversationId), type: "support", userId: conversation.user_id ? Number(conversation.user_id) : null, guestSessionId: conversation.guest_session_id || null }
     );

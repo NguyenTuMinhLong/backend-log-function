@@ -4,6 +4,7 @@ const { rollbackReservedVoucherUsageForBooking } = require("./payment.service");
 const QB = require("../queries/booking.queries");
 const QF = require("../queries/flight.queries");
 const QP = require("../queries/payment.queries");
+const QAnc = require("../queries/ancillary.queries");
 const QB2 = { SELECT_MY_BOOKINGS: QB.SELECT_MY_BOOKINGS };
 
 // ====================== THÊM LOYALTY SERVICE ======================
@@ -176,6 +177,8 @@ const createBooking = async (data, userId = null) => {
 
     // ... (toàn bộ phần insert passenger, assign seat, decrease seats giữ nguyên)
 
+    let firstOutboundPassengerId = null;
+
     for (const p of passengers) {
       const flightType       = p.flight_type || "outbound";
       const isInfant         = p.passenger_type === "infant";
@@ -192,6 +195,10 @@ const createBooking = async (data, userId = null) => {
 
       const passengerId = passResult.rows[0].id;
 
+      if (flightType === 'outbound' && !firstOutboundPassengerId) {
+        firstOutboundPassengerId = passengerId;
+      }
+
       if (!isInfant) {
         const flightId   = flightType === "outbound" ? outbound_flight_id : return_flight_id;
         const seatClass  = flightType === "outbound" ? outbound_seat_class : return_seat_class;
@@ -200,7 +207,7 @@ const createBooking = async (data, userId = null) => {
           : parseInt(returnSeat?.total_seats || 0);
 
         if (flightId && seatClass && totalSeats > 0) {
-          const seatNumber = await assignSeat(client, flightId, seatClass, totalSeats, passengerId, booking.id);
+          const seatNumber = await assignSeat(client, flightId, seatClass, totalSeats, passengerId, booking.id, p.seat_number || null);
           assignedSeats[flightType].push({ passenger: p.full_name, seat: seatNumber });
         }
       }
@@ -210,6 +217,19 @@ const createBooking = async (data, userId = null) => {
 
     if (trip_type === "round_trip" && return_flight_id) {
       await client.query(QF.DECREASE_AVAILABLE_SEATS, [seatsNeeded, return_flight_id, return_seat_class]);
+    }
+
+    // Lưu ancillary_options vào booking_ancillaries
+    const ancillaryOptions = data.ancillary_options || [];
+    if (ancillaryOptions.length > 0 && firstOutboundPassengerId) {
+      for (const opt of ancillaryOptions) {
+        const qty       = parseInt(opt.quantity) || 1;
+        const unitPrice = Number(opt.unit_price) || 0;
+        await client.query(QAnc.INSERT_ANCILLARY, [
+          booking.id, firstOutboundPassengerId, opt.ancillary_option_id,
+          'outbound', qty, unitPrice, unitPrice * qty,
+        ]);
+      }
     }
 
         // ====================== HOOK LOYALTY - DEBUG (tạm thời) ======================
@@ -273,14 +293,22 @@ const getBookingDetail = async (bookingCode, userId = null) => {
   const passResult = await pool.query(QB.SELECT_PASSENGERS_BY_BOOKING, [b.id]);
 
   let paymentInfo = null;
+  let ancillaryTotal = 0;
   try {
-    const payResult = await pool.query(QB.SELECT_BOOKING_PAYMENT_INFO, [b.id]);
+    const [payResult, ancResult] = await Promise.all([
+      pool.query(QB.SELECT_BOOKING_PAYMENT_INFO, [b.id]),
+      pool.query(QAnc.GET_ANCILLARY_TOTAL, [b.id]),
+    ]);
     if (payResult.rows.length > 0) paymentInfo = payResult.rows[0];
+    ancillaryTotal = parseFloat(ancResult.rows[0]?.ancillary_total || 0);
   } catch (_) {}
 
   const totalPrice  = parseFloat(b.total_price);
+  const basePrice   = parseFloat(b.base_price);
+  const baggageTotal = Math.max(totalPrice - basePrice, 0);
   const finalAmount = paymentInfo ? parseFloat(paymentInfo.final_amount || totalPrice) : totalPrice;
   const discountAmt = paymentInfo ? parseFloat(paymentInfo.discount_amount || 0) : 0;
+  const grandTotal  = totalPrice + ancillaryTotal;
 
   return {
     booking_code: b.booking_code,
@@ -316,9 +344,15 @@ const getBookingDetail = async (bookingCode, userId = null) => {
       infants:  b.total_infants,
       list:     passResult.rows,
     },
+    baggage: {
+      extra_baggage_total: baggageTotal,
+    },
     price: {
-      base_price:      parseFloat(b.base_price),
+      base_price:      basePrice,
       total_price:     totalPrice,
+      baggage_total:   baggageTotal,
+      ancillary_total: ancillaryTotal,
+      grand_total:     grandTotal,
       final_amount:    finalAmount,
       discount_amount: discountAmt,
     },

@@ -182,11 +182,22 @@ const emitSupportConversationChanged = (actor, payload = {}) => {
   io.to("admins").emit("admin:support_updated", payload);
 };
 
+// Dùng cho sự kiện admin đọc/mở hội thoại — chỉ thông báo user, KHÔNG broadcast admins
+// Tránh vòng lặp: admin mở → socket → admin reload → admin mở → ...
+const emitSupportReadByAdmin = (actor, payload = {}) => {
+  if (!io) return;
+  const room = getRoomForActor(actor);
+  if (room) {
+    io.to(room).emit("chat:support_updated", payload);
+  }
+};
+
 module.exports = {
   initSocketServer,
   getIO,
   emitAiConversationChanged,
   emitSupportConversationChanged,
+  emitSupportReadByAdmin,
 
   // THÊM MỚI: Hàm broadcast thủ công cho 1 chuyến bay cụ thể
   // Dùng khi admin cập nhật status chuyến bay → push realtime cho user đang xem
