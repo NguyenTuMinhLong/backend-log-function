@@ -400,4 +400,113 @@ const sendPaymentInitiatedEmail = async (to, { contactName, paymentCode, payment
   }
 };
 
-module.exports = { sendOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail };
+// ─── Refund completed email ───────────────────────────────────────────────────
+const sendRefundCompletedEmail = async (to, { contactName, refundCode, bookingCode, netRefundAmount, originalAmount, adminFee, refundType, processedAt }) => {
+  try {
+    const refundTypeLabel = {
+      full:               "Hoàn toàn bộ",
+      partial_leg:        "Hoàn một chặng",
+      partial_passenger:  "Hoàn theo hành khách",
+    }[refundType] || "Hoàn tiền";
+
+    const adminFeeNum = Number(adminFee || 0);
+
+    const html = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="color-scheme" content="light dark"/>
+  <meta name="supported-color-schemes" content="light dark"/>
+  ${DARK_MODE_STYLE}
+</head>
+<body class="em-body" style="margin:0;padding:0;background:#f3f4f6;">
+  <div style="max-width:560px;margin:auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+    <div class="em-card" style="background:#ffffff;margin:20px auto;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+
+      <!-- Header -->
+      <div style="background:linear-gradient(135deg,#059669,#047857);padding:36px 24px;text-align:center;">
+        <img src="https://iili.io/qvDF3Kl.png" width="110" style="margin-bottom:14px;display:block;margin-left:auto;margin-right:auto;filter:brightness(0) invert(1);" />
+        <h1 style="color:#fff;font-size:22px;margin:0 0 6px;font-weight:700;">Hoàn tiền thành công ✅</h1>
+        <p style="color:#a7f3d0;font-size:14px;margin:0;">Giao dịch hoàn tiền đã được xử lý</p>
+      </div>
+
+      <!-- Body -->
+      <div style="padding:28px 24px;">
+        <p class="em-text-primary" style="color:#374151;font-size:15px;margin:0 0 20px;">
+          Xin chào <strong>${contactName || "Quý khách"}</strong>,<br/>
+          Yêu cầu hoàn tiền của bạn đã được xử lý thành công.
+        </p>
+
+        <!-- Refund amount highlight -->
+        <div style="background:linear-gradient(135deg,#ecfdf5,#d1fae5);border:1px solid #6ee7b7;border-radius:12px;padding:22px;text-align:center;margin-bottom:24px;">
+          <p class="em-text-muted" style="color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;font-weight:600;">Số tiền hoàn về</p>
+          <p style="color:#059669;font-size:36px;font-weight:800;margin:0;letter-spacing:1px;">${fmtCurrency(netRefundAmount)}</p>
+          <p style="color:#6b7280;font-size:12px;margin:10px 0 0;">Sẽ được hoàn về phương thức thanh toán ban đầu trong vòng 3–7 ngày làm việc</p>
+        </div>
+
+        <!-- Detail table -->
+        <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+          <tr>
+            <td class="em-td-label em-td-border" style="padding:10px 16px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;width:45%;">Mã hoàn tiền</td>
+            <td class="em-td-value em-td-border" style="padding:10px 16px;font-size:13px;color:#111827;font-weight:600;border-bottom:1px solid #f3f4f6;font-family:monospace;">${refundCode}</td>
+          </tr>
+          <tr>
+            <td class="em-td-label em-td-border" style="padding:10px 16px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;">Mã đặt vé</td>
+            <td class="em-td-value em-td-border" style="padding:10px 16px;font-size:13px;color:#111827;font-weight:600;border-bottom:1px solid #f3f4f6;font-family:monospace;">${bookingCode}</td>
+          </tr>
+          <tr>
+            <td class="em-td-label em-td-border" style="padding:10px 16px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;">Loại hoàn tiền</td>
+            <td class="em-td-value em-td-border" style="padding:10px 16px;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6;">${refundTypeLabel}</td>
+          </tr>
+          <tr>
+            <td class="em-td-label em-td-border" style="padding:10px 16px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;">Số tiền đã thanh toán</td>
+            <td class="em-td-value em-td-border" style="padding:10px 16px;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6;">${fmtCurrency(originalAmount)}</td>
+          </tr>
+          ${adminFeeNum > 0 ? `
+          <tr>
+            <td class="em-td-label em-td-border" style="padding:10px 16px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;">Phí xử lý</td>
+            <td class="em-td-value em-td-border" style="padding:10px 16px;font-size:13px;color:#dc2626;border-bottom:1px solid #f3f4f6;">−${fmtCurrency(adminFeeNum)}</td>
+          </tr>` : ""}
+          <tr>
+            <td class="em-td-label" style="padding:10px 16px;font-size:13px;color:#6b7280;">Thời gian xử lý</td>
+            <td class="em-td-value" style="padding:10px 16px;font-size:13px;color:#374151;">${fmtDateTime(processedAt)}</td>
+          </tr>
+        </table>
+
+        <!-- Info note -->
+        <div class="em-success-box" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:14px 16px;">
+          <p style="color:#1e40af;font-size:13px;margin:0;line-height:1.6;">
+            💳 Nếu bạn thanh toán qua <strong>PayPal</strong>, tiền sẽ về trong 3–5 ngày làm việc.<br/>
+            🏦 Nếu qua <strong>chuyển khoản / QR</strong>, vui lòng chờ 5–7 ngày làm việc.<br/>
+            📩 Lưu email này làm bằng chứng hoàn tiền khi cần.
+          </p>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="em-footer" style="background:#f9fafb;padding:16px 24px;text-align:center;border-top:1px solid #e5e7eb;">
+        <p class="em-footer-text" style="color:#9ca3af;font-size:12px;margin:0;">© ${new Date().getFullYear()} Vivudee · Đặt vé máy bay trực tuyến</p>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>`;
+
+    const { data, error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM,
+      to,
+      subject: `Hoàn tiền thành công — ${refundCode}`,
+      html,
+    });
+
+    if (error) { console.error("❌ sendRefundCompletedEmail error:", error); return false; }
+    console.log("✅ sendRefundCompletedEmail sent:", data?.id);
+    return true;
+  } catch (err) {
+    console.error("❌ sendRefundCompletedEmail exception:", err);
+    return false;
+  }
+};
+
+module.exports = { sendOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail };
