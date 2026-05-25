@@ -13,7 +13,8 @@ const adminFlightCancellationController = require("../controllers/admin/flight-c
 
 const adminUserController = require("../controllers/admin/user.controller");
 const adminChatController = require("../controllers/admin/chat.controller");
-const adminCronController = require("../controllers/admin/cron.controller");
+const adminCronController      = require("../controllers/admin/cron.controller");
+const adminPriceRuleController = require("../controllers/admin/price-rule.controller");
 
 // Tất cả routes admin: phải đăng nhập + role = 'admin'
 router.use(authenticate, authorize("admin"));
@@ -102,5 +103,14 @@ router.get("/chat/conversations", adminChatController.listSupportConversations);
 router.get("/chat/conversations/:id", adminChatController.getSupportConversation);
 router.post("/chat/conversations/:id/message", adminChatController.replySupportConversation);
 router.patch("/chat/conversations/:id/status", adminChatController.updateSupportConversationStatus);
+
+// Price Rules (Dynamic Pricing)
+router.get("/price-rules/preview",    adminPriceRuleController.previewPrice);
+router.get("/price-rules",            adminPriceRuleController.getAllRules);
+router.get("/price-rules/:id",        adminPriceRuleController.getRuleById);
+router.post("/price-rules",           adminPriceRuleController.createRule);
+router.put("/price-rules/:id",        adminPriceRuleController.updateRule);
+router.delete("/price-rules/:id",     adminPriceRuleController.deleteRule);
+router.patch("/price-rules/:id/toggle", adminPriceRuleController.toggleRule);
 
 module.exports = router;

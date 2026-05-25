@@ -212,8 +212,13 @@ const searchFlights = async (params) => {
     airline_code, departure_city, arrival_city,
   };
 
-  const outboundRows    = await queryFlights(baseParams);
-  const outboundFlights = formatFlights(outboundRows, a, c, i);
+  const outboundRows       = await queryFlights(baseParams);
+  const outboundFlightsRaw = formatFlights(outboundRows, a, c, i);
+
+  // Áp dụng price rules (tăng/giảm giá theo mùa, lễ hội)
+  const outboundFlights = await Promise.all(
+    outboundFlightsRaw.map(f => priceRuleService.applyPriceRules(f, departure_date))
+  );
 
   let returnFlights = null;
   if (return_date) {
@@ -223,14 +228,17 @@ const searchFlights = async (params) => {
       arrival_code:   departure_code,
       departure_date: return_date,
     });
-    returnFlights = formatFlights(returnRows, a, c, i);
+    const returnFlightsRaw = formatFlights(returnRows, a, c, i);
+    returnFlights = await Promise.all(
+      returnFlightsRaw.map(f => priceRuleService.applyPriceRules(f, return_date))
+    );
   }
 
   return {
     outbound_flights: outboundFlights,
-    return_flights: returnFlights,
-    total_outbound: outboundFlights.length,
-    total_return: returnFlights ? returnFlights.length : 0,
+    return_flights:   returnFlights,
+    total_outbound:   outboundFlights.length,
+    total_return:     returnFlights ? returnFlights.length : 0,
   };
 };
 
