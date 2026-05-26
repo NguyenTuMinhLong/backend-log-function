@@ -322,7 +322,7 @@
             "header": [{"key": "Content-Type", "value": "application/json"}],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"booking_code\": \"{{bookingCode}}\",\n    \"email\": \"test@example.com\"\n}"
+              "raw": "{\n    \"bookingCode\": \"{{bookingCode}}\",\n    \"email\": \"test@example.com\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/refunds/guest/request-otp",
@@ -354,7 +354,7 @@
             "header": [{"key": "Content-Type", "value": "application/json"}],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"booking_code\": \"{{bookingCode}}\",\n    \"email\": \"test@example.com\",\n    \"reason\": \"Thay doi lich trinh\"\n}"
+              "raw": "{\n    \"bookingCode\": \"{{bookingCode}}\",\n    \"guestEmail\": \"test@example.com\",\n    \"reason\": \"Thay doi lich trinh\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/refunds/guest",
