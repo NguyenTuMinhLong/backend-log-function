@@ -13,6 +13,8 @@ const wishlistRoutes = require("./routes/wishlist.routes");
 const loyaltyRoutes = require('./routes/loyalty.routes');
 const refundRoutes = require('./routes/refund.routes');
 const dateChangeRoutes = require('./routes/date-change.routes');
+const seatRoutes = require('./routes/seat.routes');
+const checkinRoutes = require('./routes/checkin.routes');
 
 const { expireHeldBookings }   = require("./services/booking.service");
 const { autoGenerateFlights }  = require("./services/admin/flight.service");
@@ -36,6 +38,8 @@ app.use("/api/wishlist", wishlistRoutes);
 app.use('/api/loyalty', loyaltyRoutes);
 app.use('/api/refunds', refundRoutes);
 app.use('/api/date-changes', dateChangeRoutes);
+app.use('/api', seatRoutes);
+app.use('/api/checkin', checkinRoutes);
 
 // Mỗi 1 phút sẽ chạy 1 lần để kiểm tra toàn bộ danh sách booking nhằm tự động hủy booking đã hết hạn giữ ghế
 // 5. Thời gian giữ ghế (30 phút) nằm bên service dòng 192

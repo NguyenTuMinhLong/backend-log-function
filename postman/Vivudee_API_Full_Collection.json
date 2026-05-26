@@ -1,0 +1,585 @@
+{
+  "info": {
+    "name": "Vivudee API - Full Collection",
+    "description": "API endpoints day du cho he thong dat ve may bay. Cac luong: Auth, Flights, Bookings, Payments, Refunds, Seats, Check-in",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000/api",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bookingCode",
+      "value": "YOUR_BOOKING_CODE",
+      "type": "string"
+    },
+    {
+      "key": "refundCode",
+      "value": "RF123456",
+      "type": "string"
+    },
+    {
+      "key": "flightId",
+      "value": "1",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "AUTH - Xac thuc",
+      "item": [
+        {
+          "name": "1. Dang ky tai khoan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201 || pm.response.code === 200) {",
+                  "    var data = pm.response.json();",
+                  "    if (data.token) {",
+                  "        pm.collectionVariables.set('token', data.token);",
+                  "        console.log('Token saved:', data.token);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"test@example.com\",\n    \"password\": \"Password123!\",\n    \"full_name\": \"Nguyen Van A\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "register"]
+            }
+          }
+        },
+        {
+          "name": "2. Dang nhap",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var data = pm.response.json();",
+                  "    if (data.token) {",
+                  "        pm.collectionVariables.set('token', data.token);",
+                  "        console.log('Token saved:', data.token);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"test@example.com\",\n    \"password\": \"Password123!\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "FLIGHTS - Chuyen bay",
+      "item": [
+        {
+          "name": "Tim kiem chuyen bay",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/flights/search?from_city=HAN&to_city=SGN&departure_date=2026-06-01&adults=1&children=0&infants=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["flights", "search"],
+              "query": [
+                {"key": "from_city", "value": "HAN"},
+                {"key": "to_city", "value": "SGN"},
+                {"key": "departure_date", "value": "2026-06-01"},
+                {"key": "adults", "value": "1"},
+                {"key": "children", "value": "0"},
+                {"key": "infants", "value": "0"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Lay seat map (economy)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/flights/{{flightId}}/seats?seat_class=economy",
+              "host": ["{{baseUrl}}"],
+              "path": ["flights", "{{flightId}}", "seats"],
+              "query": [{"key": "seat_class", "value": "economy"}]
+            }
+          }
+        },
+        {
+          "name": "Lay seat pricing",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/flights/{{flightId}}/seats/pricing?seat_class=economy",
+              "host": ["{{baseUrl}}"],
+              "path": ["flights", "{{flightId}}", "seats", "pricing"],
+              "query": [{"key": "seat_class", "value": "economy"}]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "BOOKINGS - Dat ve",
+      "item": [
+        {
+          "name": "1. Tao booking (chua thanh toan)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201 || pm.response.code === 200) {",
+                  "    var data = pm.response.json();",
+                  "    var code = data.booking ? data.booking.booking_code : data.bookingCode;",
+                  "    if (code) {",
+                  "        pm.collectionVariables.set('bookingCode', code);",
+                  "        console.log('Booking code saved:', code);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"outbound_flight_id\": 1,\n    \"outbound_seat_class\": \"economy\",\n    \"trip_type\": \"one_way\",\n    \"adults\": 1,\n    \"children\": 0,\n    \"infants\": 0,\n    \"contact_name\": \"Nguyen Van A\",\n    \"contact_email\": \"test@example.com\",\n    \"contact_phone\": \"0909123456\",\n    \"passengers\": [\n        {\n            \"passenger_type\": \"adult\",\n            \"full_name\": \"Nguyen Van A\",\n            \"date_of_birth\": \"1990-01-01\",\n            \"gender\": \"male\",\n            \"nationality\": \"Vietnam\",\n            \"passport_number\": \"B1234567\",\n            \"passport_expiry\": \"2030-01-01\",\n            \"flight_type\": \"outbound\",\n            \"extra_baggage_kg\": 0\n        }\n    ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings"]
+            }
+          }
+        },
+        {
+          "name": "2. Lay thong tin booking",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{bookingCode}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "{{bookingCode}}"]
+            }
+          }
+        },
+        {
+          "name": "3. Lay danh sach booking cua toi",
+          "request": {
+            "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{token}}", "type": "string"}]},
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/bookings/my",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "my"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "SEAT SELECTION - Chon ghe",
+      "item": [
+        {
+          "name": "1. Lay ghe da assign",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{bookingCode}}/seats",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "{{bookingCode}}", "seats"]
+            }
+          }
+        },
+        {
+          "name": "2. Chon ghe cu the (A/F=10k, B-E=5k)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"selections\": [\n        {\n            \"passenger_id\": 1,\n            \"flight_type\": \"outbound\",\n            \"seat_number\": \"12A\"\n        }\n    ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{bookingCode}}/seats",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "{{bookingCode}}", "seats"]
+            }
+          }
+        },
+        {
+          "name": "3. Auto assign ghe ngau nhien (FREE)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{bookingCode}}/seats/auto",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "{{bookingCode}}", "seats", "auto"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "PAYMENTS - Thanh toan",
+      "item": [
+        {
+          "name": "1. Khoi tao thanh toan",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"booking_id\": 1,\n    \"email\": \"test@example.com\",\n    \"phone\": \"0909123456\",\n    \"name\": \"Nguyen Van A\",\n    \"payment_method\": \"BANK_QR\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/payments/init",
+              "host": ["{{baseUrl}}"],
+              "path": ["payments", "init"]
+            }
+          }
+        },
+        {
+          "name": "2. Xac nhan thanh toan",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"payment_code\": \"PAY123456\",\n    \"transaction_id\": \"BANK123456\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/payments/PAY123456/confirm",
+              "host": ["{{baseUrl}}"],
+              "path": ["payments", "PAY123456", "confirm"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "REFUNDS (GUEST) - Hoan tien",
+      "item": [
+        {
+          "name": "1. [GUEST] Request OTP (bill > 5M)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    console.log('OTP requested successfully');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"bookingCode\": \"{{bookingCode}}\",\n    \"email\": \"test@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/refunds/guest/request-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["refunds", "guest", "request-otp"]
+            }
+          }
+        },
+        {
+          "name": "2. [GUEST] Verify OTP (nhap ma nhan duoc)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"test@example.com\",\n    \"code\": \"123456\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/refunds/guest/verify-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["refunds", "guest", "verify-otp"]
+            }
+          }
+        },
+        {
+          "name": "3. [GUEST] Submit refund request",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"bookingCode\": \"{{bookingCode}}\",\n    \"guestEmail\": \"test@example.com\",\n    \"reason\": \"Thay doi lich trinh\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/refunds/guest",
+              "host": ["{{baseUrl}}"],
+              "path": ["refunds", "guest"]
+            }
+          }
+        },
+        {
+          "name": "4. [GUEST] Huy refund request",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"refund_code\": \"{{refundCode}}\",\n    \"email\": \"test@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/refunds/guest/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["refunds", "guest", "cancel"]
+            }
+          }
+        },
+        {
+          "name": "5. [GUEST] Lay chi tiet refund",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/refunds/guest/{{refundCode}}?email=test@example.com",
+              "host": ["{{baseUrl}}"],
+              "path": ["refunds", "guest", "{{refundCode}}"],
+              "query": [{"key": "email", "value": "test@example.com"}]
+            }
+          }
+        },
+        {
+          "name": "6. [GUEST] Kiem tra trang thai OTP",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/refunds/guest/otp-status?email=test@example.com",
+              "host": ["{{baseUrl}}"],
+              "path": ["refunds", "guest", "otp-status"],
+              "query": [{"key": "email", "value": "test@example.com"}]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "REFUNDS (USER) - Hoan tien",
+      "item": [
+        {
+          "name": "1. [USER] Request OTP (bill > 5M) - CAN AUTH",
+          "request": {
+            "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{token}}", "type": "string"}]},
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"bookingCode\": \"{{bookingCode}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/refunds/user/request-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["refunds", "user", "request-otp"]
+            }
+          }
+        },
+        {
+          "name": "2. [USER] Verify OTP (dung /guest/verify-otp)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"test@example.com\",\n    \"code\": \"123456\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/refunds/guest/verify-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["refunds", "guest", "verify-otp"]
+            }
+          }
+        },
+        {
+          "name": "3. [USER] Lay lich su refund cua minh",
+          "request": {
+            "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{token}}", "type": "string"}]},
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/refunds/my",
+              "host": ["{{baseUrl}}"],
+              "path": ["refunds", "my"]
+            }
+          }
+        },
+        {
+          "name": "4. [USER] Lay chi tiet refund",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/refunds/{{refundCode}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["refunds", "{{refundCode}}"]
+            }
+          }
+        },
+        {
+          "name": "5. [USER] Huy refund request - CAN AUTH",
+          "request": {
+            "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{token}}", "type": "string"}]},
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/refunds/{{refundCode}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["refunds", "{{refundCode}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "CHECK-IN - Checkin online",
+      "item": [
+        {
+          "name": "1. Lay trang thai check-in",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/checkin/status/{{bookingCode}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["checkin", "status", "{{bookingCode}}"]
+            }
+          }
+        },
+        {
+          "name": "2. Check-in tat ca hanh khach",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"booking_code\": \"{{bookingCode}}\",\n    \"flight_type\": \"outbound\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/checkin",
+              "host": ["{{baseUrl}}"],
+              "path": ["checkin"]
+            }
+          }
+        },
+        {
+          "name": "3. Check-in 1 hanh khach",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"booking_code\": \"{{bookingCode}}\",\n    \"passenger_id\": 1,\n    \"flight_type\": \"outbound\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/checkin/passenger",
+              "host": ["{{baseUrl}}"],
+              "path": ["checkin", "passenger"]
+            }
+          }
+        },
+        {
+          "name": "4. Lay boarding pass",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/checkin/{{bookingCode}}-P1/boarding-pass",
+              "host": ["{{baseUrl}}"],
+              "path": ["checkin", "{{bookingCode}}-P1", "boarding-pass"]
+            }
+          }
+        },
+        {
+          "name": "5. Lay QR code (base64 image)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/checkin/{{bookingCode}}-P1/qr",
+              "host": ["{{baseUrl}}"],
+              "path": ["checkin", "{{bookingCode}}-P1", "qr"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ADMIN - Quan tri",
+      "item": [
+        {
+          "name": "1. Lay danh sach booking - CAN AUTH",
+          "request": {
+            "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{token}}", "type": "string"}]},
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/admin/bookings?page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "bookings"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "limit", "value": "10"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "2. Xac nhan booking - CAN AUTH",
+          "request": {
+            "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{token}}", "type": "string"}]},
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/admin/bookings/1/confirm",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "bookings", "1", "confirm"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

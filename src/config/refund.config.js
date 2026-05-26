@@ -141,7 +141,7 @@ const NOTIFICATIONS = {
   // Email notifications
   email: {
     enabled: true,
-    from: 'noreply@airlines.example.com',
+    from: 'no-reply@n4minhlong.io.vn',
     fromName: 'Airline Booking System',
 
     // Events to send
@@ -189,6 +189,16 @@ const VALIDATION = {
   maxRefundPercentOfOriginal: 100, // Không hoàn quá 100% số đã trả
   requireReason: true, // Bắt buộc nhập lý do
   minReasonLength: 10, // Lý do tối thiểu 10 ký tự
+};
+
+// OTP Configuration for Guest Refunds
+const OTP_CONFIG = {
+  enabled: true,
+  threshold: 5000000, // Yêu cầu OTP khi refund amount > 5,000,000 VND
+  codeLength: 6,
+  expiresInMinutes: 5,
+  maxAttempts: 3,
+  resendCooldownMinutes: 1,
 };
 
 // Helper: Tìm policy phù hợp dựa trên giờ trước departure
@@ -240,6 +250,9 @@ module.exports = {
 
   // Validation
   VALIDATION,
+
+  // OTP
+  OTP_CONFIG,
 
   // Helpers
   findPolicy,

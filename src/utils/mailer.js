@@ -237,29 +237,21 @@ const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAm
 
 // ─── OTP ─────────────────────────────────────────────────────────────────────
 const sendOTPEmail = async (to, otp) => {
+  console.log(`[MAILER] sendOTPEmail called with to: ${to}, otp: ${otp}`);
   try {
-    const html = `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="color-scheme" content="light dark"/>
-  <meta name="supported-color-schemes" content="light dark"/>
-  ${DARK_MODE_STYLE}
-</head>
-<body class="em-body" style="margin:0;padding:0;background:#f3f4f6;">
-  <div style="max-width:420px;margin:auto;">
-    <div class="em-card" style="background:#ffffff;margin:20px auto;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.08);text-align:center;padding:28px 24px;">
-      <img src="https://iili.io/qvDF3Kl.png" width="100" style="display:block;margin:0 auto 16px;" />
-      <p class="em-text-secondary" style="color:#555;font-size:14px;margin:0 0 16px;">Your verification code is:</p>
-      <div class="em-booking-code" style="font-size:34px;font-weight:bold;letter-spacing:8px;margin:0 0 16px;color:#111;">${otp}</div>
-      <p class="em-text-muted" style="color:#888;font-size:13px;margin:0 0 20px;">This code will expire in 5 minutes.</p>
-      <div style="height:1px;background:#eee;margin:0 0 16px;"></div>
-      <p class="em-footer-text" style="font-size:12px;color:#aaa;margin:0;">If you didn't request this, please ignore this email.</p>
+    const html = `
+    <div style="max-width:420px;margin:auto;background:#ffffff;padding:24px;border-radius:12px;border:1px solid #eaeaea;box-shadow:0 4px 12px rgba(0,0,0,0.08);text-align:center;">
+      <img src="https://iili.io/qvDF3Kl.png" width="100" style="margin-bottom:10px;" />
+      <p style="color:#555;font-size:14px;">Your verification code is:</p>
+      <div style="font-size:34px;font-weight:bold;letter-spacing:8px;margin:20px 0;color:#111;">
+        ${otp}
+      </div>
+      <p style="color:#888;font-size:13px;">This code will expire in 5 minutes.</p>
+      <div style="height:1px;background:#eee;margin:20px 0;"></div>
+      <p style="font-size:12px;color:#aaa;">If you didn't request this, please ignore this email.</p>
     </div>
-  </div>
-</body>
-</html>`;
-
+    `;
+    
     const { data, error } = await resend.emails.send({
       from: process.env.EMAIL_FROM,
       to,
@@ -276,35 +268,46 @@ const sendOTPEmail = async (to, otp) => {
   }
 };
 
-// ─── Gateway details box ──────────────────────────────────────────────────────
+// Refund OTP - alias cua sendOTPEmail
+const sendRefundOTPEmail = async (to, otp) => {
+  console.log(`[MAILER] sendRefundOTPEmail called`);
+  return await sendOTPEmail(to, otp);
+};
+
 const buildGatewayDetailsBox = (paymentMethod, gatewayResponse = {}) => {
   const rows = [];
 
   if (paymentMethod === "PAYPAL") {
-    if (gatewayResponse.order_id)    rows.push(["Order ID",      gatewayResponse.order_id]);
-    if (gatewayResponse.amount)      rows.push(["Số tiền (USD)", `${gatewayResponse.amount} USD`]);
-    if (gatewayResponse.currency)    rows.push(["Tiền tệ",       gatewayResponse.currency]);
-    if (gatewayResponse.approve_url) rows.push(["Checkout URL",  `<a href="${gatewayResponse.approve_url}" style="color:#1a56db;">Mở PayPal thanh toán</a>`]);
+    if (gatewayResponse.order_id) rows.push(["Order ID", gatewayResponse.order_id]);
+    if (gatewayResponse.amount) rows.push(["Số tiền (USD)", `${gatewayResponse.amount} USD`]);
+    if (gatewayResponse.currency) rows.push(["Tiền tệ", gatewayResponse.currency]);
+    if (gatewayResponse.approve_url) {
+      rows.push(["Checkout URL", `<a href="${gatewayResponse.approve_url}" style="color:#1a56db;">Mở PayPal thanh toán</a>`]);
+    }
   } else if (paymentMethod === "MOMO") {
-    if (gatewayResponse.pay_url) rows.push(["Thanh toán MoMo", `<a href="${gatewayResponse.pay_url}" style="color:#a21caf;">Mở MoMo thanh toán</a>`]);
+    if (gatewayResponse.pay_url) {
+      rows.push(["Thanh toán MoMo", `<a href="${gatewayResponse.pay_url}" style="color:#a21caf;">Mở MoMo thanh toán</a>`]);
+    }
   } else if (paymentMethod === "BANK_QR" || paymentMethod === "BANK_TRANSFER") {
-    if (gatewayResponse.checkout_url)  rows.push(["Checkout URL",  `<a href="${gatewayResponse.checkout_url}" style="color:#1a56db;">Mở trang thanh toán</a>`]);
-    if (gatewayResponse.bank_account)  rows.push(["Số tài khoản",  gatewayResponse.bank_account]);
-    if (gatewayResponse.description)   rows.push(["Nội dung CK",   `<strong>${gatewayResponse.description}</strong>`]);
+    if (gatewayResponse.checkout_url) {
+      rows.push(["Checkout URL", `<a href="${gatewayResponse.checkout_url}" style="color:#1a56db;">Mở trang thanh toán</a>`]);
+    }
+    if (gatewayResponse.bank_account) rows.push(["Số tài khoản", gatewayResponse.bank_account]);
+    if (gatewayResponse.description) rows.push(["Nội dung CK", `<strong>${gatewayResponse.description}</strong>`]);
   }
 
   if (!rows.length) return "";
 
-  const bgColor     = paymentMethod === "MOMO" ? "#fdf4ff" : "#fff7ed";
+  const bgColor = paymentMethod === "MOMO" ? "#fdf4ff" : "#fff7ed";
   const borderColor = paymentMethod === "MOMO" ? "#e9d5ff" : "#fed7aa";
 
   return `
-    <div class="em-gateway-box" style="background:${bgColor};border:1px solid ${borderColor};border-radius:8px;padding:16px;margin-top:20px;">
+    <div style="background:${bgColor};border:1px solid ${borderColor};border-radius:8px;padding:16px;margin-top:20px;">
       <table style="width:100%;border-collapse:collapse;">
         ${rows.map(([label, value]) => `
           <tr>
-            <td class="em-gateway-label" style="padding:5px 0;font-size:13px;color:#6b7280;white-space:nowrap;width:40%;">${label}</td>
-            <td class="em-gateway-value" style="padding:5px 0;font-size:13px;color:#111827;word-break:break-all;">${value}</td>
+            <td style="padding:5px 0;font-size:13px;color:#6b7280;white-space:nowrap;width:40%;">${label}</td>
+            <td style="padding:5px 0;font-size:13px;color:#111827;word-break:break-all;">${value}</td>
           </tr>
         `).join("")}
       </table>
@@ -312,7 +315,6 @@ const buildGatewayDetailsBox = (paymentMethod, gatewayResponse = {}) => {
   `;
 };
 
-// ─── Payment initiated email ──────────────────────────────────────────────────
 const sendPaymentInitiatedEmail = async (to, { contactName, paymentCode, paymentMethod, finalAmount, expiresAt, gatewayResponse }) => {
   try {
     const expiryMinutes = (() => {
@@ -322,76 +324,70 @@ const sendPaymentInitiatedEmail = async (to, { contactName, paymentCode, payment
     })();
 
     const methodLabel = PAYMENT_METHOD_LABEL[paymentMethod] || paymentMethod || "--";
-    const gatewayBox  = buildGatewayDetailsBox(paymentMethod, gatewayResponse || {});
+    const gatewayBox = buildGatewayDetailsBox(paymentMethod, gatewayResponse || {});
 
-    const html = `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="color-scheme" content="light dark"/>
-  <meta name="supported-color-schemes" content="light dark"/>
-  ${DARK_MODE_STYLE}
-</head>
-<body class="em-body" style="margin:0;padding:0;background:#f3f4f6;">
-  <div style="max-width:560px;margin:auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
-    <div class="em-card" style="background:#ffffff;margin:20px auto;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.06);">
+    const html = `
+      <div style="max-width:560px;margin:auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;background:#ffffff;">
+        <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.06);">
+          <!-- Header -->
+          <div style="background:#f9fafb;padding:24px;text-align:center;border-bottom:1px solid #e5e7eb;">
+            <img src="https://iili.io/qvDF3Kl.png" width="64" style="margin-bottom:8px;" />
+            <h2 style="color:#1a56db;font-size:20px;margin:0;">Vivudee</h2>
+            <p style="color:#6b7280;font-size:13px;margin:4px 0 0;">Your Journey Starts Here</p>
+          </div>
 
-      <!-- Header -->
-      <div class="em-header-light" style="background:#f9fafb;padding:28px 24px;text-align:center;border-bottom:1px solid #e5e7eb;">
-        <img src="https://iili.io/qvDF3Kl.png" width="90" style="display:block;margin:0 auto;" />
+          <!-- Body -->
+          <div style="padding:28px 24px;">
+            <h3 style="font-size:16px;color:#111827;text-align:center;margin:0 0 20px;">
+              Hoàn tất thanh toán trong vòng <span style="color:#dc2626;">${expiryMinutes} phút</span>
+            </h3>
+
+            <p style="color:#6b7280;font-size:14px;margin:0 0 20px;">
+              Xin chào <strong style="color:#111827;">${contactName || "Quý khách"}</strong>,<br/>
+              Giao dịch thanh toán của bạn đã được tạo thành công.
+            </p>
+
+            <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;">
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;width:40%;">Mã thanh toán</td>
+                <td style="padding:10px 14px;font-size:13px;color:#111827;font-weight:600;border-bottom:1px solid #f3f4f6;word-break:break-all;">${paymentCode}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;">Phương thức</td>
+                <td style="padding:10px 14px;font-size:13px;color:#111827;border-bottom:1px solid #f3f4f6;">${methodLabel}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;">Số tiền</td>
+                <td style="padding:10px 14px;font-size:15px;color:#1a56db;font-weight:700;border-bottom:1px solid #f3f4f6;">${fmtCurrency(finalAmount)}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#6b7280;">Hết hạn lúc</td>
+                <td style="padding:10px 14px;font-size:13px;color:#dc2626;">${fmtDateTime(expiresAt)}</td>
+              </tr>
+            </table>
+
+            ${gatewayBox}
+
+            <p style="color:#9ca3af;font-size:12px;text-align:center;margin:24px 0 0;">
+              Nếu bạn đã hoàn tất thanh toán, vui lòng bỏ qua email này.<br/>
+              Nếu bạn không thực hiện giao dịch này, cũng hãy bỏ qua email này.
+            </p>
+          </div>
+        </div>
       </div>
-
-      <!-- Body -->
-      <div style="padding:28px 24px;">
-        <h3 class="em-text-primary" style="font-size:17px;color:#111827;text-align:center;margin:0 0 20px;font-weight:700;">
-          Vui lòng hoàn tất thanh toán trong vòng <span class="em-expiry" style="color:#dc2626;">${expiryMinutes} phút</span>
-        </h3>
-
-        <p class="em-text-secondary" style="color:#6b7280;font-size:14px;margin:0 0 20px;">
-          Xin chào <strong class="em-text-primary" style="color:#111827;">${contactName || "Quý khách"}</strong>,<br/>
-          Giao dịch thanh toán của bạn đã được tạo thành công.
-        </p>
-
-        <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
-          <tr>
-            <td class="em-td-label em-td-border" style="padding:10px 14px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;width:40%;">Mã thanh toán</td>
-            <td class="em-td-value em-td-border" style="padding:10px 14px;font-size:13px;color:#111827;font-weight:600;border-bottom:1px solid #f3f4f6;word-break:break-all;">${paymentCode}</td>
-          </tr>
-          <tr>
-            <td class="em-td-label em-td-border" style="padding:10px 14px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;">Phương thức</td>
-            <td class="em-td-value em-td-border" style="padding:10px 14px;font-size:13px;color:#111827;border-bottom:1px solid #f3f4f6;">${methodLabel}</td>
-          </tr>
-          <tr>
-            <td class="em-td-label em-td-border" style="padding:10px 14px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;">Số tiền</td>
-            <td class="em-amount em-td-border" style="padding:10px 14px;font-size:15px;color:#1a56db;font-weight:700;border-bottom:1px solid #f3f4f6;">${fmtCurrency(finalAmount)}</td>
-          </tr>
-          <tr>
-            <td class="em-td-label" style="padding:10px 14px;font-size:13px;color:#6b7280;">Hết hạn lúc</td>
-            <td class="em-expiry" style="padding:10px 14px;font-size:13px;color:#dc2626;">${fmtDateTime(expiresAt)}</td>
-          </tr>
-        </table>
-
-        ${gatewayBox}
-
-        <p class="em-footer-text" style="color:#9ca3af;font-size:12px;text-align:center;margin:24px 0 0;">
-          Nếu bạn đã hoàn tất thanh toán, vui lòng bỏ qua email này.<br/>
-          Nếu bạn không thực hiện giao dịch này, cũng hãy bỏ qua email này.
-        </p>
-      </div>
-
-    </div>
-  </div>
-</body>
-</html>`;
+    `;
 
     const { data, error } = await resend.emails.send({
       from: process.env.EMAIL_FROM,
       to,
-      subject: `Xác nhận giao dịch — ${paymentCode}`,
+      subject: `Hoàn tất thanh toán — ${paymentCode}`,
       html,
     });
 
-    if (error) { console.error("❌ sendPaymentInitiatedEmail error:", error); return false; }
+    if (error) {
+      console.error("❌ sendPaymentInitiatedEmail error:", error);
+      return false;
+    }
     console.log("✅ sendPaymentInitiatedEmail sent:", data?.id);
     return true;
   } catch (err) {
@@ -509,4 +505,4 @@ const sendRefundCompletedEmail = async (to, { contactName, refundCode, bookingCo
   }
 };
 
-module.exports = { sendOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail };
+module.exports = { sendOTPEmail, sendRefundOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail };
