@@ -145,6 +145,8 @@ const SELECT_BOOKINGS_ADMIN = (dk, gioiHan, viTri) =>
      b.total_price,
      COALESCE(anc.ancillary_total, 0) AS ancillary_total,
      b.total_price + COALESCE(anc.ancillary_total, 0) AS grand_total,
+     (SELECT p.final_amount FROM payments p WHERE p.booking_id = b.id ORDER BY p.created_at DESC LIMIT 1) AS final_amount,
+     (SELECT p.discount_amount FROM payments p WHERE p.booking_id = b.id ORDER BY p.created_at DESC LIMIT 1) AS discount_amount,
      b.held_until, b.created_at,
      b.contact_name, b.contact_email, b.contact_phone,
      b.user_id,
@@ -169,6 +171,8 @@ const SELECT_BOOKING_DETAIL_ADMIN =
   `SELECT b.*,
      COALESCE(anc.ancillary_total, 0) AS ancillary_total,
      b.total_price + COALESCE(anc.ancillary_total, 0) AS grand_total,
+     (SELECT p.final_amount FROM payments p WHERE p.booking_id = b.id ORDER BY p.created_at DESC LIMIT 1) AS final_amount,
+     (SELECT p.discount_amount FROM payments p WHERE p.booking_id = b.id ORDER BY p.created_at DESC LIMIT 1) AS discount_amount,
      f_out.flight_number AS outbound_flight_number,
      f_out.departure_time AS outbound_dep_time, f_out.arrival_time AS outbound_arr_time,
      al_out.name AS outbound_airline, dep_out.code AS from_code, arr_out.code AS to_code,
@@ -240,19 +244,33 @@ const STATS_BOOKING_SUMMARY = (locNgay) =>
    GROUP BY b.status ORDER BY b.status`;
 
 const STATS_DAILY_REVENUE = (locNgay) =>
-  `SELECT DATE(b.created_at) AS date,
+  `SELECT (b.created_at AT TIME ZONE '+07')::date AS date,
           COUNT(*) AS bookings,
           COUNT(*) FILTER (WHERE b.status IN ('confirmed','refund_pending','refunded')) AS valid_bookings,
-          SUM(b.total_price + COALESCE(anc.ancillary_total, 0))
-            FILTER (WHERE b.status IN ('confirmed','refund_pending','refunded')) AS revenue
+          SUM(COALESCE(pay.final_amount, b.total_price + COALESCE(anc.ancillary_total, 0)))
+            FILTER (WHERE b.status IN ('confirmed','refund_pending','refunded')) AS revenue,
+          COALESCE(SUM(ref.net_refunded)
+            FILTER (WHERE b.status IN ('refund_pending','refunded')), 0) AS refunded
    FROM bookings b
    LEFT JOIN (
      SELECT booking_id, COALESCE(SUM(total_price), 0) AS ancillary_total
      FROM booking_ancillaries WHERE status != 'cancelled'
      GROUP BY booking_id
    ) anc ON anc.booking_id = b.id
-   WHERE ${locNgay ? `b.created_at BETWEEN $1 AND $2` : `b.created_at >= CURRENT_DATE - INTERVAL '6 days'`}
-   GROUP BY DATE(b.created_at)
+   LEFT JOIN LATERAL (
+     SELECT final_amount FROM payments
+     WHERE booking_id = b.id
+     ORDER BY created_at DESC LIMIT 1
+   ) pay ON true
+   LEFT JOIN (
+     SELECT booking_id, SUM(net_refund_amount) AS net_refunded
+     FROM refunds WHERE status = 'completed'
+     GROUP BY booking_id
+   ) ref ON ref.booking_id = b.id
+   WHERE ${locNgay
+     ? `(b.created_at AT TIME ZONE '+07')::date BETWEEN $1::date AND $2::date`
+     : `(b.created_at AT TIME ZONE '+07')::date >= (NOW() AT TIME ZONE '+07')::date - INTERVAL '6 days'`}
+   GROUP BY (b.created_at AT TIME ZONE '+07')::date
    ORDER BY date ASC`;
 
 const STATS_POPULAR_FLIGHTS = (locNgayDat) =>
@@ -281,7 +299,7 @@ const STATS_OVERVIEW = (locNgay) =>
        FROM refunds r
        JOIN bookings rb ON rb.id = r.booking_id
        WHERE r.status = 'completed'
-       ${locNgay ? `AND rb.created_at BETWEEN $1 AND $2` : ""}
+       ${locNgay ? `AND (rb.created_at AT TIME ZONE '+07')::date BETWEEN $1::date AND $2::date` : ""}
      ), 0)                                                                         AS total_refunded,
      COUNT(*) FILTER (WHERE b.status = 'confirmed')                               AS confirmed,
      COUNT(*) FILTER (WHERE b.status = 'pending')                                 AS pending,

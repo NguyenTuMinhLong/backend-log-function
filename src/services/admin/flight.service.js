@@ -794,7 +794,7 @@ const getBookings = async (params) => {
     values.push(`%${search}%`);
   }
   if (from_date && to_date) {
-    conditions.push(`DATE(b.created_at) BETWEEN $${idx} AND $${idx + 1}`);
+    conditions.push(`(b.created_at AT TIME ZONE '+07')::date BETWEEN $${idx} AND $${idx + 1}`);
     idx += 2;
     values.push(from_date, to_date);
   }
@@ -860,8 +860,8 @@ const getStatistics = async (params) => {
 
   if (from_date && to_date) {
     dateValues.push(from_date, to_date);
-    dateFilter = `AND created_at BETWEEN $1 AND $2`;
-    bDateFilter = `AND b.created_at BETWEEN $1 AND $2`;
+    dateFilter  = `AND (created_at  AT TIME ZONE '+07')::date BETWEEN $1::date AND $2::date`;
+    bDateFilter = `AND (b.created_at AT TIME ZONE '+07')::date BETWEEN $1::date AND $2::date`;
   }
 
   const bookingSummary = await pool.query(
