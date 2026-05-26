@@ -1,6 +1,6 @@
 "use strict";
 
-const priceRuleService = require("../services/price-rule.service");
+const priceRuleService = require("../../services/price-rule.service");
 
 /** GET /api/admin/price-rules */
 const getAllRules = async (req, res) => {
