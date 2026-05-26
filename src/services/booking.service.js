@@ -491,7 +491,7 @@ const autoCompleteFlights = async () => {
         AND  status NOT IN ('cancelled', 'completed')
       RETURNING id, flight_number
     `);
-
+      // chỉ check chuyến bay //////// WARNING:
     if (completedResult.rows.length > 0) {
       console.log(
         `[AutoComplete] Đã hoàn thành ${completedResult.rows.length} chuyến bay:`,
