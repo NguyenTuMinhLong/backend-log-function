@@ -505,4 +505,147 @@ const sendRefundCompletedEmail = async (to, { contactName, refundCode, bookingCo
   }
 };
 
-module.exports = { sendOTPEmail, sendRefundOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail };
+// ─── Flight status change notification ───────────────────────────────────────
+
+const FLIGHT_STATUS_CFG = {
+  scheduled: { emoji: '🟢', color: '#059669', bgGrad: 'linear-gradient(135deg,#059669,#047857)', subtitleColor: '#a7f3d0', subtitle: 'Chuyến bay của bạn đang đúng giờ' },
+  delayed:   { emoji: '⚠️', color: '#d97706', bgGrad: 'linear-gradient(135deg,#d97706,#b45309)', subtitleColor: '#fde68a', subtitle: 'Vui lòng cập nhật lịch di chuyển của bạn' },
+  boarding:  { emoji: '🛫', color: '#1a56db', bgGrad: 'linear-gradient(135deg,#1a56db,#1e40af)', subtitleColor: '#bfdbfe', subtitle: 'Đến cổng lên máy bay ngay' },
+  departed:  { emoji: '✈️', color: '#1a56db', bgGrad: 'linear-gradient(135deg,#1a56db,#1e40af)', subtitleColor: '#bfdbfe', subtitle: 'Chuyến bay đã rời khỏi sân bay' },
+  arrived:   { emoji: '🛬', color: '#059669', bgGrad: 'linear-gradient(135deg,#059669,#047857)', subtitleColor: '#a7f3d0', subtitle: 'Chuyến bay đã hạ cánh an toàn' },
+  cancelled: { emoji: '❌', color: '#dc2626', bgGrad: 'linear-gradient(135deg,#dc2626,#b91c1c)', subtitleColor: '#fecaca', subtitle: 'Liên hệ với chúng tôi để được hỗ trợ' },
+  completed: { emoji: '✅', color: '#059669', bgGrad: 'linear-gradient(135deg,#059669,#047857)', subtitleColor: '#a7f3d0', subtitle: 'Cảm ơn bạn đã bay cùng chúng tôi' },
+};
+
+const sendFlightStatusEmail = async (to, {
+  contactName,
+  bookingCode,
+  flightNumber,
+  airlineName,
+  depCode, depCity,
+  arrCode, arrCity,
+  departureTime,
+  newStatus,
+  statusLabel,
+  reason,
+}) => {
+  try {
+    const cfg = FLIGHT_STATUS_CFG[newStatus] || FLIGHT_STATUS_CFG.scheduled;
+
+    const reasonBlock = reason ? `
+      <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:14px 16px;margin-top:16px;">
+        <p style="color:#92400e;font-size:13px;margin:0;line-height:1.6;">
+          <strong>Lý do:</strong> ${reason}
+        </p>
+      </div>` : '';
+
+    const cancelledNote = newStatus === 'cancelled' ? `
+      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px 16px;margin-top:16px;">
+        <p style="color:#991b1b;font-size:13px;margin:0;line-height:1.6;">
+          🔄 Chúng tôi sẽ liên hệ với bạn trong vòng <strong>24 giờ</strong> để hỗ trợ hoàn tiền hoặc đổi vé.<br/>
+          📩 Vui lòng giữ email này làm bằng chứng khi cần.
+        </p>
+      </div>` : '';
+
+    const delayedNote = newStatus === 'delayed' ? `
+      <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px 16px;margin-top:16px;">
+        <p style="color:#92400e;font-size:13px;margin:0;line-height:1.6;">
+          ⏳ Thời gian khởi hành mới sẽ được cập nhật trên bảng thông tin tại sân bay.<br/>
+          📱 Bạn có thể kiểm tra tại quầy làm thủ tục hoặc ứng dụng của hãng hàng không.
+        </p>
+      </div>` : '';
+
+    const html = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="color-scheme" content="light dark"/>
+  <meta name="supported-color-schemes" content="light dark"/>
+  ${DARK_MODE_STYLE}
+</head>
+<body class="em-body" style="margin:0;padding:0;background:#f3f4f6;">
+  <div style="max-width:600px;margin:auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+    <div class="em-card" style="background:#ffffff;margin:20px auto;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+
+      <!-- Header -->
+      <div style="background:${cfg.bgGrad};padding:36px 24px;text-align:center;">
+        <img src="https://iili.io/qvDF3Kl.png" width="110" style="margin-bottom:14px;display:block;margin-left:auto;margin-right:auto;filter:brightness(0) invert(1);" />
+        <div style="font-size:36px;margin-bottom:8px;">${cfg.emoji}</div>
+        <h1 style="color:#fff;font-size:20px;margin:0 0 6px;font-weight:700;">Cập nhật chuyến bay: ${statusLabel}</h1>
+        <p style="color:${cfg.subtitleColor};font-size:14px;margin:0;">${cfg.subtitle}</p>
+      </div>
+
+      <!-- Body -->
+      <div style="padding:28px 24px;">
+        <p class="em-text-primary" style="color:#374151;font-size:15px;margin:0 0 20px;">
+          Xin chào <strong>${contactName || 'Quý khách'}</strong>,<br/>
+          Có cập nhật mới về chuyến bay trong booking của bạn.
+        </p>
+
+        <!-- Booking code -->
+        <div class="em-booking-box" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:16px;text-align:center;margin-bottom:20px;">
+          <p class="em-text-muted" style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin:0 0 4px;font-weight:600;">Mã đặt vé</p>
+          <p class="em-booking-code" style="color:#1a56db;font-size:26px;font-weight:800;letter-spacing:6px;margin:0;">${bookingCode}</p>
+        </div>
+
+        <!-- Flight card -->
+        <div class="em-flight-card" style="border:1px solid #e5e7eb;border-radius:8px;padding:18px;margin-bottom:16px;">
+          <div style="font-size:12px;color:#6b7280;margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Thông tin chuyến bay</div>
+          <div class="em-flight-airline" style="font-size:15px;font-weight:700;color:#111827;margin-bottom:12px;">${airlineName || ''} · ${flightNumber}</div>
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            <tr>
+              <td style="width:42%;vertical-align:top;">
+                <div class="em-flight-code" style="font-size:28px;font-weight:800;color:#1a56db;">${depCode}</div>
+                <div style="font-size:12px;color:#6b7280;margin-top:2px;">${depCity || ''}</div>
+              </td>
+              <td style="width:16%;text-align:center;vertical-align:middle;font-size:20px;padding:0 4px;">
+                ${PLANE_ARROW_ROUTE}
+              </td>
+              <td style="width:42%;text-align:right;vertical-align:top;">
+                <div class="em-flight-code" style="font-size:28px;font-weight:800;color:#1a56db;">${arrCode}</div>
+                <div style="font-size:12px;color:#6b7280;margin-top:2px;">${arrCity || ''}</div>
+              </td>
+            </tr>
+          </table>
+          ${departureTime ? `<div style="margin-top:12px;padding-top:12px;border-top:1px solid #f3f4f6;font-size:13px;color:#6b7280;">Giờ khởi hành dự kiến: <strong style="color:#374151;">${fmtDateTime(departureTime)}</strong></div>` : ''}
+        </div>
+
+        <!-- Status badge -->
+        <div style="text-align:center;margin-bottom:16px;">
+          <span style="display:inline-block;background:${cfg.color};color:#fff;font-size:13px;font-weight:700;padding:8px 20px;border-radius:20px;letter-spacing:0.5px;">
+            ${cfg.emoji} ${statusLabel}
+          </span>
+        </div>
+
+        ${reasonBlock}
+        ${cancelledNote}
+        ${delayedNote}
+      </div>
+
+      <!-- Footer -->
+      <div class="em-footer" style="background:#f9fafb;padding:16px 24px;text-align:center;border-top:1px solid #e5e7eb;">
+        <p class="em-footer-text" style="color:#9ca3af;font-size:12px;margin:0;">© ${new Date().getFullYear()} Vivudee · Đặt vé máy bay trực tuyến</p>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>`;
+
+    const { data, error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM,
+      to,
+      subject: `${cfg.emoji} Cập nhật chuyến bay ${flightNumber}: ${statusLabel} — Booking ${bookingCode}`,
+      html,
+    });
+
+    if (error) { console.error("❌ sendFlightStatusEmail error:", error); return false; }
+    console.log("✅ sendFlightStatusEmail sent:", data?.id);
+    return true;
+  } catch (err) {
+    console.error("❌ sendFlightStatusEmail exception:", err);
+    return false;
+  }
+};
+
+module.exports = { sendOTPEmail, sendRefundOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail, sendFlightStatusEmail };
