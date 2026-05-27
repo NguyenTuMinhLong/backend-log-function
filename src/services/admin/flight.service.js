@@ -7,7 +7,7 @@ const QS = require("../../queries/schedule.queries");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const VALID_STATUSES = ["scheduled", "delayed", "cancelled", "completed"];
+const VALID_STATUSES = ["scheduled", "delayed", "boarding", "departed", "arrived", "cancelled", "completed"];
 const VALID_CLASSES = ["economy", "business", "first"];
 
 const validateFlightInput = (data, isUpdate = false) => {
@@ -436,10 +436,12 @@ const updateFlightStatus = async (flightId, status, reason = "") => {
   // 3. Payload thông báo
   const statusLabels = {
     scheduled: "Đúng giờ",
-    delayed: "Bị trễ",
+    delayed:   "Bị trễ",
+    boarding:  "Đang lên máy bay",
+    departed:  "Đã khởi hành",
+    arrived:   "Đã hạ cánh",
     cancelled: "Đã hủy",
     completed: "Đã hoàn thành",
-    boarding: "Đang lên máy bay",
   };
 
   const notification = {
