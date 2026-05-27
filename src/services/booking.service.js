@@ -468,7 +468,57 @@ const cancelBooking = async (userId, bookingCode, reason = null) => {
 };
 
 const expireHeldBookings = async () => {
-  // ... (giữ nguyên)
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Tìm booking pending đã hết thời gian giữ ghế
+    const expired = await client.query(
+      `SELECT * FROM bookings
+       WHERE status = 'pending'
+         AND held_until < NOW()
+       FOR UPDATE SKIP LOCKED`
+    );
+
+    for (const booking of expired.rows) {
+      const seatsNeeded = booking.total_adults + booking.total_children;
+
+      // Hoàn ghế chuyến đi
+      await client.query(
+        `UPDATE flight_seats
+         SET available_seats = available_seats + $1, updated_at = NOW()
+         WHERE flight_id = $2 AND class = $3`,
+        [seatsNeeded, booking.outbound_flight_id, booking.outbound_seat_class]
+      );
+
+      // Hoàn ghế chuyến về (nếu khứ hồi)
+      if (booking.return_flight_id) {
+        await client.query(
+          `UPDATE flight_seats
+           SET available_seats = available_seats + $1, updated_at = NOW()
+           WHERE flight_id = $2 AND class = $3`,
+          [seatsNeeded, booking.return_flight_id, booking.return_seat_class]
+        );
+      }
+
+      // Đánh dấu booking là expired
+      await client.query(
+        `UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1`,
+        [booking.id]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    if (expired.rows.length > 0) {
+      console.log(`[Auto-expire] Đã hủy ${expired.rows.length} booking hết hạn`);
+    }
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("[Auto-expire] Lỗi:", err.message);
+  } finally {
+    client.release();
+  }
 };
 
 
