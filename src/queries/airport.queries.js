@@ -9,7 +9,7 @@ const COUNT_AIRPORTS = (dk) =>
   `SELECT COUNT(*) FROM airports ${dk}`;
 
 const SELECT_AIRPORTS = (dk, gioiHan, viTri) =>
-  `SELECT id, code, name, city, country, timezone, is_active, created_at
+  `SELECT id, code, name, city, country, timezone, lat, lng, is_active, created_at
    FROM airports
    ${dk}
    ORDER BY country ASC, city ASC
