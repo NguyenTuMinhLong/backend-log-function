@@ -7,7 +7,7 @@ const QS = require("../../queries/schedule.queries");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const VALID_STATUSES = ["scheduled", "delayed", "cancelled", "completed"];
+const VALID_STATUSES = ["scheduled", "delayed", "boarding", "departed", "arrived", "cancelled", "completed"];
 const VALID_CLASSES = ["economy", "business", "first"];
 
 const validateFlightInput = (data, isUpdate = false) => {
@@ -436,10 +436,12 @@ const updateFlightStatus = async (flightId, status, reason = "") => {
   // 3. Payload thông báo
   const statusLabels = {
     scheduled: "Đúng giờ",
-    delayed: "Bị trễ",
+    delayed:   "Bị trễ",
+    boarding:  "Đang lên máy bay",
+    departed:  "Đã khởi hành",
+    arrived:   "Đã hạ cánh",
     cancelled: "Đã hủy",
     completed: "Đã hoàn thành",
-    boarding: "Đang lên máy bay",
   };
 
   const notification = {
@@ -483,54 +485,43 @@ const updateFlightStatus = async (flightId, status, reason = "") => {
     console.error("[AD-05 Socket]", socketErr.message);
   }
 
-  // 5. Gửi email cho các booking bị ảnh hưởng (nếu status = cancelled hoặc delayed)
-  if (["cancelled", "delayed"].includes(status)) {
+  // 5. Gửi email HTML cho tất cả booking bị ảnh hưởng (mọi trạng thái)
+  if (affectedBookings.rows.length > 0) {
     try {
-      const { sendEmail } = require("../../services/notification.service");
-      const formatDate = (d) =>
-        new Date(d).toLocaleString("vi-VN", {
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-        });
+      const { sendFlightStatusEmail } = require("../../utils/mailer");
+
+      const statusLabels = {
+        scheduled: "Đúng giờ",
+        delayed:   "Bị trễ",
+        boarding:  "Đang lên máy bay",
+        departed:  "Đã khởi hành",
+        arrived:   "Đã hạ cánh",
+        cancelled: "Đã hủy",
+        completed: "Đã hoàn thành",
+      };
+
+      // Lấy chi tiết chuyến bay (hãng, sân bay) để điền vào email
+      const flightDetail = await pool.query(QF.SELECT_FLIGHT_BY_ID, [flightId]);
+      const fd = flightDetail.rows[0] || {};
 
       for (const booking of affectedBookings.rows) {
         if (!booking.contact_email) continue;
 
-        const subject =
-          status === "cancelled"
-            ? `Thông báo: Chuyến bay ${flight.flight_number} đã bị hủy - Booking ${booking.booking_code}`
-            : `Thông báo: Chuyến bay ${flight.flight_number} bị trễ - Booking ${booking.booking_code}`;
-
-        const body =
-          status === "cancelled"
-            ? `Xin chào ${booking.contact_name},
-
-Chúng tôi rất tiếc phải thông báo rằng chuyến bay ${flight.flight_number} đã bị hủy.
-
-Mã booking của bạn: ${booking.booking_code}
-${reason ? "Lý do: " + reason + "" : ""}
-Chúng tôi sẽ liên hệ để hỗ trợ hoàn tiền hoặc đổi vé.
-
-Trân trọng,
-Đội ngũ hỗ trợ`
-            : `Xin chào ${booking.contact_name},
-
-Chuyến bay ${flight.flight_number} của bạn đang bị trễ.
-
-Mã booking: ${booking.booking_code}
-${reason ? "Lý do: " + reason + "" : ""}
-Chúng tôi xin lỗi về sự bất tiện này.
-
-Trân trọng,
-Đội ngũ hỗ trợ`;
-
-        // Fire-and-forget — không await để không block response
-        sendEmail(booking.contact_email, subject, body).catch((e) =>
-          console.error("[AD-05 Email]", e.message),
-        );
+        // Fire-and-forget — không block response
+        sendFlightStatusEmail(booking.contact_email, {
+          contactName:   booking.contact_name,
+          bookingCode:   booking.booking_code,
+          flightNumber:  flight.flight_number,
+          airlineName:   fd.airline_name || "",
+          depCode:       fd.departure_code || "",
+          depCity:       fd.departure_city || "",
+          arrCode:       fd.arrival_code || "",
+          arrCity:       fd.arrival_city || "",
+          departureTime: fd.departure_time || flight.departure_time,
+          newStatus:     status,
+          statusLabel:   statusLabels[status] || status,
+          reason:        reason || "",
+        }).catch((e) => console.error("[AD-05 Email]", e.message));
       }
     } catch (emailErr) {
       console.error("[AD-05 Email]", emailErr.message);

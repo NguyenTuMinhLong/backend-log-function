@@ -75,15 +75,51 @@ const guestRateLimiter = rateLimiter({ windowMs: 1 * 60 * 1000, max: 3 });
 router.post('/guest', guestRateLimiter, refundController.requestGuestRefund);
 
 /**
+ * POST /api/refund/guest/cancel
+ * Guest hủy yêu cầu refund của mình
+ * Body: { refundCode, guestEmail }
+ */
+router.post('/guest/cancel', guestRateLimiter, refundController.cancelGuestRefund);
+
+/**
  * GET /api/refund/guest/:refundCode
  * Xem chi tiết refund của guest (cần verify email)
  * Query: ?email=guest@email.com
  */
 router.get('/guest/:refundCode', guestRateLimiter, refundController.getGuestRefundDetail);
 
+/**
+ * POST /api/refund/guest/request-otp
+ * Yêu cầu gửi mã OTP đến email (khi refund amount > threshold)
+ * Body: { email, bookingCode }
+ */
+router.post('/guest/request-otp', guestRateLimiter, refundController.requestGuestOTP);
+
+/**
+ * POST /api/refund/guest/verify-otp
+ * Verify OTP để tạo refund (khi refund amount > threshold)
+ * Body: { email, code }
+ */
+router.post('/guest/verify-otp', guestRateLimiter, refundController.verifyGuestOTP);
+
+/**
+ * GET /api/refund/guest/otp-status
+ * Kiểm tra trạng thái OTP
+ * Query: ?email=xxx
+ */
+router.get('/guest/otp-status', refundController.getOTPStatus);
+
 // =========================================================
 // USER ROUTES (Cần đăng nhập)
 // =========================================================
+
+/**
+ * POST /api/refund/user/request-otp
+ * User (logged in) yêu cầu gửi mã OTP đến email (khi bill amount > threshold)
+ * Body: { bookingCode }
+ * Headers: { Authorization: Bearer <token> }
+ */
+router.post('/user/request-otp', authenticate, refundController.requestUserOTP);
 
 // User xem danh sách refund của mình
 router.get('/my', authenticate, refundController.getMyRefunds);

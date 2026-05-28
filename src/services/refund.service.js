@@ -21,6 +21,8 @@ const {
 } = require('../config/refund.config');
 const { revokePointsForRefund } = require('./loyalty.service');
 const { createRefundNotification } = require('./notification.service');
+const { sendRefundOTPEmail } = require('../utils/mailer');
+const { OTP_CONFIG } = require('../config/refund.config');
 
 // Payment Gateway imports
 const { refundPayPalCapture } = require('../providers/paypal.provider');
@@ -81,6 +83,242 @@ const validateRefundRequest = (booking, payment, userId) => {
   if (CONCURRENCY.preventDuplicateRequests) {
     // Sẽ check trong transaction để tránh race condition
   }
+};
+
+// =========================================================
+// OTP STORE (In-Memory)
+// =========================================================
+
+/**
+ * In-memory OTP store for guest refunds
+ * Key: email -> { code, expiresAt, attempts, bookingCode, createdAt }
+ */
+const guestOTPStore = new Map();
+
+/**
+ * Generate a random OTP code
+ */
+const generateOTPCode = () => {
+  const chars = '0123456789';
+  let code = '';
+  for (let i = 0; i < OTP_CONFIG.codeLength; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
+};
+
+/**
+ * Check if OTP is required for the refund amount
+ * @param {number} netRefundAmount - Net refund amount in VND
+ * @returns {boolean}
+ */
+const isOTPRequired = (netRefundAmount) => {
+  return OTP_CONFIG.enabled && netRefundAmount >= OTP_CONFIG.threshold;
+};
+
+/**
+ * Request OTP for user refund (logged in user)
+ * @param {string} email - User email
+ * @param {string} bookingCode - Booking code for context
+ * @returns {object} - OTP request result
+ */
+const requestUserOTP = async (email, bookingCode) => {
+  const now = Date.now();
+  const normalizedEmail = email.toLowerCase().trim();
+
+  // Check cooldown
+  const existingOTP = guestOTPStore.get(normalizedEmail);
+  if (existingOTP) {
+    const cooldownEnd = existingOTP.createdAt + (OTP_CONFIG.resendCooldownMinutes * 60 * 1000);
+    if (now < cooldownEnd) {
+      const remainingSeconds = Math.ceil((cooldownEnd - now) / 1000);
+      throw new Error(`Vui lòng chờ ${remainingSeconds} giây trước khi gửi lại mã`);
+    }
+  }
+
+  // Generate new OTP
+  const code = generateOTPCode();
+  const expiresAt = now + (OTP_CONFIG.expiresInMinutes * 60 * 1000);
+
+  guestOTPStore.set(normalizedEmail, {
+    code,
+    expiresAt,
+    attempts: 0,
+    bookingCode,
+    createdAt: now,
+    isUser: true,
+  });
+
+  // Send OTP email using Resend
+  try {
+    await sendRefundOTPEmail(normalizedEmail, code, OTP_CONFIG.expiresInMinutes);
+  } catch (emailErr) {
+    console.error('[OTP] Failed to send email:', emailErr.message);
+  }
+
+  console.log(`[OTP] Generated for user ${normalizedEmail}: ${code} (expires in ${OTP_CONFIG.expiresInMinutes} min)`);
+
+  return {
+    success: true,
+    email: normalizedEmail,
+    expiresIn: OTP_CONFIG.expiresInMinutes * 60,
+    message: `Mã OTP đã được gửi đến ${normalizedEmail}. Mã có hiệu lực trong ${OTP_CONFIG.expiresInMinutes} phút.`,
+  };
+};
+
+/**
+ * Request OTP for guest refund
+ * @param {string} email - Guest email
+ * @param {string} bookingCode - Booking code for context
+ * @returns {object} - OTP request result
+ */
+const requestGuestOTP = async (email, bookingCode) => {
+  const now = Date.now();
+  const normalizedEmail = email.toLowerCase().trim();
+
+  // Check cooldown
+  const existingOTP = guestOTPStore.get(normalizedEmail);
+  if (existingOTP) {
+    const cooldownEnd = existingOTP.createdAt + (OTP_CONFIG.resendCooldownMinutes * 60 * 1000);
+    if (now < cooldownEnd) {
+      const remainingSeconds = Math.ceil((cooldownEnd - now) / 1000);
+      throw new Error(`Vui lòng chờ ${remainingSeconds} giây trước khi gửi lại mã`);
+    }
+  }
+
+  // Generate new OTP
+  const code = generateOTPCode();
+  const expiresAt = now + (OTP_CONFIG.expiresInMinutes * 60 * 1000);
+
+  guestOTPStore.set(normalizedEmail, {
+    code,
+    expiresAt,
+    attempts: 0,
+    bookingCode,
+    createdAt: now,
+  });
+
+  // Send OTP email using Resend
+  console.log(`[OTP] Preparing to send email to: ${normalizedEmail}`);
+  try {
+    const emailResult = await sendRefundOTPEmail(normalizedEmail, code, OTP_CONFIG.expiresInMinutes);
+    console.log(`[OTP] Email send result: ${emailResult}`);
+  } catch (emailErr) {
+    console.error('[OTP] Failed to send email:', emailErr.message);
+    // Continue anyway - OTP is still valid, just email failed
+  }
+
+  console.log(`[OTP] Generated for ${normalizedEmail}: ${code} (expires in ${OTP_CONFIG.expiresInMinutes} min)`);
+
+  return {
+    success: true,
+    email: normalizedEmail,
+    expiresIn: OTP_CONFIG.expiresInMinutes * 60,
+    message: `Mã OTP đã được gửi đến ${normalizedEmail}. Mã có hiệu lực trong ${OTP_CONFIG.expiresInMinutes} phút.`,
+  };
+};
+
+/**
+ * Verify OTP for guest refund
+ * @param {string} email - Guest email
+ * @param {string} code - OTP code
+ * @returns {object} - Verification result
+ */
+const verifyGuestOTP = async (email, code) => {
+  const normalizedEmail = email.toLowerCase().trim();
+  const otpData = guestOTPStore.get(normalizedEmail);
+
+  if (!otpData) {
+    throw new Error('Không tìm thấy mã OTP. Vui lòng yêu cầu gửi lại mã.');
+  }
+
+  const now = Date.now();
+
+  // Check if expired
+  if (now > otpData.expiresAt) {
+    guestOTPStore.delete(normalizedEmail);
+    throw new Error('Mã OTP đã hết hạn. Vui lòng yêu cầu gửi lại mã.');
+  }
+
+  // Check attempts
+  if (otpData.attempts >= OTP_CONFIG.maxAttempts) {
+    guestOTPStore.delete(normalizedEmail);
+    throw new Error('Đã nhập sai quá nhiều lần. Vui lòng yêu cầu gửi lại mã mới.');
+  }
+
+  // Verify code
+  if (otpData.code !== code) {
+    otpData.attempts += 1;
+    const remainingAttempts = OTP_CONFIG.maxAttempts - otpData.attempts;
+    guestOTPStore.set(normalizedEmail, otpData);
+    throw new Error(`Mã OTP không đúng. Còn ${remainingAttempts} lần thử.`);
+  }
+
+  // Success - mark as verified
+  otpData.verified = true;
+  guestOTPStore.set(normalizedEmail, otpData);
+
+  return {
+    success: true,
+    verified: true,
+    email: normalizedEmail,
+    bookingCode: otpData.bookingCode,
+    message: 'Xác thực OTP thành công',
+  };
+};
+
+/**
+ * Check if email has verified OTP
+ * @param {string} email - Guest email
+ * @returns {boolean}
+ */
+const isOTPVerified = (email) => {
+  const normalizedEmail = email.toLowerCase().trim();
+  const otpData = guestOTPStore.get(normalizedEmail);
+
+  if (!otpData || !otpData.verified) return false;
+
+  // Check if still valid (not expired)
+  return Date.now() <= otpData.expiresAt;
+};
+
+/**
+ * Clear OTP for email
+ * @param {string} email - Guest email
+ */
+const clearGuestOTP = (email) => {
+  const normalizedEmail = email.toLowerCase().trim();
+  guestOTPStore.delete(normalizedEmail);
+};
+
+/**
+ * Get OTP status for an email
+ * @param {string} email - Guest email
+ * @returns {object} - OTP status
+ */
+const getOTPStatus = (email) => {
+  const normalizedEmail = email.toLowerCase().trim();
+  const otpData = guestOTPStore.get(normalizedEmail);
+
+  if (!otpData) {
+    return { exists: false, verified: false };
+  }
+
+  const now = Date.now();
+  const isExpired = now > otpData.expiresAt;
+
+  if (isExpired) {
+    guestOTPStore.delete(normalizedEmail);
+    return { exists: false, verified: false, expired: true };
+  }
+
+  return {
+    exists: true,
+    verified: otpData.verified || false,
+    attemptsRemaining: OTP_CONFIG.maxAttempts - otpData.attempts,
+    expiresIn: Math.ceil((otpData.expiresAt - now) / 1000),
+    bookingCode: otpData.bookingCode,
+  };
 };
 
 // =========================================================
@@ -232,7 +470,17 @@ const requestRefund = async (userId, bookingCode, data) => {
       throw new Error(`Số tiền hoàn (${refundCalc.net_refund_amount}) không đủ để xử lý`);
     }
 
-    // 10. Generate refund code
+    // 10. Check OTP requirement based on ORIGINAL BILL AMOUNT (not refund amount)
+    const baseAmount = parseFloat(payment.final_amount || payment.amount);
+    if (isOTPRequired(baseAmount)) {
+      // OTP is required for large bill amounts - check if verified
+      const userEmail = booking.contact_email || booking.guest_email;
+      if (!isOTPVerified(userEmail)) {
+        throw new Error(`Yêu cầu xác thực OTP cho hóa đơn có giá trị lớn (${baseAmount.toLocaleString('vi-VN')} VND). Vui lòng xác thực bằng mã OTP đã được gửi đến email.`);
+      }
+    }
+
+    // 11. Generate refund code
     let refundCode;
     let isUnique = false;
     while (!isUnique) {
@@ -257,6 +505,7 @@ const requestRefund = async (userId, bookingCode, data) => {
       userId,
       false, // is_guest
       null,  // guest_email
+      null,  // guest_session_id
     ]);
 
     const refund = refundResult.rows[0];
@@ -841,6 +1090,7 @@ const getBookingRefunds = async (bookingCode) => {
  * 2. Verify guest email/phone khớp với booking
  * 3. Kiểm tra booking chưa bị refund
  * 4. Tính refund amount & tạo request
+ * 5. Nếu amount > OTP_THRESHOLD, yêu cầu OTP verification trước
  * 
  * @param {string} bookingCode - Mã booking
  * @param {string} guestEmail - Email của guest để xác thực
@@ -929,7 +1179,16 @@ const requestGuestRefund = async (bookingCode, guestEmail, data, options = {}) =
       throw new Error(`Số tiền hoàn (${refundCalc.net_refund_amount}) không đủ để xử lý`);
     }
 
-    // 11. Generate refund code
+    // 11. Check OTP requirement based on ORIGINAL BILL AMOUNT (not refund amount)
+    const baseAmount = parseFloat(payment.final_amount || payment.amount);
+    if (isOTPRequired(baseAmount)) {
+      // OTP is required for large bill amounts - check if verified
+      if (!isOTPVerified(guestEmail.toLowerCase())) {
+        throw new Error(`Yêu cầu xác thực OTP cho hóa đơn có giá trị lớn (${baseAmount.toLocaleString('vi-VN')} VND). Vui lòng xác thực bằng mã OTP đã được gửi đến email.`);
+      }
+    }
+
+    // 12. Generate refund code
     let refundCode;
     let isUnique = false;
     while (!isUnique) {
@@ -938,7 +1197,7 @@ const requestGuestRefund = async (bookingCode, guestEmail, data, options = {}) =
       if (check.rows.length === 0) isUnique = true;
     }
 
-    // 12. Create refund request với is_guest = true
+    // 13. Create refund request với is_guest = true
     const refundResult = await client.query(QR.INSERT_REFUND, [
       refundCode,
       booking.id,
@@ -953,15 +1212,21 @@ const requestGuestRefund = async (bookingCode, guestEmail, data, options = {}) =
       user_notes,
       null,     // requested_by = null cho guest
       true,     // is_guest = true
-      guestEmail,
+      guestEmail.toLowerCase(), // guest_email
+      guestSessionId || null,  // guest_session_id
     ]);
 
     const refund = refundResult.rows[0];
 
-    // 13. Update booking status to refund_pending
+    // 14. Clear OTP after successful refund request (based on ORIGINAL bill amount)
+    if (isOTPRequired(baseAmount)) {
+      clearGuestOTP(guestEmail.toLowerCase());
+    }
+
+    // 15. Update booking status to refund_pending
     await client.query(QB.UPDATE_BOOKING_STATUS, ['refund_pending', booking.id]);
 
-    // 14. Send notification (sẽ gửi qua email của guest)
+    // 16. Send notification (sẽ gửi qua email của guest)
     try {
       await createRefundNotification({
         event: 'REFUND_REQUESTED',
@@ -981,6 +1246,7 @@ const requestGuestRefund = async (bookingCode, guestEmail, data, options = {}) =
       refund_code: refund.refund_code,
       status: refund.status,
       refund_type,
+      otp_verified: isOTPRequired(refundCalc.net_refund_amount),
       refund_preview: {
         refund_amount: refundCalc.refund_amount,
         admin_fee: refundCalc.admin_fee,
@@ -1100,6 +1366,73 @@ const getGuestRefundsByEmail = async (guestEmail) => {
 };
 
 // =========================================================
+// GUEST CANCEL REFUND
+// =========================================================
+
+/**
+ * Guest hủy yêu cầu refund của mình (không cần đăng nhập)
+ * @param {string} refundCode - Mã refund
+ * @param {string} guestEmail - Email để verify ownership
+ * @returns {object} - Kết quả hủy
+ */
+const cancelGuestRefundRequest = async (refundCode, guestEmail) => {
+  if (!guestEmail || !guestEmail.includes('@')) {
+    throw new Error('Email xác thực không hợp lệ');
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Get refund info
+    const refundResult = await client.query(QR.SELECT_REFUND_BY_CODE, [refundCode]);
+    if (refundResult.rows.length === 0) throw new Error('Không tìm thấy yêu cầu hoàn tiền');
+
+    const refund = refundResult.rows[0];
+
+    // 2. Verify this is a guest refund
+    if (!refund.is_guest) {
+      throw new Error('Yêu cầu này không phải của guest. Vui lòng đăng nhập để hủy.');
+    }
+
+    // 3. Verify email matches
+    if (refund.guest_email.toLowerCase() !== guestEmail.toLowerCase()) {
+      throw new Error('Email xác thực không khớp');
+    }
+
+    // 4. Validate status (chỉ pending/approved mới cancel được)
+    if (!['pending', 'approved'].includes(refund.status)) {
+      throw new Error(`Không thể hủy yêu cầu có trạng thái "${refund.status}"`);
+    }
+
+    // 5. Update status to cancelled
+    await client.query(QR.UPDATE_REFUND_STATUS, [
+      'cancelled',
+      null,
+      'Guest cancelled request',
+      refundCode,
+    ]);
+
+    // 6. Revert booking status back to confirmed
+    await client.query(QB.UPDATE_BOOKING_STATUS, ['confirmed', refund.booking_id]);
+
+    await client.query('COMMIT');
+
+    return {
+      success: true,
+      refund_code: refundCode,
+      status: 'cancelled',
+      message: 'Yêu cầu hoàn tiền đã được hủy thành công',
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// =========================================================
 // EXPORTS
 // =========================================================
 
@@ -1134,4 +1467,16 @@ module.exports = {
   linkGuestRefundsToUser,
   getGuestRefundsBySession,
   getGuestRefundsByEmail,
+
+  // Guest cancel
+  cancelGuestRefundRequest,
+
+  // OTP functions
+  requestGuestOTP,
+  requestUserOTP,
+  verifyGuestOTP,
+  isOTPVerified,
+  isOTPRequired,
+  getOTPStatus,
+  clearGuestOTP,
 };
