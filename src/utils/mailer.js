@@ -203,8 +203,9 @@ const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAm
 
         <!-- Note -->
         <div class="em-success-box" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 16px;margin-top:24px;">
-          <p class="em-success-text" style="color:#166534;font-size:13px;margin:0;">
-            📩 Vui lòng lưu email này để làm thủ tục tại sân bay. Bạn có thể cần xuất trình mã đặt vé cùng giấy tờ tùy thân.
+          <p class="em-success-text" style="color:#166534;font-size:13px;margin:0;line-height:1.6;">
+            📱 <strong>Check-in online</strong> tại <a href="https://vivudee.com/checkin" style="color:#166534;">vivudee.com/checkin</a> trong vòng 24 giờ trước giờ bay để nhận <strong>boarding pass điện tử</strong> gửi qua email này.<br/>
+            🪪 Vui lòng mang theo giấy tờ tùy thân khi ra sân bay.
           </p>
         </div>
       </div>
@@ -648,4 +649,195 @@ const sendFlightStatusEmail = async (to, {
   }
 };
 
-module.exports = { sendOTPEmail, sendRefundOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail, sendFlightStatusEmail };
+// ─── Boarding Pass E-ticket Email ─────────────────────────────────────────────
+const buildBoardingPassCard = (bp) => {
+  const frontendBase = process.env.FRONTEND_URL || 'https://vivudee.vercel.app';
+  const bpUrl   = `${frontendBase}/checkin/bp/${bp.boarding_pass_code || ''}`;
+  const qrData  = encodeURIComponent(bpUrl);
+  const qrUrl   = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${qrData}&bgcolor=f8faff&color=0d1f6e&margin=8&format=png`;
+  const gate    = bp.gate || 'TBA';
+  const seat    = bp.seat || '--';
+
+  return `
+  <!-- Boarding Pass Card -->
+  <table width="100%" cellpadding="0" cellspacing="0" style="border:2px solid #dbe4ff;border-radius:14px;overflow:hidden;margin-bottom:22px;border-collapse:separate;">
+    <tr>
+      <!-- Blue top bar -->
+      <td colspan="3" style="background:linear-gradient(90deg,#1a56db,#2563eb);padding:10px 20px;">
+        <table width="100%" cellpadding="0" cellspacing="0"><tr>
+          <td style="color:#bfdbfe;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">VIVUDEE AIR &nbsp;·&nbsp; ${bp.flight_number || ''}</td>
+          <td align="right" style="color:#fff;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;">BOARDING PASS</td>
+        </tr></table>
+      </td>
+    </tr>
+    <tr>
+      <!-- LEFT: passenger + route + times -->
+      <td valign="top" style="width:62%;padding:20px 22px;border-right:2px dashed #dbe4ff;background:#ffffff;">
+
+        <!-- Passenger name -->
+        <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Hành khách</div>
+        <div style="font-size:18px;font-weight:900;color:#111827;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:16px;">${bp.passenger_name || '--'}</div>
+
+        <!-- Route row -->
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:14px;">
+          <tr>
+            <td valign="top" style="width:38%;">
+              <div style="font-size:30px;font-weight:900;color:#1a56db;line-height:1;">${bp.departure_airport || '---'}</div>
+              <div style="font-size:11px;color:#6b7280;margin-top:2px;">${bp.departure_city || ''}</div>
+              <div style="font-size:18px;font-weight:800;color:#111827;margin-top:6px;">${bp.departure_time || '--:--'}</div>
+            </td>
+            <td align="center" valign="middle" style="width:24%;font-size:20px;color:#2563eb;">&#9992;&#xFE0F;</td>
+            <td valign="top" style="width:38%;text-align:right;">
+              <div style="font-size:30px;font-weight:900;color:#1a56db;line-height:1;">${bp.arrival_airport || '---'}</div>
+              <div style="font-size:11px;color:#6b7280;margin-top:2px;">${bp.arrival_city || ''}</div>
+            </td>
+          </tr>
+        </table>
+
+        <!-- Date + boarding -->
+        <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #f1f5f9;padding-top:10px;margin-top:4px;">
+          <tr>
+            <td style="width:50%;">
+              <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.8px;">Ngày bay</div>
+              <div style="font-size:12px;font-weight:700;color:#374151;margin-top:2px;">${bp.date || '--'}</div>
+            </td>
+            <td style="width:50%;text-align:right;">
+              <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.8px;">Giờ boarding</div>
+              <div style="font-size:12px;font-weight:700;color:#374151;margin-top:2px;">${bp.boarding_time || '--:--'}</div>
+            </td>
+          </tr>
+        </table>
+      </td>
+
+      <!-- RIGHT: seat + gate + QR -->
+      <td valign="top" align="center" style="width:38%;padding:20px 16px;background:#f8faff;">
+
+        <!-- Seat + Gate row -->
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px;">
+          <tr>
+            <td align="center" style="width:50%;">
+              <div style="font-size:9px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">Ghế</div>
+              <div style="font-size:34px;font-weight:900;color:#111827;line-height:1.1;">${seat}</div>
+            </td>
+            <td align="center" style="width:50%;border-left:1px solid #dbe4ff;">
+              <div style="font-size:9px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">Cổng</div>
+              <div style="font-size:28px;font-weight:900;color:#1a56db;line-height:1.1;">${gate}</div>
+            </td>
+          </tr>
+        </table>
+
+        <!-- QR code -->
+        <img src="${qrUrl}" width="140" height="140" alt="QR Code" style="display:block;margin:0 auto 8px;border-radius:8px;border:1px solid #dbe4ff;" />
+
+        <!-- Boarding pass code -->
+        <div style="font-size:10px;font-weight:800;letter-spacing:1.5px;color:#6b7280;font-family:monospace;text-align:center;">${bp.boarding_pass_code || ''}</div>
+      </td>
+    </tr>
+
+    <!-- Bottom barcode strip -->
+    <tr>
+      <td colspan="3" style="background:#f1f5f9;padding:8px 20px;text-align:center;border-top:1px dashed #dbe4ff;">
+        <div style="font-size:9px;color:#9ca3af;letter-spacing:2px;font-family:monospace;text-transform:uppercase;">
+          ${bp.booking_code || ''} &nbsp;·&nbsp; ${bp.passenger_name || ''} &nbsp;·&nbsp; ${bp.flight_number || ''} &nbsp;·&nbsp; ${seat}
+        </div>
+      </td>
+    </tr>
+  </table>
+  `;
+};
+
+const sendBoardingPassEmail = async (to, { contactName, bookingCode, boardingPasses }) => {
+  try {
+    const passCount = boardingPasses.length;
+    const allCardsHtml = boardingPasses.map(buildBoardingPassCard).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="color-scheme" content="light dark"/>
+  <meta name="supported-color-schemes" content="light dark"/>
+  ${DARK_MODE_STYLE}
+</head>
+<body class="em-body" style="margin:0;padding:0;background:#eef2ff;">
+  <div style="max-width:620px;margin:auto;padding:20px 0 40px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+
+    <!-- Outer card -->
+    <div class="em-card" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(26,86,219,0.12);">
+
+      <!-- Header -->
+      <div style="background:linear-gradient(135deg,#1a56db 0%,#1e40af 100%);padding:40px 28px 32px;text-align:center;position:relative;">
+        <img src="https://iili.io/qvDF3Kl.png" width="100" style="margin-bottom:16px;display:block;margin-left:auto;margin-right:auto;filter:brightness(0) invert(1);" alt="Vivudee" />
+        <div style="font-size:40px;margin-bottom:8px;">🎫</div>
+        <h1 style="color:#ffffff;font-size:24px;margin:0 0 8px;font-weight:800;letter-spacing:-0.5px;">Boarding Pass Điện Tử</h1>
+        <p style="color:#bfdbfe;font-size:14px;margin:0;">Check-in thành công · ${passCount} hành khách</p>
+      </div>
+
+      <!-- Wave separator -->
+      <div style="background:linear-gradient(135deg,#1a56db,#1e40af);height:20px;"></div>
+      <div style="background:#eef2ff;height:16px;border-radius:50% 50% 0 0 / 100% 100% 0 0;margin-top:-16px;"></div>
+
+      <!-- Body -->
+      <div style="padding:24px 28px 32px;">
+
+        <!-- Greeting -->
+        <p class="em-text-primary" style="color:#374151;font-size:15px;margin:0 0 24px;line-height:1.6;">
+          Xin chào <strong>${contactName || 'Quý khách'}</strong>,<br/>
+          Vui lòng <strong>lưu email này</strong> và xuất trình boarding pass khi ra sân bay.
+          Quét mã QR tại cổng lên máy bay.
+        </p>
+
+        <!-- Booking code chip -->
+        <div style="text-align:center;margin-bottom:24px;">
+          <span style="display:inline-block;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:24px;padding:8px 24px;">
+            <span style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:3px;">Mã đặt vé</span>
+            <span style="font-size:22px;font-weight:900;color:#1a56db;letter-spacing:4px;font-family:monospace;">${bookingCode}</span>
+          </span>
+        </div>
+
+        <!-- Boarding passes -->
+        ${allCardsHtml}
+
+        <!-- Important notes -->
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;">
+          <tr>
+            <td style="padding:14px 18px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;">
+              <p style="color:#166534;font-size:13px;margin:0;line-height:1.7;">
+                ✅ <strong>Đã check-in thành công.</strong> Vui lòng đến sân bay trước ít nhất <strong>60 phút</strong>.<br/>
+                📱 Boarding pass này có thể dùng trực tiếp từ điện thoại, không cần in.<br/>
+                🪪 Mang theo <strong>CMND/CCCD/Hộ chiếu</strong> cùng boarding pass khi lên máy bay.
+              </p>
+            </td>
+          </tr>
+        </table>
+
+      </div>
+
+      <!-- Footer -->
+      <div class="em-footer" style="background:#f8faff;padding:20px 28px;text-align:center;border-top:1px solid #dbe4ff;">
+        <p class="em-footer-text" style="color:#9ca3af;font-size:12px;margin:0 0 6px;">© ${new Date().getFullYear()} Vivudee · Đặt vé máy bay trực tuyến</p>
+        <p style="color:#c7d2fe;font-size:11px;margin:0;">Không trả lời email này · Mọi thắc mắc vui lòng liên hệ hỗ trợ</p>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>`;
+
+    const { data, error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM,
+      to,
+      subject: `🎫 Boarding Pass — ${bookingCode} · ${passCount} hành khách`,
+      html,
+    });
+
+    if (error) { console.error('❌ sendBoardingPassEmail error:', error); return false; }
+    console.log('✅ sendBoardingPassEmail sent:', data?.id);
+    return true;
+  } catch (err) {
+    console.error('❌ sendBoardingPassEmail exception:', err);
+    return false;
+  }
+};
+
+module.exports = { sendOTPEmail, sendRefundOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail, sendFlightStatusEmail, sendBoardingPassEmail };

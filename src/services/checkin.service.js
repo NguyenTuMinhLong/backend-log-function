@@ -363,11 +363,13 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
     }
     
     await client.query('COMMIT');
-    
+
     return {
       success: true,
       booking_code: bookingCode,
       flight_type: flightType,
+      contact_email: booking.contact_email || null,
+      contact_name: booking.contact_name || null,
       passengers: results
     };
   } catch (err) {

@@ -7,6 +7,7 @@ CHECKIN CONTROLLER - API endpoints cho check-in online
 */
 
 const checkinService = require('../services/checkin.service');
+const { sendBoardingPassEmail } = require('../utils/mailer');
 
 // =========================================================
 // CHECKIN ENDPOINTS
@@ -27,9 +28,30 @@ const checkin = async (req, res) => {
 
     // Check-in all passengers
     const result = await checkinService.checkinAllPassengers(
-      booking_code.toUpperCase(), 
+      booking_code.toUpperCase(),
       flight_type
     );
+
+    // Send boarding pass email (async, không block response)
+    const successPassengers = result.passengers.filter(p => p.success && p.boarding_pass_code);
+    if (successPassengers.length > 0 && result.contact_email) {
+      setImmediate(async () => {
+        try {
+          const boardingPasses = [];
+          for (const p of successPassengers) {
+            const bp = await checkinService.getBoardingPass(p.boarding_pass_code);
+            boardingPasses.push(bp);
+          }
+          await sendBoardingPassEmail(result.contact_email, {
+            contactName: result.contact_name,
+            bookingCode: result.booking_code,
+            boardingPasses,
+          });
+        } catch (emailErr) {
+          console.error('[Checkin] Email error:', emailErr.message);
+        }
+      });
+    }
 
     res.status(200).json({
       success: true,
