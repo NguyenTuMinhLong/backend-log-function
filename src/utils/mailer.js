@@ -204,7 +204,7 @@ const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAm
         <!-- Note -->
         <div class="em-success-box" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 16px;margin-top:24px;">
           <p class="em-success-text" style="color:#166534;font-size:13px;margin:0;line-height:1.6;">
-            📱 <strong>Check-in online</strong> tại <a href="https://vivudee.com/checkin" style="color:#166534;">vivudee.com/checkin</a> trong vòng 24 giờ trước giờ bay để nhận <strong>boarding pass điện tử</strong> gửi qua email này.<br/>
+            📱 <strong>Check-in online</strong> tại <a href="https://vivudee.vercel.app/checkin" style="color:#166534;">vivudee.vercel.app/checkin</a> trong vòng 24 giờ trước giờ bay để nhận <strong>boarding pass điện tử</strong> gửi qua email này.<br/>
             🪪 Vui lòng mang theo giấy tờ tùy thân khi ra sân bay.
           </p>
         </div>
