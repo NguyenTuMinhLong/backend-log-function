@@ -332,8 +332,7 @@ const sendPaymentInitiatedEmail = async (to, { contactName, paymentCode, payment
         <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.06);">
           <!-- Header -->
           <div style="background:#f9fafb;padding:24px;text-align:center;border-bottom:1px solid #e5e7eb;">
-            <img src="https://iili.io/qvDF3Kl.png" width="110" style="margin-bottom:6px;" />
-            <p style="color:#6b7280;font-size:13px;margin:0;">Your Journey Starts Here</p>
+            <img src="https://iili.io/qvDF3Kl.png" width="180" style="display:block;margin:0 auto;" />
           </div>
 
           <!-- Body -->
