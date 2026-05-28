@@ -416,7 +416,13 @@ const getBoardingPass = async (boardingPassCode) => {
   // Format date/time
   const departureDate = formatDate(data.departure_time);
   const departureTime = formatTime(data.departure_time);
-  const boardingTimeFormatted = data.boarding_time ? formatTime(data.boarding_time) : null;
+  let boardingTimeFormatted = null;
+  if (data.boarding_time) {
+    boardingTimeFormatted = formatTime(data.boarding_time);
+  } else if (data.departure_time) {
+    const dep = new Date(data.departure_time);
+    boardingTimeFormatted = formatTime(new Date(dep.getTime() - 30 * 60 * 1000));
+  }
   
   // Generate QR code URL (placeholder - can tich hop QR generator)
   const qrCodeUrl = `/api/checkin/${boardingPassCode}/qr`;
