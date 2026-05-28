@@ -13,7 +13,8 @@ const adminFlightCancellationController = require("../controllers/admin/flight-c
 
 const adminUserController = require("../controllers/admin/user.controller");
 const adminChatController = require("../controllers/admin/chat.controller");
-const adminCronController = require("../controllers/admin/cron.controller");
+const adminCronController      = require("../controllers/admin/cron.controller");
+const adminAutoFlightController = require("../controllers/admin/auto-flight.controller");
 
 // Tất cả routes admin: phải đăng nhập + role = 'admin'
 router.use(authenticate, authorize("admin"));
@@ -87,6 +88,12 @@ router.get("/date-changes/:requestCode", adminDateChangeController.getDateChange
 router.post("/date-changes/:requestCode/approve", adminDateChangeController.approveDateChange);
 router.post("/date-changes/:requestCode/reject", adminDateChangeController.rejectDateChange);
 router.delete("/date-changes/:requestCode", adminDateChangeController.cancelDateChange);
+
+// A-12: Auto Multi-Airline Flight Generator
+router.get("/auto-flights/status",  adminAutoFlightController.getStatus);
+router.get("/auto-flights/config",  adminAutoFlightController.getConfig);
+router.put("/auto-flights/config",  adminAutoFlightController.saveConfig);
+router.post("/auto-flights/run",    adminAutoFlightController.runNow);
 
 // A-11: Cronjob Manual Trigger
 router.post("/cron/run",              adminCronController.runCron);

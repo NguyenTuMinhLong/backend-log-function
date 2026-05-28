@@ -19,6 +19,7 @@ const checkinRoutes = require('./routes/checkin.routes');
 const { expireHeldBookings }   = require("./services/booking.service");
 const { autoGenerateFlights }  = require("./services/admin/flight.service");
 const { checkAndAlertSLABreach } = require("./services/notification.service");
+const { runBatch: autoFlightBatch } = require("./services/admin/auto-flight.service");
 require("./scripts/Loyalty.cron"); // Loyalty annual reset cron job
 
 const app = express();
@@ -60,6 +61,20 @@ setInterval(async () => {
     isExpiringHeldBookings = false;
   }
 }, 60 * 1000);
+
+// A-12: Mỗi 30 phút tự động sinh chuyến bay cho tất cả hãng (auto-flight config)
+let isAutoFlighting = false;
+setInterval(async () => {
+  if (isAutoFlighting) return;
+  isAutoFlighting = true;
+  try {
+    await autoFlightBatch(20); // tạo tối đa 20 chuyến mỗi lần, gradual over time
+  } catch (err) {
+    console.error("[AutoFlight] Unhandled error:", err.message);
+  } finally {
+    isAutoFlighting = false;
+  }
+}, 30 * 60 * 1000); // mỗi 30 phút
 
 // AD-04: Mỗi 24 giờ tự động sinh chuyến bay từ lịch bay định kỳ (flight_schedules)
 let isGeneratingFlights = false;
