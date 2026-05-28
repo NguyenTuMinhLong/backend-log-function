@@ -223,7 +223,7 @@ const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAm
     const { data, error } = await resend.emails.send({
       from: process.env.EMAIL_FROM,
       to,
-      subject: `✈ Xác nhận đặt vé thành công — Mã booking: ${bookingCode}`,
+      subject: `Xác nhận đặt vé thành công — Mã booking: ${bookingCode}`,
       html,
     });
 
