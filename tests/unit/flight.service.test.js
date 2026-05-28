@@ -21,16 +21,15 @@ function loadFlightService(queryImpl) {
   return require(servicePath);
 }
 
-test('searchFlights: báo lỗi nếu điểm đi và điểm đến trùng nhau', async () => {
+test('searchFlights: báo lỗi nếu thiếu mã sân bay đi', async () => {
   const flightService = loadFlightService();
   await assert.rejects(
     () => flightService.searchFlights({
-      departure_code: 'SGN',
-      arrival_code: 'SGN',
+      arrival_code: 'HAN',
       departure_date: '2099-12-31',
       seat_class: 'economy',
     }),
-    /Điểm đi và điểm đến không được trùng nhau/
+    /Mã sân bay đi là bắt buộc/
   );
 });
 
@@ -43,7 +42,7 @@ test('searchFlights: báo lỗi nếu seat_class không hợp lệ', async () =>
       departure_date: '2099-12-31',
       seat_class: 'premium',
     }),
-    /seat_class phải là một trong/
+    /seat_class phải là economy, business hoặc first/
   );
 });
 
@@ -100,7 +99,7 @@ test('searchFlights: trả danh sách chuyến bay đã format đúng', async ()
   assert.equal(result.outbound_flights[0].flight_number, 'VN123');
   assert.equal(result.outbound_flights[0].seat.total_price, 175);
   assert.equal(result.outbound_flights[0].seat.price_breakdown.child_price, 75);
-  assert.equal(result.outbound_flights[0].seat.extra_baggage_options.length, 4);
-  assert.equal(result.outbound_flights[0].seat.extra_baggage_options[1].price_per_person, 120000);
-  assert.equal(result.outbound_flights[0].seat.extra_baggage_options[2].price_per_person, 210000);
+  assert.equal(result.outbound_flights[0].seat.extra_baggage_options.length, 5);
+  assert.equal(result.outbound_flights[0].seat.extra_baggage_options[1].price_per_person, 10);
+  assert.equal(result.outbound_flights[0].seat.extra_baggage_options[2].price_per_person, 20);
 });

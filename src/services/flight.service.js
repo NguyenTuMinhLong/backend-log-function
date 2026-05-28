@@ -1,6 +1,7 @@
 // src/services/flight.service.js
 const pool = require('../config/db');
 const QF = require('../queries/flight.queries');
+const priceRuleService = require('./price-rule.service');
 
 /**
  * Lưu lịch sử tìm kiếm (fire-and-forget, không block search)

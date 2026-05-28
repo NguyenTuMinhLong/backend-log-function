@@ -7,7 +7,15 @@ const QS = require("../../queries/schedule.queries");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const VALID_STATUSES = ["scheduled", "delayed", "boarding", "departed", "arrived", "cancelled", "completed"];
+const VALID_STATUSES = [
+  "scheduled",
+  "delayed",
+  "boarding",
+  "departed",   
+  "arrived",
+  "cancelled",
+  "completed",
+];
 const VALID_CLASSES = ["economy", "business", "first"];
 
 const validateFlightInput = (data, isUpdate = false) => {
@@ -436,10 +444,10 @@ const updateFlightStatus = async (flightId, status, reason = "") => {
   // 3. Payload thông báo
   const statusLabels = {
     scheduled: "Đúng giờ",
-    delayed:   "Bị trễ",
-    boarding:  "Đang lên máy bay",
-    departed:  "Đã khởi hành",
-    arrived:   "Đã hạ cánh",
+    delayed: "Bị trễ",
+    boarding: "Đang lên máy bay",
+    departed: "Đã khởi hành",
+    arrived: "Đã hạ cánh",
     cancelled: "Đã hủy",
     completed: "Đã hoàn thành",
   };
@@ -492,10 +500,10 @@ const updateFlightStatus = async (flightId, status, reason = "") => {
 
       const statusLabels = {
         scheduled: "Đúng giờ",
-        delayed:   "Bị trễ",
-        boarding:  "Đang lên máy bay",
-        departed:  "Đã khởi hành",
-        arrived:   "Đã hạ cánh",
+        delayed: "Bị trễ",
+        boarding: "Đang lên máy bay",
+        departed: "Đã khởi hành",
+        arrived: "Đã hạ cánh",
         cancelled: "Đã hủy",
         completed: "Đã hoàn thành",
       };
@@ -509,18 +517,18 @@ const updateFlightStatus = async (flightId, status, reason = "") => {
 
         // Fire-and-forget — không block response
         sendFlightStatusEmail(booking.contact_email, {
-          contactName:   booking.contact_name,
-          bookingCode:   booking.booking_code,
-          flightNumber:  flight.flight_number,
-          airlineName:   fd.airline_name || "",
-          depCode:       fd.departure_code || "",
-          depCity:       fd.departure_city || "",
-          arrCode:       fd.arrival_code || "",
-          arrCity:       fd.arrival_city || "",
+          contactName: booking.contact_name,
+          bookingCode: booking.booking_code,
+          flightNumber: flight.flight_number,
+          airlineName: fd.airline_name || "",
+          depCode: fd.departure_code || "",
+          depCity: fd.departure_city || "",
+          arrCode: fd.arrival_code || "",
+          arrCity: fd.arrival_city || "",
           departureTime: fd.departure_time || flight.departure_time,
-          newStatus:     status,
-          statusLabel:   statusLabels[status] || status,
-          reason:        reason || "",
+          newStatus: status,
+          statusLabel: statusLabels[status] || status,
+          reason: reason || "",
         }).catch((e) => console.error("[AD-05 Email]", e.message));
       }
     } catch (emailErr) {
@@ -763,7 +771,15 @@ const toggleAirlineStatus = async (airlineId) => {
 // ══════════════════════════════════════════════════════
 
 const getBookings = async (params) => {
-  const { page = 1, limit = 10, status, trip_type, search, from_date, to_date } = params;
+  const {
+    page = 1,
+    limit = 10,
+    status,
+    trip_type,
+    search,
+    from_date,
+    to_date,
+  } = params;
   const offset = (parseInt(page) - 1) * parseInt(limit);
   const conditions = [];
   const values = [];
@@ -785,7 +801,9 @@ const getBookings = async (params) => {
     values.push(`%${search}%`);
   }
   if (from_date && to_date) {
-    conditions.push(`(b.created_at AT TIME ZONE '+07')::date BETWEEN $${idx} AND $${idx + 1}`);
+    conditions.push(
+      `(b.created_at AT TIME ZONE '+07')::date BETWEEN $${idx} AND $${idx + 1}`,
+    );
     idx += 2;
     values.push(from_date, to_date);
   }
@@ -851,7 +869,7 @@ const getStatistics = async (params) => {
 
   if (from_date && to_date) {
     dateValues.push(from_date, to_date);
-    dateFilter  = `AND (created_at  AT TIME ZONE '+07')::date BETWEEN $1::date AND $2::date`;
+    dateFilter = `AND (created_at  AT TIME ZONE '+07')::date BETWEEN $1::date AND $2::date`;
     bDateFilter = `AND (b.created_at AT TIME ZONE '+07')::date BETWEEN $1::date AND $2::date`;
   }
 

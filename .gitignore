@@ -9,3 +9,4 @@ DOCS.md
 .flaskenv*
 !.env.project
 !.env.vault
+
