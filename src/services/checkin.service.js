@@ -524,7 +524,7 @@ const getBoardingPass = async (boardingPassCode) => {
 
     departure_time: departureTime,
     arrival_time:   formatTime(data.arrival_time),
-    gate:           data.gate || generateGate(data.flight_number, data.departure_airport, data.arrival_airport),
+    gate:           generateGate(data.flight_number, data.departure_airport, data.arrival_airport),
     seat:           data.seat_number,
 
     sequence:          data.sequence_number,
