@@ -81,6 +81,58 @@ const getBoardingMinutes = (depTime, arrTime) => {
   return 90;
 };
 
+const VN_AIRPORTS = new Set([
+  'SGN','HAN','DAD','CXR','PQC','VCA','HPH','DLI','UIH',
+  'HUI','VII','TBB','BMV','VDH','DIN','VCS','VKG','PXU',
+]);
+
+/**
+ * Sinh gate tự động theo sân bay + hành trình
+ * Dùng hash từ flight_number → cùng chuyến luôn ra cùng gate
+ */
+const generateGate = (flightNumber, departureAirport, arrivalAirport) => {
+  const fn  = (flightNumber || '').toUpperCase();
+  const dep = (departureAirport || '').toUpperCase();
+  const arr = (arrivalAirport  || '').toUpperCase();
+  const isIntl = !VN_AIRPORTS.has(arr);
+
+  // Hash ổn định từ flight number
+  const h = fn.split('').reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) & 0xfffffff, 0);
+
+  const pick = (max) => (h % max) + 1;
+
+  // ── Sân bay Việt Nam ──────────────────────────────────────
+  if (dep === 'SGN') {
+    if (isIntl) {
+      return ['D','E'][h % 2] + pick(['D','E'][h % 2] === 'D' ? 12 : 8);
+    }
+    return ['A','B'][h % 2] + pick(['A','B'][h % 2] === 'A' ? 16 : 12);
+  }
+  if (dep === 'HAN') return isIntl ? String(pick(30)) : `G${pick(20)}`;
+  if (dep === 'DAD') return String(pick(10));
+  if (dep === 'CXR') return String(pick(8));
+  if (dep === 'PQC') return String(pick(8));
+  if (dep === 'VCA') return String(pick(4));
+  if (dep === 'HPH') return String(pick(6));
+  if (['DLI','UIH','HUI','VII','BMV','VKG','PXU'].includes(dep)) return String(pick(4));
+  if (['TBB','VDH','VCS','DIN'].includes(dep)) return String(pick(2));
+
+  // ── Sân bay quốc tế phổ biến ─────────────────────────────
+  if (dep === 'BKK') return 'ABCDE'[h % 5] + pick(10);
+  if (dep === 'SIN') { const p = 'ABCD'[h % 4]; return p + pick(p === 'D' ? 10 : 30); }
+  if (dep === 'KUL') { const p = 'CD'[h % 2];   return p + pick(p === 'C' ? 30 : 20); }
+  if (dep === 'HKG') return String(pick(80));
+  if (['NRT','HND'].includes(dep)) return String(pick(60));
+  if (dep === 'ICN') return String(100 + pick(50));
+  if (['PVG','PEK','CAN'].includes(dep)) return String(pick(50));
+  if (dep === 'TPE') return 'A' + pick(20);
+  if (dep === 'MNL') return String(pick(20));
+  if (['CGK','DPS'].includes(dep)) return 'D' + pick(30);
+
+  // Fallback
+  return isIntl ? 'ABCDE'[h % 5] + pick(10) : String(pick(8));
+};
+
 // =========================================================
 // CHECKIN FUNCTIONS
 // =========================================================
@@ -205,7 +257,12 @@ const checkinPassenger = async (bookingCode, passengerId, flightType) => {
     
     // Get flight info
     const flightResult = await client.query(
-      'SELECT flight_number, departure_time, arrival_time FROM flights WHERE id = $1',
+      `SELECT f.flight_number, f.departure_time, f.arrival_time,
+              dep.code AS departure_airport, arr.code AS arrival_airport
+       FROM flights f
+       JOIN airports dep ON dep.id = f.departure_airport_id
+       JOIN airports arr ON arr.id = f.arrival_airport_id
+       WHERE f.id = $1`,
       [flightId]
     );
 
@@ -218,8 +275,8 @@ const checkinPassenger = async (bookingCode, passengerId, flightType) => {
     // Generate boarding pass code
     const boardingPassCode = generateBoardingPassCode(booking.booking_code, seq);
 
-    // Determine gate
-    const gate = booking.gate || CHECKIN_CONFIG.defaultGate;
+    // Gate theo sân bay
+    const gate = booking.gate || generateGate(flightNumber, flightRow.departure_airport, flightRow.arrival_airport);
 
     // Boarding time theo thực tế
     let boardingTime = null;
@@ -345,7 +402,12 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
         : booking.outbound_flight_id;
       
       const flightResult = await client.query(
-        'SELECT flight_number, departure_time, arrival_time FROM flights WHERE id = $1',
+        `SELECT f.flight_number, f.departure_time, f.arrival_time,
+                dep.code AS departure_airport, arr.code AS arrival_airport
+         FROM flights f
+         JOIN airports dep ON dep.id = f.departure_airport_id
+         JOIN airports arr ON arr.id = f.arrival_airport_id
+         WHERE f.id = $1`,
         [flightId]
       );
 
@@ -358,8 +420,8 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
       // Generate boarding pass code
       const boardingPassCode = generateBoardingPassCode(booking.booking_code, seq);
 
-      // Determine gate
-      const gate = booking.gate || CHECKIN_CONFIG.defaultGate;
+      // Gate theo sân bay
+      const gate = booking.gate || generateGate(flightNumber, flightRow.departure_airport, flightRow.arrival_airport);
 
       // Boarding time theo thực tế
       let boardingTime = null;
@@ -462,7 +524,7 @@ const getBoardingPass = async (boardingPassCode) => {
 
     departure_time: departureTime,
     arrival_time:   formatTime(data.arrival_time),
-    gate:           data.gate || CHECKIN_CONFIG.defaultGate,
+    gate:           data.gate || generateGate(data.flight_number, data.departure_airport, data.arrival_airport),
     seat:           data.seat_number,
 
     sequence:          data.sequence_number,
