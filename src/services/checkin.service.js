@@ -69,6 +69,18 @@ const formatTime = (dateString) => {
   return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 };
 
+/**
+ * Tính số phút boarding trước giờ bay theo độ dài chuyến
+ * ≤ 2h → 45 phút | 2–5h → 60 phút | > 5h → 90 phút
+ */
+const getBoardingMinutes = (depTime, arrTime) => {
+  if (!depTime || !arrTime) return 45;
+  const durationMins = (new Date(arrTime) - new Date(depTime)) / 60000;
+  if (durationMins <= 120) return 45;
+  if (durationMins <= 300) return 60;
+  return 90;
+};
+
 // =========================================================
 // CHECKIN FUNCTIONS
 // =========================================================
@@ -193,26 +205,27 @@ const checkinPassenger = async (bookingCode, passengerId, flightType) => {
     
     // Get flight info
     const flightResult = await client.query(
-      'SELECT flight_number FROM flights WHERE id = $1',
+      'SELECT flight_number, departure_time, arrival_time FROM flights WHERE id = $1',
       [flightId]
     );
-    
-    const flightNumber = flightResult.rows[0]?.flight_number || 'N/A';
-    
+
+    const flightRow = flightResult.rows[0] || {};
+    const flightNumber = flightRow.flight_number || 'N/A';
+
     // Get next sequence
     const seq = await getNextSequenceNumber(booking.id, flightType);
-    
+
     // Generate boarding pass code
     const boardingPassCode = generateBoardingPassCode(booking.booking_code, seq);
-    
+
     // Determine gate
     const gate = booking.gate || CHECKIN_CONFIG.defaultGate;
-    
-    // Determine boarding time (thuong 30 phut truoc gio bay)
+
+    // Boarding time theo thực tế
     let boardingTime = null;
-    if (booking.departure_time) {
-      const depTime = new Date(booking.departure_time);
-      boardingTime = new Date(depTime.getTime() - 30 * 60 * 1000);
+    if (flightRow.departure_time) {
+      const mins = getBoardingMinutes(flightRow.departure_time, flightRow.arrival_time);
+      boardingTime = new Date(new Date(flightRow.departure_time).getTime() - mins * 60 * 1000);
     }
     
     // Insert checkin record
@@ -332,26 +345,27 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
         : booking.outbound_flight_id;
       
       const flightResult = await client.query(
-        'SELECT flight_number FROM flights WHERE id = $1',
+        'SELECT flight_number, departure_time, arrival_time FROM flights WHERE id = $1',
         [flightId]
       );
-      
-      const flightNumber = flightResult.rows[0]?.flight_number || 'N/A';
-      
+
+      const flightRow = flightResult.rows[0] || {};
+      const flightNumber = flightRow.flight_number || 'N/A';
+
       // Get sequence
       const seq = await getNextSequenceNumber(booking.id, flightType);
-      
+
       // Generate boarding pass code
       const boardingPassCode = generateBoardingPassCode(booking.booking_code, seq);
-      
+
       // Determine gate
       const gate = booking.gate || CHECKIN_CONFIG.defaultGate;
-      
-      // Determine boarding time
+
+      // Boarding time theo thực tế
       let boardingTime = null;
-      if (booking.departure_time) {
-        const depTime = new Date(booking.departure_time);
-        boardingTime = new Date(depTime.getTime() - 30 * 60 * 1000);
+      if (flightRow.departure_time) {
+        const mins = getBoardingMinutes(flightRow.departure_time, flightRow.arrival_time);
+        boardingTime = new Date(new Date(flightRow.departure_time).getTime() - mins * 60 * 1000);
       }
       
       // Insert checkin
@@ -420,8 +434,8 @@ const getBoardingPass = async (boardingPassCode) => {
   if (data.boarding_time) {
     boardingTimeFormatted = formatTime(data.boarding_time);
   } else if (data.departure_time) {
-    const dep = new Date(data.departure_time);
-    boardingTimeFormatted = formatTime(new Date(dep.getTime() - 30 * 60 * 1000));
+    const mins = getBoardingMinutes(data.departure_time, data.arrival_time);
+    boardingTimeFormatted = formatTime(new Date(new Date(data.departure_time).getTime() - mins * 60 * 1000));
   }
   
   // Generate QR code URL (placeholder - can tich hop QR generator)
