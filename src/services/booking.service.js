@@ -27,6 +27,27 @@ const calcTotalPrice = (basePrice, adults, children, infants) => {
   return Math.round(adultTotal + childTotal + infantTotal);
 };
 
+const getDayOfWeekMult = (depTime) => {
+  const day = new Date(depTime).getDay();
+  if (day === 0) return 1.20;
+  if (day === 5) return 1.15;
+  if (day === 6) return 1.10;
+  return 1.00;
+};
+
+const getAdvanceMult = (depTime) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((new Date(depTime) - today) / 86400000);
+  if (diffDays <= 2)  return 1.45;
+  if (diffDays <= 5)  return 1.30;
+  if (diffDays <= 10) return 1.15;
+  if (diffDays <= 20) return 1.05;
+  if (diffDays <= 35) return 1.00;
+  if (diffDays <= 50) return 0.93;
+  return 0.87;
+};
+
 const getDemandMult = (availableSeats, totalSeats) => {
   const avail = parseInt(availableSeats) || 0;
   const total = parseInt(totalSeats) || 1;
@@ -36,11 +57,13 @@ const getDemandMult = (availableSeats, totalSeats) => {
   if (occupancy >= 0.60) return 1.15;
   if (occupancy >= 0.40) return 1.05;
   if (occupancy >= 0.20) return 1.00;
-  return 0.95;
+  return 0.97;
 };
 
-const applyDemand = (basePrice, availableSeats, totalSeats) =>
-  Math.round(basePrice * getDemandMult(availableSeats, totalSeats) / 1000) * 1000;
+const applyDemand = (basePrice, availableSeats, totalSeats, depTime) => {
+  const mult = getDayOfWeekMult(depTime) * getAdvanceMult(depTime) * getDemandMult(availableSeats, totalSeats);
+  return Math.round(basePrice * mult / 1000) * 1000;
+};
 
 const validateBookingInput = (data) => {
   // ... (giữ nguyên code validate của bạn)
@@ -141,8 +164,8 @@ const createBooking = async (data, userId = null) => {
       returnSeat = await checkAndGetSeatInfo(client, return_flight_id, return_seat_class, seatsNeeded);
     }
 
-    const outboundPrice = applyDemand(parseFloat(outboundSeat.base_price), outboundSeat.available_seats, outboundSeat.total_seats);
-    const returnPrice   = returnSeat ? applyDemand(parseFloat(returnSeat.base_price), returnSeat.available_seats, returnSeat.total_seats) : 0;
+    const outboundPrice = applyDemand(parseFloat(outboundSeat.base_price), outboundSeat.available_seats, outboundSeat.total_seats, outboundSeat.departure_time);
+    const returnPrice   = returnSeat ? applyDemand(parseFloat(returnSeat.base_price), returnSeat.available_seats, returnSeat.total_seats, returnSeat.departure_time) : 0;
 
     const outboundTotal = calcTotalPrice(outboundPrice, a, c, i);
     const returnTotal   = returnSeat ? calcTotalPrice(returnPrice, a, c, i) : 0;
