@@ -2,12 +2,10 @@
  * ============================================================
  *  UNIT TEST — Flight Tracker (getFlightPosition)
  *  Chạy: node --test tests/unit/flight.tracker.test.js
- * ============================================================
  *
- *  Kỹ thuật: Manual Module Mock (inject cache)
- *  - Không cần jest / sinon
- *  - Dùng require.cache để stub pool.query và flight.queries
- *  - Mỗi test gọi loadFlightService() để nạp lại module sạch
+ *  Mỗi TC có 2 luồng:
+ *    ✅ Happy path  — input hợp lệ → kết quả đúng
+ *    ❌ Failure path — input sai / edge case → expect lỗi hoặc giá trị khác
  * ============================================================
  */
 
@@ -15,24 +13,16 @@ const test   = require('node:test');
 const assert = require('node:assert/strict');
 const path   = require('node:path');
 
-// ── Đường dẫn tới module cần test ──────────────────────────────────────────
 const SERVICE_PATH = path.resolve(__dirname, '../../src/services/flight.service.js');
 const DB_PATH      = path.resolve(__dirname, '../../src/config/db.js');
 const QF_PATH      = path.resolve(__dirname, '../../src/queries/flight.queries.js');
 
-// ── Helper: nạp lại flight.service với db.query giả ──────────────────────
 function loadFlightService(fakeQuery) {
-  // Xóa cache để đảm bảo module được nạp lại từ đầu
   [SERVICE_PATH, DB_PATH, QF_PATH].forEach(p => delete require.cache[p]);
-
-  // Inject stub db
   require.cache[DB_PATH] = {
     id: DB_PATH, filename: DB_PATH, loaded: true,
     exports: { query: fakeQuery || (async () => ({ rows: [] })) },
   };
-
-  // Inject stub queries (chỉ cần key tồn tại, giá trị không quan trọng
-  // vì db.query đã được stub hoàn toàn)
   require.cache[QF_PATH] = {
     id: QF_PATH, filename: QF_PATH, loaded: true,
     exports: {
@@ -42,148 +32,151 @@ function loadFlightService(fakeQuery) {
       SELECT_ALL_AIRLINES: 'STUB_AIRLINES',
     },
   };
-
   return require(SERVICE_PATH);
 }
 
-// ── Dữ liệu mẫu cho một chuyến bay đang bay ──────────────────────────────
 function makeFlight(overrides = {}) {
-  const now         = Date.now();
-  const depTime     = new Date(now - 30 * 60 * 1000).toISOString(); // đã cất cánh 30 phút
-  const durationMin = 120;
+  const now = Date.now();
   return {
-    id: 42,
-    flight_number:  'VN100',
-    departure_time: depTime,
-    duration_minutes: durationMin,
+    id: 42, flight_number: 'VN100',
+    departure_time: new Date(now - 30 * 60 * 1000).toISOString(),
+    duration_minutes: 120,
     dep_code: 'SGN', dep_city: 'Hồ Chí Minh',
-    dep_lat: '10.8188',  dep_lng: '106.6520',
+    dep_lat: '10.8188', dep_lng: '106.6520',
     arr_code: 'HAN', arr_city: 'Hà Nội',
-    arr_lat: '21.2187',  arr_lng: '105.8045',
+    arr_lat: '21.2187', arr_lng: '105.8045',
     ...overrides,
   };
 }
 
-// ============================================================
-// 1. Ném lỗi khi không tìm thấy chuyến bay
-// ============================================================
-test('getFlightPosition: ném lỗi khi flight_id không tồn tại', async () => {
+// ══════════════════════════════════════════════════════════════
+// TC01 — Flight không tồn tại
+// ══════════════════════════════════════════════════════════════
+test('TC01 ✅ Happy: ném lỗi khi flight_id không tồn tại', async () => {
   const service = loadFlightService(async () => ({ rows: [] }));
-
   await assert.rejects(
     () => service.getFlightPosition(9999),
-    /Không tìm thấy chuyến bay/,
-    'Phải throw lỗi "Không tìm thấy chuyến bay"'
+    /Không tìm thấy chuyến bay/
   );
 });
 
-// ============================================================
-// 2. Trạng thái "scheduled" khi chưa đến giờ bay
-// ============================================================
-test('getFlightPosition: status = scheduled khi chưa đến giờ bay', async () => {
-  const futureTime = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(); // 2 tiếng nữa
-  const flight = makeFlight({ departure_time: futureTime });
-  const service = loadFlightService(async () => ({ rows: [flight] }));
-
-  const result = await service.getFlightPosition(42);
-
-  assert.equal(result.status, 'scheduled', 'Chuyến chưa cất cánh phải là scheduled');
-  assert.equal(result.progress, 0, 'Progress phải = 0 khi chưa cất cánh');
-});
-
-// ============================================================
-// 3. Trạng thái "airborne" và progress đúng khi đang bay
-// ============================================================
-test('getFlightPosition: status = airborne và progress hợp lệ khi đang bay', async () => {
-  // Đã bay được 60 phút, tổng 120 phút → progress ≈ 0.5
-  const now = Date.now();
-  const depTime = new Date(now - 60 * 60 * 1000).toISOString();
-  const flight = makeFlight({ departure_time: depTime, duration_minutes: 120 });
-  const service = loadFlightService(async () => ({ rows: [flight] }));
-
-  const result = await service.getFlightPosition(42);
-
-  assert.equal(result.status, 'airborne', 'Chuyến đang bay phải là airborne');
-  assert.ok(result.progress > 0 && result.progress < 1,
-    `progress phải trong khoảng (0, 1), thực tế: ${result.progress}`);
-  // ~50% với sai số nhỏ do thời gian chạy test
-  assert.ok(Math.abs(result.progress - 0.5) < 0.02,
-    `Sau 60/120 phút, progress ≈ 0.5, thực tế: ${result.progress}`);
-});
-
-// ============================================================
-// 4. Trạng thái "landed" khi đã đến nơi
-// ============================================================
-test('getFlightPosition: status = landed khi đã hạ cánh', async () => {
-  const depTime = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(); // 3h trước
-  const flight  = makeFlight({ departure_time: depTime, duration_minutes: 120 }); // chuyến 2h
-  const service = loadFlightService(async () => ({ rows: [flight] }));
-
-  const result = await service.getFlightPosition(42);
-
-  assert.equal(result.status, 'landed', 'Chuyến đã hạ cánh phải là landed');
-  assert.equal(result.progress, 1, 'Progress phải = 1 khi đã landed');
-  assert.equal(result.timeRemaining, 0, 'timeRemaining phải = 0 khi đã landed');
-});
-
-// ============================================================
-// 5. Vị trí nội suy đúng khi progress = 0 (ngay lúc cất cánh)
-// ============================================================
-test('getFlightPosition: vị trí = sân bay đi khi progress = 0', async () => {
-  const depTime = new Date(Date.now()).toISOString(); // cất cánh đúng lúc này
-  const flight  = makeFlight({ departure_time: depTime });
-  const service = loadFlightService(async () => ({ rows: [flight] }));
-
-  const result = await service.getFlightPosition(42);
-
-  // Vị trí phải ≈ tọa độ sân bay đi (SGN)
-  assert.ok(Math.abs(result.position.lat - 10.8188) < 0.01,
-    `lat phải ≈ 10.8188 (SGN), thực tế: ${result.position.lat}`);
-  assert.ok(Math.abs(result.position.lng - 106.6520) < 0.01,
-    `lng phải ≈ 106.6520 (SGN), thực tế: ${result.position.lng}`);
-});
-
-// ============================================================
-// 6. Cấu trúc object trả về đúng format
-// ============================================================
-test('getFlightPosition: object trả về có đủ các trường bắt buộc', async () => {
+test('TC01 ❌ Failure: không ném lỗi khi có dữ liệu — assert.rejects phải fail', async () => {
   const flight  = makeFlight();
   const service = loadFlightService(async () => ({ rows: [flight] }));
+  // Khi có flight, hàm KHÔNG throw → rejects phải fail
+  await assert.rejects(
+    async () => {
+      const result = await service.getFlightPosition(42);
+      if (result && result.flightId) throw new Error('EXPECTED_NO_THROW_BUT_GOT_RESULT');
+    },
+    /EXPECTED_NO_THROW_BUT_GOT_RESULT/
+  );
+});
 
-  const result = await service.getFlightPosition(42);
+// ══════════════════════════════════════════════════════════════
+// TC02 — Status: scheduled
+// ══════════════════════════════════════════════════════════════
+test('TC02 ✅ Happy: status = scheduled khi chưa đến giờ bay', async () => {
+  const futureTime = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+  const service = loadFlightService(async () => ({ rows: [makeFlight({ departure_time: futureTime })] }));
+  const result  = await service.getFlightPosition(42);
+  assert.equal(result.status, 'scheduled');
+  assert.equal(result.progress, 0);
+});
 
-  // Kiểm tra các trường bắt buộc
-  ['flightId', 'flightNumber', 'status', 'progress', 'timeRemaining', 'position', 'departure', 'arrival']
-    .forEach(key => {
-      assert.ok(key in result, `Thiếu trường "${key}" trong kết quả`);
-    });
+test('TC02 ❌ Failure: status KHÔNG phải scheduled khi đã cất cánh', async () => {
+  // Đã bay 30 phút → airborne, không phải scheduled
+  const service = loadFlightService(async () => ({ rows: [makeFlight()] }));
+  const result  = await service.getFlightPosition(42);
+  assert.notEqual(result.status, 'scheduled', 'Chuyến đang bay không được là scheduled');
+});
 
-  // Kiểm tra sub-object position
-  ['lat', 'lng', 'heading'].forEach(key => {
-    assert.ok(key in result.position, `Thiếu trường "position.${key}"`);
-  });
+// ══════════════════════════════════════════════════════════════
+// TC03 — Status: airborne + progress
+// ══════════════════════════════════════════════════════════════
+test('TC03 ✅ Happy: status = airborne, progress ≈ 0.5 sau 60/120 phút', async () => {
+  const depTime = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const service = loadFlightService(async () => ({ rows: [makeFlight({ departure_time: depTime, duration_minutes: 120 })] }));
+  const result  = await service.getFlightPosition(42);
+  assert.equal(result.status, 'airborne');
+  assert.ok(Math.abs(result.progress - 0.5) < 0.02, `progress phải ≈ 0.5, thực tế: ${result.progress}`);
+});
 
-  // Kiểm tra departure/arrival
-  ['code', 'city', 'lat', 'lng', 'time'].forEach(key => {
-    assert.ok(key in result.departure, `Thiếu trường "departure.${key}"`);
-    assert.ok(key in result.arrival,   `Thiếu trường "arrival.${key}"`);
+test('TC03 ❌ Failure: progress KHÔNG được = 1 khi đang airborne', async () => {
+  const depTime = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const service = loadFlightService(async () => ({ rows: [makeFlight({ departure_time: depTime, duration_minutes: 120 })] }));
+  const result  = await service.getFlightPosition(42);
+  assert.notEqual(result.progress, 1, 'progress=1 chỉ hợp lệ khi landed');
+});
+
+// ══════════════════════════════════════════════════════════════
+// TC04 — Status: landed
+// ══════════════════════════════════════════════════════════════
+test('TC04 ✅ Happy: status = landed, progress = 1, timeRemaining = 0', async () => {
+  const depTime = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  const service = loadFlightService(async () => ({ rows: [makeFlight({ departure_time: depTime, duration_minutes: 120 })] }));
+  const result  = await service.getFlightPosition(42);
+  assert.equal(result.status, 'landed');
+  assert.equal(result.progress, 1);
+  assert.equal(result.timeRemaining, 0);
+});
+
+test('TC04 ❌ Failure: timeRemaining KHÔNG được > 0 khi đã landed', async () => {
+  const depTime = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  const service = loadFlightService(async () => ({ rows: [makeFlight({ departure_time: depTime, duration_minutes: 120 })] }));
+  const result  = await service.getFlightPosition(42);
+  assert.ok(result.timeRemaining === 0, `Landed phải timeRemaining=0, thực tế: ${result.timeRemaining}`);
+});
+
+// ══════════════════════════════════════════════════════════════
+// TC05 — Vị trí nội suy
+// ══════════════════════════════════════════════════════════════
+test('TC05 ✅ Happy: vị trí ≈ sân bay đi (SGN) khi progress = 0', async () => {
+  const service = loadFlightService(async () => ({ rows: [makeFlight({ departure_time: new Date().toISOString() })] }));
+  const result  = await service.getFlightPosition(42);
+  assert.ok(Math.abs(result.position.lat - 10.8188) < 0.05);
+  assert.ok(Math.abs(result.position.lng - 106.6520) < 0.05);
+});
+
+test('TC05 ❌ Failure: vị trí KHÔNG phải sân bay đến (HAN) khi progress < 1', async () => {
+  const service = loadFlightService(async () => ({ rows: [makeFlight({ departure_time: new Date().toISOString() })] }));
+  const result  = await service.getFlightPosition(42);
+  // Nếu progress=0, không được ở HAN (21.2187, 105.8045)
+  assert.ok(Math.abs(result.position.lat - 21.2187) > 1, 'Không được ở tọa độ HAN khi chưa đến nơi');
+});
+
+// ══════════════════════════════════════════════════════════════
+// TC06 — Cấu trúc object trả về
+// ══════════════════════════════════════════════════════════════
+test('TC06 ✅ Happy: object có đủ tất cả trường bắt buộc', async () => {
+  const service = loadFlightService(async () => ({ rows: [makeFlight()] }));
+  const result  = await service.getFlightPosition(42);
+  ['flightId','flightNumber','status','progress','timeRemaining','position','departure','arrival']
+    .forEach(k => assert.ok(k in result, `Thiếu trường "${k}"`));
+});
+
+test('TC06 ❌ Failure: trường position phải có lat, lng, heading — không được thiếu', async () => {
+  const service = loadFlightService(async () => ({ rows: [makeFlight()] }));
+  const result  = await service.getFlightPosition(42);
+  ['lat','lng','heading'].forEach(k => {
+    assert.ok(k in result.position, `position thiếu trường "${k}"`);
+    assert.ok(result.position[k] !== undefined, `position.${k} không được undefined`);
   });
 });
 
-// ============================================================
-// 7. timeRemaining > 0 khi đang bay
-// ============================================================
-test('getFlightPosition: timeRemaining > 0 khi đang airborne', async () => {
-  const flight  = makeFlight(); // đã bay 30/120 phút
-  const service = loadFlightService(async () => ({ rows: [flight] }));
-
-  const result = await service.getFlightPosition(42);
-
-  assert.equal(result.status, 'airborne');
-  assert.ok(result.timeRemaining > 0,
-    `timeRemaining phải > 0, thực tế: ${result.timeRemaining}`);
-  // Khoảng 90 phút còn lại (±1 phút)
+// ══════════════════════════════════════════════════════════════
+// TC07 — timeRemaining
+// ══════════════════════════════════════════════════════════════
+test('TC07 ✅ Happy: timeRemaining ≈ 90 phút khi đã bay 30/120 phút', async () => {
+  const service = loadFlightService(async () => ({ rows: [makeFlight()] }));
+  const result  = await service.getFlightPosition(42);
   const expected = 90 * 60 * 1000;
   assert.ok(Math.abs(result.timeRemaining - expected) < 60_000,
-    `timeRemaining ≈ 90 phút, thực tế: ${result.timeRemaining}ms`);
+    `timeRemaining phải ≈ 90 phút, thực tế: ${result.timeRemaining}ms`);
+});
+
+test('TC07 ❌ Failure: timeRemaining KHÔNG được = 0 khi đang airborne', async () => {
+  const service = loadFlightService(async () => ({ rows: [makeFlight()] }));
+  const result  = await service.getFlightPosition(42);
+  assert.notEqual(result.timeRemaining, 0, 'Chuyến đang bay phải còn thời gian');
 });

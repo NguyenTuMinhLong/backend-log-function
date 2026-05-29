@@ -269,10 +269,27 @@ const buildBaggageOptions = (extraBaggagePrice) => {
   ];
 };
 
+// Demand multiplier: more seats sold → higher price (simulates real-time airline pricing)
+const getDemandMult = (availableSeats, totalSeats) => {
+  const avail = parseInt(availableSeats) || 0;
+  const total = parseInt(totalSeats) || 1;
+  const occupancy = Math.max(0, Math.min(1, (total - avail) / total));
+  if (occupancy >= 0.90) return 1.40;
+  if (occupancy >= 0.75) return 1.25;
+  if (occupancy >= 0.60) return 1.15;
+  if (occupancy >= 0.40) return 1.05;
+  if (occupancy >= 0.20) return 1.00;
+  return 0.95;
+};
+
+const applyDemand = (basePrice, availableSeats, totalSeats) =>
+  Math.round(basePrice * getDemandMult(availableSeats, totalSeats) / 1000) * 1000;
+
 const formatFlights = (rows, adults, children, infants) =>
   rows.map((r) => {
-    const base       = parseFloat(r.base_price) || 0;
-    const extraPrice = parseFloat(r.extra_baggage_price) || 0;
+    const base        = parseFloat(r.base_price) || 0;
+    const extraPrice  = parseFloat(r.extra_baggage_price) || 0;
+    const price       = applyDemand(base, r.available_seats, r.total_seats);
 
     return {
       flight_id:     r.flight_id,
@@ -296,17 +313,17 @@ const formatFlights = (rows, adults, children, infants) =>
         class:                 r.seat_class,
         available_seats:       r.available_seats,
         total_seats:           r.total_seats,
-        base_price:            base,
+        base_price:            price,
         baggage_included_kg:   r.baggage_included_kg,
         carry_on_kg:           r.carry_on_kg,
         extra_baggage_price:   extraPrice,
         extra_baggage_options: buildBaggageOptions(extraPrice),
         price_breakdown: {
-          adult_price:  base,
-          child_price:  Math.round(base * 0.75),
-          infant_price: Math.round(base * 0.10),
+          adult_price:  price,
+          child_price:  Math.round(price * 0.75),
+          infant_price: Math.round(price * 0.10),
         },
-        total_price: calcTotalPrice(base, adults, children, infants),
+        total_price: calcTotalPrice(price, adults, children, infants),
       },
     };
   });

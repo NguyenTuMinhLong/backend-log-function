@@ -1138,6 +1138,9 @@ const autoGenerateFlights = async () => {
         // Xây dựng timestamp cho giờ khởi hành và đến nơi
         const depTimestamp = `${dateStr} ${sched.departure_time}`;
 
+        // Bỏ qua nếu giờ khởi hành < 2 tiếng kể từ bây giờ (tránh tạo chuyến sắp hoặc đã qua)
+        if (new Date(depTimestamp) <= new Date(Date.now() + 2 * 60 * 60 * 1000)) { skipped++; continue; }
+
         // Xử lý trường hợp bay qua nửa đêm
         let arrDateStr = dateStr;
         if (sched.arrival_time < sched.departure_time) {
