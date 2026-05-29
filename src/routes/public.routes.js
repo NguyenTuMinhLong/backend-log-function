@@ -8,17 +8,16 @@ const pool = require("../config/db");
 
 router.get("/airports", flightController.getAirports);
 router.get("/airlines", flightController.getAirlines);
-// Kiểm tra email/phone có thuộc tài khoản đã đăng ký của người khác không
+// Guest: kiểm tra email/phone có thuộc tài khoản nào không (guest không được dùng email/phone đã đăng ký)
 router.post("/check-contact", async (req, res) => {
-  const { email, phone, userId } = req.body;
-  const uid = parseInt(userId) || 0;
+  const { email, phone } = req.body;
   const result = { email_taken: false, phone_taken: false };
   if (email) {
-    const r = await pool.query(`SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND id != $2`, [email, uid]);
+    const r = await pool.query(`SELECT id FROM users WHERE LOWER(email) = LOWER($1)`, [email]);
     result.email_taken = r.rows.length > 0;
   }
   if (phone) {
-    const r = await pool.query(`SELECT id FROM users WHERE phone = $1 AND id != $2`, [phone.replace(/\s/g,''), uid]);
+    const r = await pool.query(`SELECT id FROM users WHERE phone = $1`, [phone.replace(/\s/g,'')]);
     result.phone_taken = r.rows.length > 0;
   }
   res.json(result);
