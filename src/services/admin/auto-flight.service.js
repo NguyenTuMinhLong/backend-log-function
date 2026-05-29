@@ -112,7 +112,7 @@ const saveConfig = async ({ is_enabled, start_date, end_date, flights_per_route,
 const getAutoRoutes = async () => {
   const { rows } = await pool.query(`
     WITH airline_hubs AS (
-      -- Sân bay mà mỗi hãng đã từng bay (điểm đi hoặc điểm đến)
+      -- Sân bay mà mỗi hãng đã từng bay
       SELECT DISTINCT airline_id, departure_airport_id AS airport_id
       FROM flights WHERE status != 'cancelled'
       UNION
@@ -121,9 +121,10 @@ const getAutoRoutes = async () => {
     ),
     ranked AS (
       SELECT
-        al.id    AS airline_id,
-        al.code  AS airline_code,
-        al.name  AS airline_name,
+        al.id      AS airline_id,
+        al.code    AS airline_code,
+        al.name    AS airline_name,
+        al.country AS airline_country,
         al.price_tier,
         dep.id   AS dep_id,
         dep.code AS dep_code,
@@ -145,6 +146,13 @@ const getAutoRoutes = async () => {
         AND arr.is_active = TRUE
         AND arr.lat IS NOT NULL AND arr.lng IS NOT NULL
         AND dep.lat IS NOT NULL AND dep.lng IS NOT NULL
+        -- Nếu hãng có country: ít nhất 1 đầu phải là sân bay cùng nước
+        -- Nếu hãng chưa có country: không lọc (giữ behaviour cũ)
+        AND (
+          al.country IS NULL
+          OR dep.country = al.country
+          OR arr.country = al.country
+        )
     )
     SELECT airline_id, airline_code, airline_name, price_tier,
            dep_id, dep_code, dep_lat, dep_lng,
