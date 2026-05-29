@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 
-const servicePath = path.resolve(__dirname, "../../src/services/admin.flight.service.js");
+const servicePath = path.resolve(__dirname, "../../src/services/admin/flight.service.js");
 const dbPath = path.resolve(__dirname, "../../src/config/db.js");
 
 function loadAdminFlightService(poolMock) {

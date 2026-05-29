@@ -40,10 +40,12 @@ const recommendFlights = async ({ userId, fromAirport, toAirport, limit = 15 }) 
     WHERE f.status = 'scheduled'
       AND f.is_active = true
       AND f.departure_time > NOW()
+      AND dep.code = $2
+      AND arr.code = $3
     ORDER BY f.departure_time ASC
     LIMIT $1`;
 
-  const { rows } = await pool.query(query, [limit]);
+  const { rows } = await pool.query(query, [limit, fromAirport, toAirport]);
   return formatFlights(rows, 1, 0, 0);
 };
 
