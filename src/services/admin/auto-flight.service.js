@@ -111,24 +111,26 @@ const saveConfig = async ({ is_enabled, start_date, end_date, flights_per_route,
 
 const getAutoRoutes = async () => {
   const { rows } = await pool.query(`
-    SELECT DISTINCT
-      f.airline_id,
+    SELECT
+      al.id    AS airline_id,
       al.code  AS airline_code,
       al.name  AS airline_name,
       al.price_tier,
-      f.departure_airport_id  AS dep_id,
+      dep.id   AS dep_id,
       dep.code AS dep_code,
       dep.lat  AS dep_lat,
       dep.lng  AS dep_lng,
-      f.arrival_airport_id    AS arr_id,
+      arr.id   AS arr_id,
       arr.code AS arr_code,
       arr.lat  AS arr_lat,
       arr.lng  AS arr_lng
-    FROM flights f
-    JOIN airlines al  ON al.id  = f.airline_id
-    JOIN airports dep ON dep.id = f.departure_airport_id
-    JOIN airports arr ON arr.id = f.arrival_airport_id
-    WHERE f.status NOT IN ('cancelled')
+    FROM airlines al
+    CROSS JOIN airports dep
+    CROSS JOIN airports arr
+    WHERE dep.id  != arr.id
+      AND al.is_active  = TRUE
+      AND dep.is_active = TRUE
+      AND arr.is_active = TRUE
       AND dep.lat IS NOT NULL AND dep.lng IS NOT NULL
       AND arr.lat IS NOT NULL AND arr.lng IS NOT NULL
     ORDER BY al.code, dep.code, arr.code
