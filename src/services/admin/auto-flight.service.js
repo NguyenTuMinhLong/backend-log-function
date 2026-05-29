@@ -153,9 +153,10 @@ const getStatus = async () => {
 
 // ─── Batch runner ─────────────────────────────────────────────────────────────
 
-const runBatch = async (batchSize = 20, force = false) => {
+const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
   const config = await getConfig();
   if (!config || (!config.is_enabled && !force)) return { created: 0, skipped: 0, reason: 'disabled' };
+  const limit = unlimited ? Infinity : batchSize;
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -185,7 +186,7 @@ const runBatch = async (batchSize = 20, force = false) => {
     // Iterate dates from max(today, configStart) to targetEnd
     const loopStart = new Date(Math.max(today.getTime(), configStart.getTime()));
 
-    for (let d = new Date(loopStart); d <= targetEnd && created < batchSize; d.setDate(d.getDate() + 1)) {
+    for (let d = new Date(loopStart); d <= targetEnd && created < limit; d.setDate(d.getDate() + 1)) {
       const dateStr = d.toISOString().split('T')[0];
 
       // Fetch used flight numbers for this date (all airlines, to detect conflicts per airline)
@@ -211,7 +212,7 @@ const runBatch = async (batchSize = 20, force = false) => {
         const usedNums = usedByAirline[airlineId] || new Set();
         const airlineCode = aRoutes[0].airline_code;
 
-        for (let ri = 0; ri < aRoutes.length && created < batchSize; ri++) {
+        for (let ri = 0; ri < aRoutes.length && created < limit; ri++) {
           const route = aRoutes[ri];
           const km  = haversineKm(
             Number(route.dep_lat), Number(route.dep_lng),
@@ -220,7 +221,7 @@ const runBatch = async (batchSize = 20, force = false) => {
           const durationMins = estimateMins(km);
           const tierMult     = Number(route.price_tier) || 1.0;
 
-          for (let si = 0; si < timeSlots.length && created < batchSize; si++) {
+          for (let si = 0; si < timeSlots.length && created < limit; si++) {
             const depTime = `${dateStr}T${timeSlots[si]}:00`;
 
             // Bỏ qua nếu giờ khởi hành < 2 tiếng kể từ bây giờ (tránh tạo chuyến sắp hoặc đã qua)

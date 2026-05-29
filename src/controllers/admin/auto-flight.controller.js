@@ -34,7 +34,7 @@ const saveConfig = async (req, res) => {
 
 const runNow = async (req, res) => {
   try {
-    const result = await svc.runBatch(req.body?.batch_size || 50, true); // force=true: bỏ qua is_enabled
+    const result = await svc.runBatch(req.body?.batch_size || 50, true);
     res.json({ message: `Đã tạo ${result.created} chuyến, bỏ qua ${result.skipped}`, ...result });
   } catch (err) {
     console.error('[AutoFlight] runNow:', err.message);
@@ -42,4 +42,14 @@ const runNow = async (req, res) => {
   }
 };
 
-module.exports = { getStatus, getConfig, saveConfig, runNow };
+const runAll = async (req, res) => {
+  try {
+    const result = await svc.runBatch(0, true, true); // unlimited=true
+    res.json({ message: `Đã tạo toàn bộ ${result.created} chuyến, bỏ qua ${result.skipped}`, ...result });
+  } catch (err) {
+    console.error('[AutoFlight] runAll:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+module.exports = { getStatus, getConfig, saveConfig, runNow, runAll };
