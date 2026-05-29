@@ -134,6 +134,7 @@ const getAutoRoutes = async () => {
       AND dep.lat IS NOT NULL AND dep.lng IS NOT NULL
       AND arr.lat IS NOT NULL AND arr.lng IS NOT NULL
     ORDER BY al.code, dep.code, arr.code
+    LIMIT 999
   `);
   return rows;
 };
