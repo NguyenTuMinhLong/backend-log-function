@@ -202,8 +202,7 @@ const recommendFlights = async ({ userId, sessionId, fromAirport, toAirport, lim
     WHERE f.status          = 'scheduled'
       AND f.is_active       = TRUE
       AND fs.available_seats > 0
-      AND f.departure_time BETWEEN NOW() - INTERVAL '3 hours'
-                                AND NOW() + INTERVAL '10 days'
+      AND f.departure_time > NOW() AND f.departure_time < NOW() + INTERVAL '60 days'
       ${fromAirport ? `AND dep.code = '${fromAirport}'` : ''}
       ${toAirport   ? `AND arr.code = '${toAirport}'`   : ''}
 
@@ -407,6 +406,7 @@ const queryFlights = async ({
   conditions.push(`fs.available_seats >= $${idx++}`);    values.push(seatsNeeded);
   conditions.push(`f.status = 'scheduled'`);
   conditions.push(`f.is_active = TRUE`);
+  conditions.push(`f.departure_time > NOW()`);
 
   if (min_price !== undefined && min_price !== "") { conditions.push(`fs.base_price >= $${idx++}`); values.push(parseFloat(min_price)); }
   if (max_price !== undefined && max_price !== "") { conditions.push(`fs.base_price <= $${idx++}`); values.push(parseFloat(max_price)); }
