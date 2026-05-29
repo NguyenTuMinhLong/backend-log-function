@@ -121,6 +121,25 @@ const createBooking = async (data, userId = null) => {
   try {
     await client.query("BEGIN");
 
+    // Kiểm tra email/phone liên hệ không trùng với tài khoản đã đăng ký của người khác
+    const emailCheck = await client.query(
+      `SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND id != $2`,
+      [contact_email, userId || 0]
+    );
+    if (emailCheck.rows.length > 0) {
+      throw new Error('Email liên hệ này đã được đăng ký bởi tài khoản khác. Vui lòng dùng email của bạn hoặc email khác.');
+    }
+
+    if (contact_phone) {
+      const phoneCheck = await client.query(
+        `SELECT id FROM users WHERE phone = $1 AND id != $2`,
+        [contact_phone.replace(/\s/g, ''), userId || 0]
+      );
+      if (phoneCheck.rows.length > 0) {
+        throw new Error('Số điện thoại này đã được đăng ký bởi tài khoản khác. Vui lòng dùng số điện thoại của bạn hoặc số khác.');
+      }
+    }
+
     const outboundSeat = await checkAndGetSeatInfo(client, outbound_flight_id, outbound_seat_class, seatsNeeded);
 
     let returnSeat = null;
