@@ -153,8 +153,9 @@ const createBooking = async (data, userId = null) => {
       baggageTotal += p._baggage_price;
     }
 
-    const totalPrice = outboundTotal + returnTotal + baggageTotal;
-    const basePrice  = outboundPrice;
+    const seatExtraFee = parseFloat(data.seat_extra_fee) || 0;
+    const totalPrice   = outboundTotal + returnTotal + baggageTotal + seatExtraFee;
+    const basePrice    = outboundPrice;
 
     let bookingCode;
     let isUnique = false;
