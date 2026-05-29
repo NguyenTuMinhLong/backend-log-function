@@ -573,12 +573,12 @@ const autoCompleteFlights = async () => {
     await client.query("BEGIN");
 
     // 1. Chuyển tất cả chuyến bay đã khởi hành sang "completed"
-    //    Buffer 3 tiếng — khớp với cấp 3 ở search query
     const completedResult = await client.query(`
       UPDATE flights
       SET    status     = 'completed',
              updated_at = NOW()
-      WHERE  departure_time < NOW() - INTERVAL '3 hours'
+      WHERE  departure_time < NOW()
+        AND  (departure_time + (duration_minutes * 0.3 * INTERVAL '1 minute')) < NOW()
         AND  status NOT IN ('cancelled', 'completed')
       RETURNING id, flight_number
     `);
