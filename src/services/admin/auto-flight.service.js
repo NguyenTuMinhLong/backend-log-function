@@ -150,8 +150,8 @@ const getAutoRoutes = async () => {
         -- Nếu hãng chưa có country: không lọc (giữ behaviour cũ)
         AND (
           al.country IS NULL
-          OR dep.country = al.country
-          OR arr.country = al.country
+          OR LOWER(dep.country) = LOWER(al.country)
+          OR LOWER(arr.country) = LOWER(al.country)
         )
     )
     SELECT airline_id, airline_code, airline_name, price_tier,

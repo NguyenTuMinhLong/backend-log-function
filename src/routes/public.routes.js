@@ -4,9 +4,16 @@ const router = express.Router();
 const flightController = require("../controllers/flight.controller");
 const couponController = require("../controllers/coupon.controller");
 const { sendContactEmail } = require("../utils/mailer");
+const pool = require("../config/db");
 
 router.get("/airports", flightController.getAirports);
 router.get("/airlines", flightController.getAirlines);
+router.get("/airport-countries", async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT country FROM airports WHERE country IS NOT NULL ORDER BY country`
+  );
+  res.json({ data: rows.map(r => r.country) });
+});
 router.get("/coupons", couponController.getCoupons);
 router.get("/coupons/available", couponController.getAvailableCoupons);
 
