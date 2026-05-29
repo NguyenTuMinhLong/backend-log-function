@@ -553,9 +553,7 @@ exports.triggerAnnualReset = async () => {
 const syncTierAfterChange = async (userId, direction = 'both') => {
 
   const result = await db.query(`
-    SELECT
-      ul.tier_points,
-      lt.name AS current_tier
+    SELECT ul.tier_points, ul.tier_id, lt.min_points AS current_min
     FROM user_loyalty ul
     JOIN loyalty_tiers lt ON ul.tier_id = lt.id
     WHERE ul.user_id = $1
@@ -563,26 +561,29 @@ const syncTierAfterChange = async (userId, direction = 'both') => {
 
   if (result.rows.length === 0) return;
 
-  const { tier_points, current_tier } = result.rows[0];
-  const correctTier = resolveTier(parseInt(tier_points));
+  const { tier_points, tier_id: currentTierId, current_min } = result.rows[0];
 
-  // Không cần thay đổi gì
-  if (correctTier.name === current_tier) return;
+  // Tìm tier đúng theo min_points trong DB — không phụ thuộc vào tên
+  const tierResult = await db.query(`
+    SELECT id, name, min_points
+    FROM loyalty_tiers
+    WHERE min_points <= $1
+    ORDER BY min_points DESC
+    LIMIT 1
+  `, [parseInt(tier_points)]);
 
-  const currentIdx = TIERS.findIndex(t => t.name === current_tier);
-  const correctIdx = TIERS.findIndex(t => t.name === correctTier.name);
-  const isUpgrade = correctIdx > currentIdx;
+  if (tierResult.rows.length === 0) return;
+
+  const correctTier = tierResult.rows[0];
+
+  // Không cần thay đổi
+  if (correctTier.id === currentTierId) return;
+
+  const isUpgrade = correctTier.min_points > current_min;
 
   // Bỏ qua nếu không đúng chiều
   if (direction === 'upgrade' && !isUpgrade) return;
   if (direction === 'downgrade' && isUpgrade) return;
-
-  // Lấy id tier mới
-  const tierResult = await db.query(
-    queries.GET_LOYALTY_TIER_BY_NAME, [correctTier.name]
-  );
-
-  if (tierResult.rows.length === 0) return;
 
   await db.query(`
     UPDATE user_loyalty
@@ -599,12 +600,12 @@ const syncTierAfterChange = async (userId, direction = 'both') => {
       VALUES ($1, 'tier_downgrade', $2, NOW())
     `, [
       userId,
-      `Hạng thành viên của bạn đã thay đổi từ ${current_tier} xuống ${correctTier.name}.`,
+      `Hạng thành viên của bạn đã thay đổi xuống ${correctTier.name}.`,
     ]);
 
-    console.log(`[Loyalty] User ${userId} tụt tier: ${current_tier} → ${correctTier.name}`);
+    console.log(`[Loyalty] User ${userId} tụt tier → ${correctTier.name}`);
   } else {
-    console.log(`[Loyalty] User ${userId} lên tier: ${current_tier} → ${correctTier.name}`);
+    console.log(`[Loyalty] User ${userId} lên tier → ${correctTier.name}`);
   }
 };
 
