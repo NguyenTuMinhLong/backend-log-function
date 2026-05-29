@@ -101,14 +101,9 @@ const generateGate = (flightNumber, departureAirport, arrivalAirport) => {
 
   const pick = (max) => (h % max) + 1;
 
-  // ── Sân bay Việt Nam ──────────────────────────────────────
-  if (dep === 'SGN') {
-    if (isIntl) {
-      return ['D','E'][h % 2] + pick(['D','E'][h % 2] === 'D' ? 12 : 8);
-    }
-    return ['A','B'][h % 2] + pick(['A','B'][h % 2] === 'A' ? 16 : 12);
-  }
-  if (dep === 'HAN') return isIntl ? String(pick(30)) : `G${pick(20)}`;
+  // ── Sân bay Việt Nam (gate chỉ là số) ────────────────────
+  if (dep === 'SGN') return isIntl ? String(pick(17)) : String(pick(20));
+  if (dep === 'HAN') return isIntl ? String(pick(30)) : String(pick(20));
   if (dep === 'DAD') return String(pick(10));
   if (dep === 'CXR') return String(pick(8));
   if (dep === 'PQC') return String(pick(8));
