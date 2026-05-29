@@ -45,8 +45,8 @@ const SELECT_REFUND_BY_CODE = `
     p.amount AS payment_amount,
     p.final_amount AS payment_final_amount,
     p.discount_amount AS payment_discount,
-    u.email AS user_email,
-    u.full_name AS user_name,
+    COALESCE(u.email, b.contact_email) AS user_email,
+    COALESCE(u.full_name, b.contact_name) AS user_name,
     admin.full_name AS admin_name
   FROM refunds r
   JOIN bookings b ON r.booking_id = b.id
@@ -65,8 +65,8 @@ const SELECT_REFUND_BY_ID = `
     p.amount AS payment_amount,
     p.final_amount AS payment_final_amount,
     p.discount_amount AS payment_discount,
-    u.email AS user_email,
-    u.full_name AS user_name,
+    COALESCE(u.email, b.contact_email) AS user_email,
+    COALESCE(u.full_name, b.contact_name) AS user_name,
     admin.full_name AS admin_name
   FROM refunds r
   JOIN bookings b ON r.booking_id = b.id
@@ -126,9 +126,9 @@ const SELECT_PENDING_REFUNDS = `
     r.created_at,
     b.booking_code,
     b.total_price AS booking_total_price,
-    b.contact_name,
-    b.contact_email,
-    u.full_name AS user_name,
+    COALESCE(u.full_name, b.contact_name) AS contact_name,
+    COALESCE(u.email, b.contact_email) AS contact_email,
+    COALESCE(u.full_name, b.contact_name) AS user_name,
     f.flight_number AS outbound_flight_number,
     dep.code AS departure_code,
     arr.code AS arrival_code,
@@ -163,9 +163,9 @@ const SELECT_REFUNDS_ADMIN = (whereClause, idx, idx2) => `
     r.completed_at,
     b.booking_code,
     b.total_price AS booking_total_price,
-    b.contact_name,
-    b.contact_email,
-    u.full_name AS user_name,
+    COALESCE(u.full_name, b.contact_name) AS contact_name,
+    COALESCE(u.email, b.contact_email) AS contact_email,
+    COALESCE(u.full_name, b.contact_name) AS user_name,
     f.flight_number AS outbound_flight_number,
     dep.code AS departure_code,
     arr.code AS arrival_code,
