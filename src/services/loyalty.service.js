@@ -129,6 +129,14 @@ exports.getMembershipInfo = async (userId, lang = 'vi') => {
   const data = result.rows[0];
   const tierPoints = parseInt(data.tier_points);
 
+  // Auto-sync tier mỗi lần load để tránh tier bị kẹt (không gây lỗi nếu fail)
+  try { await syncTierAfterChange(userId, 'both'); } catch (_) {}
+
+  // Re-fetch sau sync để lấy tier mới nhất
+  const freshResult = await db.query(queries.GET_USER_LOYALTY, [userId]);
+  const freshData = freshResult.rows[0] || data;
+  Object.assign(data, freshData);
+
   const { next_tier, progress } = calcNextTierAndProgress(
     data.tier_name, tierPoints
   );
