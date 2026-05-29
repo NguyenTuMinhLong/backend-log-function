@@ -264,7 +264,7 @@ const checkinPassenger = async (bookingCode, passengerId, flightType) => {
     const boardingPassCode = generateBoardingPassCode(booking.booking_code, seq);
 
     // Gate theo sân bay
-    const gate = booking.gate || generateGate(flightNumber, flightRow.departure_airport, flightRow.departure_country);
+    const gate = generateGate(flightNumber, flightRow.departure_airport, flightRow.departure_country);
 
     // Boarding time theo thực tế
     let boardingTime = null;
@@ -405,7 +405,7 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
       const boardingPassCode = generateBoardingPassCode(booking.booking_code, seq);
 
       // Gate theo sân bay
-      const gate = booking.gate || generateGate(flightNumber, flightRow.departure_airport, flightRow.departure_country);
+      const gate = generateGate(flightNumber, flightRow.departure_airport, flightRow.departure_country);
 
       // Boarding time theo thực tế
       let boardingTime = null;
@@ -544,6 +544,11 @@ const getCheckinStatus = async (bookingCode) => {
   
   // Get flight info with airport + airline details
   let flightInfo = null;
+  const checkinInfoResult = await pool.query(
+    SQ.SELECT_CHECKIN_GATE_INFO,
+    [booking.id, 'outbound']
+  );
+
   if (booking.outbound_flight_id) {
     const flightResult = await pool.query(`
       SELECT f.id, f.flight_number, f.departure_time, f.arrival_time, f.status,
@@ -585,20 +590,9 @@ const getCheckinStatus = async (bookingCode) => {
       checked_in: p.checked_in,
       checked_in_at: p.checked_in_at
     })),
-    gate: booking.gate,
-    boarding_time: booking.boarding_time
+    gate: checkinInfoResult.rows[0]?.gate || null,
+    boarding_time: checkinInfoResult.rows[0]?.boarding_time || null
   };
-};
-
-/**
- * Update gate for booking
- */
-const updateGate = async (bookingId, gate) => {
-  const pool = db;
-  
-  await pool.query(SQ.UPDATE_BOOKING_GATE, [gate, bookingId]);
-  
-  return { success: true, gate };
 };
 
 module.exports = {
@@ -615,8 +609,7 @@ module.exports = {
   generateBoardingPassCode,
   formatDate,
   formatTime,
-  updateGate,
-  
+
   // Config
   CHECKIN_CONFIG,
 };
