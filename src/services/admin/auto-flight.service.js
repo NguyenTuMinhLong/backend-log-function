@@ -5,8 +5,10 @@ const QF   = require('../../queries/flight.queries');
 
 // ─── Price helpers (mirrors frontend calcPrices) ─────────────────────────────
 
-const BASE_ECO_PER_MIN = 5000;
+// Base price per minute — tuned to match real Vietnamese airline pricing
+const BASE_ECO_PER_MIN = 15000;
 
+// Peak-hour multiplier (baked into base_price at creation)
 const getTimeMult = (hour) => {
   const h = Number(hour);
   if (h >= 5  && h <= 7)  return 1.10;
@@ -17,34 +19,11 @@ const getTimeMult = (hour) => {
   return 0.85;
 };
 
-// Friday/Saturday/Sunday cost more; Mon–Thu is baseline
-const getDayOfWeekMult = (dateStr) => {
-  const day = new Date(`${dateStr}T12:00:00`).getDay(); // 0=Sun 5=Fri 6=Sat
-  if (day === 0) return 1.18;
-  if (day === 5) return 1.12;
-  if (day === 6) return 1.08;
-  return 1.00;
-};
-
-// Last-minute flights cost more; booking far in advance is cheaper
-const getAdvanceMult = (dateStr) => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const diffDays = Math.round((new Date(`${dateStr}T00:00:00`) - today) / 86400000);
-  if (diffDays <= 3)  return 1.30;
-  if (diffDays <= 7)  return 1.18;
-  if (diffDays <= 14) return 1.08;
-  if (diffDays <= 21) return 1.03;
-  if (diffDays <= 30) return 1.00;
-  if (diffDays <= 45) return 0.95;
-  return 0.90;
-};
-
-const calcPrices = (durationMins, tierMult, depHour, dateStr) => {
+// Day-of-week + advance mults are applied at search time (flight.service.js),
+// so base_price only reflects route distance + tier + departure hour.
+const calcPrices = (durationMins, tierMult, depHour) => {
   const timeMult = getTimeMult(depHour);
-  const dayMult  = getDayOfWeekMult(dateStr);
-  const advMult  = getAdvanceMult(dateStr);
-  const eco = Math.round(durationMins * BASE_ECO_PER_MIN * tierMult * timeMult * dayMult * advMult / 10000) * 10000;
+  const eco = Math.round(durationMins * BASE_ECO_PER_MIN * tierMult * timeMult / 10000) * 10000;
   return {
     economy:  eco,
     business: Math.round(eco * 2.8 / 10000) * 10000,
@@ -266,7 +245,7 @@ const runBatch = async (batchSize = 20) => {
             if (!flightNum) { skipped++; continue; } // No numbers available
 
             const depHour  = parseInt(timeSlots[si].slice(0, 2), 10);
-            const prices   = calcPrices(durationMins, tierMult, depHour, dateStr);
+            const prices   = calcPrices(durationMins, tierMult, depHour);
             const arrTime  = addMins(dateStr, timeSlots[si], durationMins);
 
             try {

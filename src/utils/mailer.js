@@ -223,7 +223,7 @@ const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAm
     const { data, error } = await resend.emails.send({
       from: process.env.EMAIL_FROM,
       to,
-      subject: `✈ Xác nhận đặt vé thành công — Mã booking: ${bookingCode}`,
+      subject: `Xác nhận đặt vé thành công — Mã booking: ${bookingCode}`,
       html,
     });
 
@@ -332,9 +332,7 @@ const sendPaymentInitiatedEmail = async (to, { contactName, paymentCode, payment
         <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.06);">
           <!-- Header -->
           <div style="background:#f9fafb;padding:24px;text-align:center;border-bottom:1px solid #e5e7eb;">
-            <img src="https://iili.io/qvDF3Kl.png" width="64" style="margin-bottom:8px;" />
-            <h2 style="color:#1a56db;font-size:20px;margin:0;">Vivudee</h2>
-            <p style="color:#6b7280;font-size:13px;margin:4px 0 0;">Your Journey Starts Here</p>
+            <img src="https://iili.io/qvDF3Kl.png" width="180" style="display:block;margin:0 auto;" />
           </div>
 
           <!-- Body -->
@@ -665,7 +663,13 @@ const buildBoardingPassCard = (bp) => {
       <!-- Blue top bar -->
       <td colspan="3" style="background:linear-gradient(90deg,#1a56db,#2563eb);padding:10px 20px;">
         <table width="100%" cellpadding="0" cellspacing="0"><tr>
-          <td style="color:#bfdbfe;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">VIVUDEE AIR &nbsp;·&nbsp; ${bp.flight_number || ''}</td>
+          <td style="vertical-align:middle;">
+            ${bp.airline_logo
+              ? `<img src="${bp.airline_logo}" alt="${bp.airline || 'airline'}" style="height:24px;width:auto;max-width:90px;object-fit:contain;vertical-align:middle;filter:brightness(0) invert(1);" />`
+              : `<span style="color:#bfdbfe;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">${(bp.airline || 'VIVUDEE AIR').toUpperCase()}</span>`
+            }
+            <span style="color:rgba(255,255,255,0.7);font-size:11px;font-weight:600;margin-left:8px;">${bp.flight_number || ''}</span>
+          </td>
           <td align="right" style="color:#fff;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;">BOARDING PASS</td>
         </tr></table>
       </td>
@@ -690,6 +694,7 @@ const buildBoardingPassCard = (bp) => {
             <td valign="top" style="width:38%;text-align:right;">
               <div style="font-size:30px;font-weight:900;color:#1a56db;line-height:1;">${bp.arrival_airport || '---'}</div>
               <div style="font-size:11px;color:#6b7280;margin-top:2px;">${bp.arrival_city || ''}</div>
+              <div style="font-size:18px;font-weight:800;color:#111827;margin-top:6px;">${bp.arrival_time || '--:--'}</div>
             </td>
           </tr>
         </table>
