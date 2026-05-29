@@ -34,7 +34,7 @@ const saveConfig = async (req, res) => {
 
 const runNow = async (req, res) => {
   try {
-    const result = await svc.runBatch(req.body?.batch_size || 50);
+    const result = await svc.runBatch(req.body?.batch_size || 50, true); // force=true: bỏ qua is_enabled
     res.json({ message: `Đã tạo ${result.created} chuyến, bỏ qua ${result.skipped}`, ...result });
   } catch (err) {
     console.error('[AutoFlight] runNow:', err.message);

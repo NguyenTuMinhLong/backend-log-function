@@ -150,9 +150,9 @@ const getStatus = async () => {
 
 // ─── Batch runner ─────────────────────────────────────────────────────────────
 
-const runBatch = async (batchSize = 20) => {
+const runBatch = async (batchSize = 20, force = false) => {
   const config = await getConfig();
-  if (!config || !config.is_enabled) return { created: 0, skipped: 0, reason: 'disabled' };
+  if (!config || (!config.is_enabled && !force)) return { created: 0, skipped: 0, reason: 'disabled' };
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
