@@ -126,33 +126,41 @@ exports.getMembershipInfo = async (userId, lang = 'vi') => {
     result = await db.query(queries.GET_USER_LOYALTY, [userId]);
   }
 
-  const data = result.rows[0];
+  const data       = result.rows[0];
   const tierPoints = parseInt(data.tier_points);
 
-  // Auto-sync tier mỗi lần load để tránh tier bị kẹt (không gây lỗi nếu fail)
-  try { await syncTierAfterChange(userId, 'both'); } catch (_) {}
+  // Tính tier ĐÚNG theo điểm từ DB loyalty_tiers — không tin vào stored tier_id
+  const correctTierRow = await db.query(`
+    SELECT id, name, min_points, multiplier
+    FROM loyalty_tiers
+    WHERE min_points <= $1
+    ORDER BY min_points DESC
+    LIMIT 1
+  `, [tierPoints]);
 
-  // Re-fetch sau sync để lấy tier mới nhất
-  const freshResult = await db.query(queries.GET_USER_LOYALTY, [userId]);
-  const freshData = freshResult.rows[0] || data;
-  Object.assign(data, freshData);
+  const correctTier = correctTierRow.rows[0];
+  const correctTierName = correctTier?.name || data.tier_name;
 
-  const { next_tier, progress } = calcNextTierAndProgress(
-    data.tier_name, tierPoints
-  );
+  // Cập nhật DB nếu sai tier (background, không block response)
+  if (correctTier && correctTier.id !== data.tier_id) {
+    db.query(`UPDATE user_loyalty SET tier_id = $1, updated_at = NOW() WHERE user_id = $2`,
+      [correctTier.id, userId]).catch(() => {});
+  }
+
+  const { next_tier, progress } = calcNextTierAndProgress(correctTierName, tierPoints);
 
   return {
     membership_number: data.membership_number,
-    tier: data.tier_name,
-    lifetime_points: parseInt(data.lifetime_points),  // chỉ đọc, không tiêu được
-    tier_points: tierPoints,                       // xét tier
-    current_points: parseInt(data.current_points),   // tiêu được
-    multiplier: parseFloat(data.multiplier),
+    tier:              correctTierName,
+    lifetime_points:   parseInt(data.lifetime_points),
+    tier_points:       tierPoints,
+    current_points:    parseInt(data.current_points),
+    multiplier:        correctTier?.multiplier ?? parseFloat(data.multiplier),
     next_tier,
     progress,
-    benefits:       (TIER_BENEFITS[data.tier_name]?.[lang]) || data.benefits || [],
-    badge_url_light: data.badge_url_light || null,
-    badge_url_dark:  data.badge_url_dark  || null,
+    benefits:          (TIER_BENEFITS[correctTierName]?.[lang]) || data.benefits || [],
+    badge_url_light:   data.badge_url_light || null,
+    badge_url_dark:    data.badge_url_dark  || null,
   };
 };
 
