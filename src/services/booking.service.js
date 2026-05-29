@@ -154,6 +154,8 @@ const createBooking = async (data, userId = null) => {
     }
 
     const seatExtraFee = parseFloat(data.seat_extra_fee) || 0;
+    // total_price = vé + hành lý + seat fee (ancillary lưu riêng ở booking_ancillaries)
+    // grand_total trong query sẽ cộng ancillary_total vào để hiển thị đúng
     const totalPrice   = outboundTotal + returnTotal + baggageTotal + seatExtraFee;
     const basePrice    = outboundPrice;
 

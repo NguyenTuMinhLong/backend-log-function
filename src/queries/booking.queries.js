@@ -68,6 +68,10 @@ const SELECT_MY_BOOKINGS = (dk) =>
      b.total_children,
      b.total_infants,
      b.total_price,
+     b.total_price + COALESCE((
+       SELECT SUM(ba.total_price) FROM booking_ancillaries ba
+       WHERE ba.booking_id = b.id AND ba.status != 'cancelled'
+     ), 0) AS grand_total,
      b.created_at,
      f.id AS flight_id,
      f.flight_number,
