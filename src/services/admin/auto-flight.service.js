@@ -111,27 +111,47 @@ const saveConfig = async ({ is_enabled, start_date, end_date, flights_per_route,
 
 const getAutoRoutes = async () => {
   const { rows } = await pool.query(`
-    SELECT DISTINCT
-      f.airline_id,
-      al.code  AS airline_code,
-      al.name  AS airline_name,
-      al.price_tier,
-      f.departure_airport_id  AS dep_id,
-      dep.code AS dep_code,
-      dep.lat  AS dep_lat,
-      dep.lng  AS dep_lng,
-      f.arrival_airport_id    AS arr_id,
-      arr.code AS arr_code,
-      arr.lat  AS arr_lat,
-      arr.lng  AS arr_lng
-    FROM flights f
-    JOIN airlines al  ON al.id  = f.airline_id
-    JOIN airports dep ON dep.id = f.departure_airport_id
-    JOIN airports arr ON arr.id = f.arrival_airport_id
-    WHERE f.status NOT IN ('cancelled')
-      AND dep.lat IS NOT NULL AND dep.lng IS NOT NULL
-      AND arr.lat IS NOT NULL AND arr.lng IS NOT NULL
-    ORDER BY al.code, dep.code, arr.code
+    WITH airline_hubs AS (
+      -- Sân bay mà mỗi hãng đã từng bay (điểm đi hoặc điểm đến)
+      SELECT DISTINCT airline_id, departure_airport_id AS airport_id
+      FROM flights WHERE status != 'cancelled'
+      UNION
+      SELECT DISTINCT airline_id, arrival_airport_id
+      FROM flights WHERE status != 'cancelled'
+    ),
+    ranked AS (
+      SELECT
+        al.id    AS airline_id,
+        al.code  AS airline_code,
+        al.name  AS airline_name,
+        al.price_tier,
+        dep.id   AS dep_id,
+        dep.code AS dep_code,
+        dep.lat  AS dep_lat,
+        dep.lng  AS dep_lng,
+        arr.id   AS arr_id,
+        arr.code AS arr_code,
+        arr.lat  AS arr_lat,
+        arr.lng  AS arr_lng,
+        ROW_NUMBER() OVER (
+          PARTITION BY al.id
+          ORDER BY dep.code, arr.code
+        ) AS rn
+      FROM airline_hubs ah
+      JOIN airlines al  ON al.id  = ah.airline_id
+      JOIN airports dep ON dep.id = ah.airport_id
+      CROSS JOIN airports arr
+      WHERE dep.id != arr.id
+        AND arr.is_active = TRUE
+        AND arr.lat IS NOT NULL AND arr.lng IS NOT NULL
+        AND dep.lat IS NOT NULL AND dep.lng IS NOT NULL
+    )
+    SELECT airline_id, airline_code, airline_name, price_tier,
+           dep_id, dep_code, dep_lat, dep_lng,
+           arr_id, arr_code, arr_lat, arr_lng
+    FROM ranked
+    WHERE rn <= 20
+    ORDER BY airline_code, dep_code, arr_code
   `);
   return rows;
 };
