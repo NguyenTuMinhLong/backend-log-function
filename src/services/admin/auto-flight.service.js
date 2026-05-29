@@ -111,30 +111,39 @@ const saveConfig = async ({ is_enabled, start_date, end_date, flights_per_route,
 
 const getAutoRoutes = async () => {
   const { rows } = await pool.query(`
-    SELECT
-      al.id    AS airline_id,
-      al.code  AS airline_code,
-      al.name  AS airline_name,
-      al.price_tier,
-      dep.id   AS dep_id,
-      dep.code AS dep_code,
-      dep.lat  AS dep_lat,
-      dep.lng  AS dep_lng,
-      arr.id   AS arr_id,
-      arr.code AS arr_code,
-      arr.lat  AS arr_lat,
-      arr.lng  AS arr_lng
-    FROM airlines al
-    CROSS JOIN airports dep
-    CROSS JOIN airports arr
-    WHERE dep.id  != arr.id
-      AND al.is_active  = TRUE
-      AND dep.is_active = TRUE
-      AND arr.is_active = TRUE
-      AND dep.lat IS NOT NULL AND dep.lng IS NOT NULL
-      AND arr.lat IS NOT NULL AND arr.lng IS NOT NULL
-    ORDER BY al.code, dep.code, arr.code
-    LIMIT 999
+    SELECT airline_id, airline_code, airline_name, price_tier,
+           dep_id, dep_code, dep_lat, dep_lng,
+           arr_id, arr_code, arr_lat, arr_lng
+    FROM (
+      SELECT
+        al.id    AS airline_id,
+        al.code  AS airline_code,
+        al.name  AS airline_name,
+        al.price_tier,
+        dep.id   AS dep_id,
+        dep.code AS dep_code,
+        dep.lat  AS dep_lat,
+        dep.lng  AS dep_lng,
+        arr.id   AS arr_id,
+        arr.code AS arr_code,
+        arr.lat  AS arr_lat,
+        arr.lng  AS arr_lng,
+        ROW_NUMBER() OVER (
+          PARTITION BY al.id
+          ORDER BY dep.code, arr.code
+        ) AS rn
+      FROM airlines al
+      CROSS JOIN airports dep
+      CROSS JOIN airports arr
+      WHERE dep.id  != arr.id
+        AND al.is_active  = TRUE
+        AND dep.is_active = TRUE
+        AND arr.is_active = TRUE
+        AND dep.lat IS NOT NULL AND dep.lng IS NOT NULL
+        AND arr.lat IS NOT NULL AND arr.lng IS NOT NULL
+    ) sub
+    WHERE rn <= 20
+    ORDER BY airline_code, dep_code, arr_code
   `);
   return rows;
 };
