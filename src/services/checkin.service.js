@@ -245,7 +245,8 @@ const checkinPassenger = async (bookingCode, passengerId, flightType) => {
     // Get flight info
     const flightResult = await client.query(
       `SELECT f.flight_number, f.departure_time, f.arrival_time,
-              dep.code AS departure_airport, arr.code AS arrival_airport
+              dep.code AS departure_airport, dep.country AS departure_country,
+              arr.code AS arrival_airport
        FROM flights f
        JOIN airports dep ON dep.id = f.departure_airport_id
        JOIN airports arr ON arr.id = f.arrival_airport_id
@@ -263,7 +264,7 @@ const checkinPassenger = async (bookingCode, passengerId, flightType) => {
     const boardingPassCode = generateBoardingPassCode(booking.booking_code, seq);
 
     // Gate theo sân bay
-    const gate = booking.gate || generateGate(flightNumber, flightRow.departure_airport, flightRow.arrival_airport);
+    const gate = booking.gate || generateGate(flightNumber, flightRow.departure_airport, flightRow.departure_country);
 
     // Boarding time theo thực tế
     let boardingTime = null;
@@ -347,18 +348,32 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
       throw new Error('Chuyến bay đã bị hủy, không thể check-in');
     }
 
+    // Fetch flight info once (dùng flightId đã có từ bước validate ở trên)
+    const flightResult = await client.query(
+      `SELECT f.flight_number, f.departure_time, f.arrival_time,
+              dep.code AS departure_airport, dep.country AS departure_country,
+              arr.code AS arrival_airport
+       FROM flights f
+       JOIN airports dep ON dep.id = f.departure_airport_id
+       JOIN airports arr ON arr.id = f.arrival_airport_id
+       WHERE f.id = $1`,
+      [flightId]
+    );
+    const flightRow    = flightResult.rows[0] || {};
+    const flightNumber = flightRow.flight_number || 'N/A';
+
     // Get passengers (except infants)
     const passengersResult = await client.query(
       'SELECT * FROM passengers WHERE booking_id = $1 AND passenger_type != $2',
       [booking.id, 'infant']
     );
-    
+
     const results = [];
-    
+
     for (const passenger of passengersResult.rows) {
       // Determine seat field
       const seatField = flightType === 'return' ? 'return_seat_number' : 'seat_number';
-      
+
       // Skip if no seat
       if (!passenger[seatField]) {
         results.push({
@@ -369,7 +384,7 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
         });
         continue;
       }
-      
+
       // Skip if already checked in
       if (passenger.checked_in) {
         results.push({
@@ -380,27 +395,8 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
         });
         continue;
       }
-      
-      const seatNumber = passenger[seatField];
-      
-      // Get flight number
-      const flightId = flightType === 'return' 
-        ? booking.return_flight_id 
-        : booking.outbound_flight_id;
-      
-      const flightResult = await client.query(
-        `SELECT f.flight_number, f.departure_time, f.arrival_time,
-                dep.code AS departure_airport, dep.country AS departure_country,
-                arr.code AS arrival_airport
-         FROM flights f
-         JOIN airports dep ON dep.id = f.departure_airport_id
-         JOIN airports arr ON arr.id = f.arrival_airport_id
-         WHERE f.id = $1`,
-        [flightId]
-      );
 
-      const flightRow = flightResult.rows[0] || {};
-      const flightNumber = flightRow.flight_number || 'N/A';
+      const seatNumber = passenger[seatField];
 
       // Get sequence
       const seq = await getNextSequenceNumber(booking.id, flightType);
