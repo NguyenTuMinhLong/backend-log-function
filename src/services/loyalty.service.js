@@ -37,9 +37,9 @@ Cron annual reset  —           - 20%     —      → check downgrade
 // Sửa mốc điểm tại đây — đồng bộ với loyalty.cron.js
 // =========================================================
 const TIERS = [
-  { name: 'Member', min_points: 0, multiplier: 1.0 },
-  { name: 'Silver', min_points: 5000, multiplier: 1.25 },
-  { name: 'Gold', min_points: 20000, multiplier: 1.5 },
+  { name: 'Bronze',   min_points: 0,     multiplier: 1.0  },
+  { name: 'Silver',   min_points: 5000,  multiplier: 1.25 },
+  { name: 'Gold',     min_points: 20000, multiplier: 1.5  },
   { name: 'Platinum', min_points: 50000, multiplier: 1.75 },
 ];
 
@@ -113,7 +113,7 @@ exports.getMembershipInfo = async (userId, lang = 'vi') => {
     console.log(`[Loyalty] User ${userId} chưa có membership → tạo mới`);
 
     const tierResult = await db.query(
-      queries.GET_LOYALTY_TIER_BY_NAME, ['Member']
+      queries.GET_LOYALTY_TIER_BY_NAME, ['Bronze']
     );
 
     const tierId = tierResult.rows[0].id;
