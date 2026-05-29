@@ -492,9 +492,10 @@ const getBoardingPass = async (boardingPassCode) => {
   const qrCodeUrl = `/api/checkin/${boardingPassCode}/qr`;
   
   return {
-    airline:      data.airline_name || 'VIVUDEE AIR',
-    airline_code: data.airline_code || '',
-    airline_logo: data.airline_logo || null,
+    airline:           data.airline_name || 'VIVUDEE AIR',
+    airline_code:      data.airline_code || '',
+    airline_logo:      data.airline_logo      || null,
+    airline_logo_dark: data.airline_logo_dark || null,
     type: 'BOARDING PASS',
 
     passenger_name: data.full_name,

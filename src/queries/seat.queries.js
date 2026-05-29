@@ -137,7 +137,8 @@ const SELECT_CHECKIN_BY_CODE = `
     dep.code as departure_airport, arr.code as arrival_airport,
     dep.name as departure_airport_name, arr.name as arrival_airport_name,
     dep.country as departure_country,
-    al.name as airline_name, al.code as airline_code, al.logo_url as airline_logo
+    al.name as airline_name, al.code as airline_code,
+    al.logo_url as airline_logo, al.logo_dark as airline_logo_dark
   FROM checkins c
   JOIN passengers p ON p.id = c.passenger_id
   JOIN bookings b ON b.id = c.booking_id
