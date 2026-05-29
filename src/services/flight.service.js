@@ -2,7 +2,7 @@
 const pool = require('../config/db');
 const QF = require('../queries/flight.queries');
 const priceRuleService = require('./price-rule.service');
-
+const notificationService = require('./notification.service');
 /**
  * Lưu lịch sử tìm kiếm (fire-and-forget, không block search)
  */
@@ -755,6 +755,85 @@ const getPriceCalendar = async (params = {}) => {
   return result.rows;
 };
 
+/**
+ * Cập nhật thông tin chuyến bay + Gửi thông báo Flight Notification
+ */
+const updateFlight = async (flightId, updateData) => {
+  // Cập nhật dữ liệu chuyến bay
+  const result = await pool.query(`
+    UPDATE flights 
+    SET ${Object.keys(updateData).map((key, i) => `${key} = $${i+1}`).join(', ')}
+    WHERE id = $${Object.keys(updateData).length + 1}
+    RETURNING *
+  `, [...Object.values(updateData), flightId]);
+
+  if (result.rows.length === 0) {
+    throw new Error("Không tìm thấy chuyến bay");
+  }
+
+  const updatedFlight = result.rows[0];
+
+  // === GỬI THÔNG BÁO FLIGHT NOTIFICATION ===
+  if (updateData.status || updateData.departure_time || updateData.gate || updateData.baggage_info) {
+    
+    // Lấy danh sách booking bị ảnh hưởng
+    const bookingsResult = await pool.query(`
+      SELECT b.id, b.booking_code, b.email, b.passenger_name 
+      FROM bookings b 
+      WHERE b.outbound_flight_id = $1 
+        AND b.status IN ('confirmed', 'pending')
+    `, [flightId]);
+
+    let eventType = 'FLIGHT_STATUS_CHANGED';
+
+    if (updateData.status === 'delayed' || updateData.status === 'cancelled') {
+      eventType = 'FLIGHT_DELAYED';
+    } else if (updateData.gate) {
+      eventType = 'FLIGHT_GATE_CHANGED';
+    } else if (updateData.departure_time) {
+      eventType = 'FLIGHT_TIME_CHANGED';
+    } else if (updateData.baggage_info) {
+      eventType = 'FLIGHT_BAGGAGE_CHANGED';
+    }
+
+    await notificationService.createFlightNotification({
+      event: eventType,
+      flight: updatedFlight,
+      bookings: bookingsResult.rows,
+      changes: {
+        reason: updateData.reason || 'Cập nhật từ hệ thống',
+        new_departure_time: updateData.departure_time,
+        new_gate: updateData.gate,
+        old_gate: updateData.old_gate,
+        baggage_info: updateData.baggage_info
+      }
+    });
+  }
+
+  return updatedFlight;
+};
+
+/**
+ * Lấy danh sách booking của một chuyến bay (dùng cho Flight Notification)
+ * Chỉ lấy những booking còn hiệu lực (confirmed hoặc pending)
+ */
+const getBookingsByFlight = async (flightId) => {
+  const { rows } = await pool.query(`
+    SELECT 
+      b.id,
+      b.booking_code,
+      b.email,
+      b.passenger_name,
+      b.status
+    FROM bookings b
+    WHERE b.outbound_flight_id = $1 
+      AND b.status IN ('confirmed', 'pending')
+    ORDER BY b.created_at ASC
+  `, [flightId]);
+
+  return rows;
+};
+
 module.exports = { 
   recommendFlights,
   saveSearchHistory,
@@ -766,4 +845,6 @@ module.exports = {
   getPriceCalendar,
   getSeatMap,
   getFlightPosition,
+  updateFlight,
+  getBookingsByFlight,
 };

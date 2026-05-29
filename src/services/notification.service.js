@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 /*
 =========================================================
@@ -12,11 +12,11 @@ Gửi email khi có sự kiện liên quan đến:
 =========================================================
 */
 
-const { NOTIFICATIONS } = require('../config/refund.config');
+const { NOTIFICATIONS } = require("../config/refund.config");
 
 // Email sender address
-const FROM_EMAIL = NOTIFICATIONS.email.from || 'no-reply@n4minhlong.io.vn';
-const FROM_NAME = NOTIFICATIONS.email.fromName || 'Airline Booking System';
+const FROM_EMAIL = NOTIFICATIONS.email.from || "no-reply@n4minhlong.io.vn";
+const FROM_NAME = NOTIFICATIONS.email.fromName || "Airline Booking System";
 
 // =========================================================
 // EMAIL TEMPLATES
@@ -25,48 +25,70 @@ const FROM_NAME = NOTIFICATIONS.email.fromName || 'Airline Booking System';
 const EMAIL_TEMPLATES = {
   // Refund Templates
   REFUND_REQUESTED: {
-    subject: 'Xác nhận yêu cầu hoàn tiền - {refund_code}',
-    template: 'refund-requested',
+    subject: "Xác nhận yêu cầu hoàn tiền - {refund_code}",
+    template: "refund-requested",
   },
   REFUND_APPROVED: {
-    subject: 'Yêu cầu hoàn tiền đã được duyệt - {refund_code}',
-    template: 'refund-approved',
+    subject: "Yêu cầu hoàn tiền đã được duyệt - {refund_code}",
+    template: "refund-approved",
   },
   REFUND_REJECTED: {
-    subject: 'Yêu cầu hoàn tiền bị từ chối - {refund_code}',
-    template: 'refund-rejected',
+    subject: "Yêu cầu hoàn tiền bị từ chối - {refund_code}",
+    template: "refund-rejected",
   },
   REFUND_COMPLETED: {
-    subject: 'Hoàn tiền thành công - {refund_code}',
-    template: 'refund-completed',
+    subject: "Hoàn tiền thành công - {refund_code}",
+    template: "refund-completed",
   },
   REFUND_FAILED: {
-    subject: 'Hoàn tiền thất bại - {refund_code}',
-    template: 'refund-failed',
+    subject: "Hoàn tiền thất bại - {refund_code}",
+    template: "refund-failed",
   },
 
   // Date Change Templates
   DATE_CHANGE_REQUESTED: {
-    subject: 'Xác nhận yêu cầu đổi ngày bay - {request_code}',
-    template: 'date-change-requested',
+    subject: "Xác nhận yêu cầu đổi ngày bay - {request_code}",
+    template: "date-change-requested",
   },
   DATE_CHANGE_APPROVED: {
-    subject: 'Yêu cầu đổi ngày bay đã được duyệt - {request_code}',
-    template: 'date-change-approved',
+    subject: "Yêu cầu đổi ngày bay đã được duyệt - {request_code}",
+    template: "date-change-approved",
   },
   DATE_CHANGE_REJECTED: {
-    subject: 'Yêu cầu đổi ngày bay bị từ chối - {request_code}',
-    template: 'date-change-rejected',
+    subject: "Yêu cầu đổi ngày bay bị từ chối - {request_code}",
+    template: "date-change-rejected",
   },
 
   // Flight Cancellation Templates
   FLIGHT_CANCELLED: {
-    subject: 'Thông báo: Chuyến bay {flight_number} đã bị hủy',
-    template: 'flight-cancelled',
+    subject: "Thông báo: Chuyến bay {flight_number} đã bị hủy",
+    template: "flight-cancelled",
   },
   BOOKING_AFFECTED_BY_CANCELLATION: {
-    subject: 'Thông tin hoàn tiền cho booking {booking_code}',
-    template: 'booking-refund-notice',
+    subject: "Thông tin hoàn tiền cho booking {booking_code}",
+    template: "booking-refund-notice",
+  },
+
+  // Flight Notifications
+  FLIGHT_STATUS_CHANGED: {
+    subject: "Cập nhật trạng thái chuyến bay {flight_number}",
+    template: "flight-status-change",
+  },
+  FLIGHT_DELAYED: {
+    subject: "Chuyến bay {flight_number} bị trễ",
+    template: "flight-delayed",
+  },
+  FLIGHT_GATE_CHANGED: {
+    subject: "Đổi cổng lên máy bay - Chuyến bay {flight_number}",
+    template: "flight-gate-change",
+  },
+  FLIGHT_TIME_CHANGED: {
+    subject: "Thay đổi giờ bay - Chuyến bay {flight_number}",
+    template: "flight-time-change",
+  },
+  FLIGHT_BAGGAGE_CHANGED: {
+    subject: "Cập nhật hành lý - Chuyến bay {flight_number}",
+    template: "flight-baggage-change",
   },
 };
 
@@ -80,18 +102,23 @@ const generateRefundEmailContent = (event, data) => {
   const baseData = {
     refund_code: refund.refund_code,
     booking_code: booking?.booking_code || refund.booking_code,
-    refund_amount: formatCurrency(refund.net_refund_amount || refund.refund_amount),
+    refund_amount: formatCurrency(
+      refund.net_refund_amount || refund.refund_amount,
+    ),
     refund_type: refund.refund_type,
     status: refund.status,
-    admin_notes: refund.admin_notes || '',
+    admin_notes: refund.admin_notes || "",
     created_at: formatDate(refund.created_at),
     completed_at: refund.completed_at ? formatDate(refund.completed_at) : null,
   };
 
   switch (event) {
-    case 'REFUND_REQUESTED':
+    case "REFUND_REQUESTED":
       return {
-        subject: EMAIL_TEMPLATES.REFUND_REQUESTED.subject.replace('{refund_code}', refund.refund_code),
+        subject: EMAIL_TEMPLATES.REFUND_REQUESTED.subject.replace(
+          "{refund_code}",
+          refund.refund_code,
+        ),
         body: `
           Xin chào,
 
@@ -103,7 +130,7 @@ const generateRefundEmailContent = (event, data) => {
           - Loại refund: ${refund.refund_type}
           - Số tiền hoàn: ${formatCurrency(refund.net_refund_amount || refund.refund_amount)}
           - Ngày yêu cầu: ${formatDate(refund.created_at)}
-          - Lý do: ${refund.reason || 'Không có'}
+          - Lý do: ${refund.reason || "Không có"}
 
           Chúng tôi sẽ xử lý yêu cầu trong vòng 7 ngày làm việc.
 
@@ -112,9 +139,12 @@ const generateRefundEmailContent = (event, data) => {
         `.trim(),
       };
 
-    case 'REFUND_APPROVED':
+    case "REFUND_APPROVED":
       return {
-        subject: EMAIL_TEMPLATES.REFUND_APPROVED.subject.replace('{refund_code}', refund.refund_code),
+        subject: EMAIL_TEMPLATES.REFUND_APPROVED.subject.replace(
+          "{refund_code}",
+          refund.refund_code,
+        ),
         body: `
           Xin chào,
 
@@ -124,7 +154,7 @@ const generateRefundEmailContent = (event, data) => {
           - Mã yêu cầu: ${refund.refund_code}
           - Mã booking: ${booking?.booking_code || refund.booking_code}
           - Số tiền hoàn: ${formatCurrency(refund.net_refund_amount || refund.refund_amount)}
-          - Ghi chú: ${refund.admin_notes || 'Không có'}
+          - Ghi chú: ${refund.admin_notes || "Không có"}
 
           Tiền sẽ được hoàn trong vòng 3-5 ngày làm việc.
 
@@ -133,9 +163,12 @@ const generateRefundEmailContent = (event, data) => {
         `.trim(),
       };
 
-    case 'REFUND_REJECTED':
+    case "REFUND_REJECTED":
       return {
-        subject: EMAIL_TEMPLATES.REFUND_REJECTED.subject.replace('{refund_code}', refund.refund_code),
+        subject: EMAIL_TEMPLATES.REFUND_REJECTED.subject.replace(
+          "{refund_code}",
+          refund.refund_code,
+        ),
         body: `
           Xin chào,
 
@@ -144,7 +177,7 @@ const generateRefundEmailContent = (event, data) => {
           Thông tin:
           - Mã yêu cầu: ${refund.refund_code}
           - Mã booking: ${booking?.booking_code || refund.booking_code}
-          - Lý do từ chối: ${refund.admin_notes || refund.reason || 'Không có'}
+          - Lý do từ chối: ${refund.admin_notes || refund.reason || "Không có"}
 
           Nếu bạn cần hỗ trợ thêm, vui lòng liên hệ với chúng tôi.
 
@@ -153,9 +186,12 @@ const generateRefundEmailContent = (event, data) => {
         `.trim(),
       };
 
-    case 'REFUND_COMPLETED':
+    case "REFUND_COMPLETED":
       return {
-        subject: EMAIL_TEMPLATES.REFUND_COMPLETED.subject.replace('{refund_code}', refund.refund_code),
+        subject: EMAIL_TEMPLATES.REFUND_COMPLETED.subject.replace(
+          "{refund_code}",
+          refund.refund_code,
+        ),
         body: `
           Xin chào,
 
@@ -188,9 +224,12 @@ const generateDateChangeEmailContent = (event, data) => {
   const { request, booking } = data;
 
   switch (event) {
-    case 'DATE_CHANGE_REQUESTED':
+    case "DATE_CHANGE_REQUESTED":
       return {
-        subject: EMAIL_TEMPLATES.DATE_CHANGE_REQUESTED.subject.replace('{request_code}', request.request_code),
+        subject: EMAIL_TEMPLATES.DATE_CHANGE_REQUESTED.subject.replace(
+          "{request_code}",
+          request.request_code,
+        ),
         body: `
           Xin chào,
 
@@ -208,9 +247,12 @@ const generateDateChangeEmailContent = (event, data) => {
         `.trim(),
       };
 
-    case 'DATE_CHANGE_APPROVED':
+    case "DATE_CHANGE_APPROVED":
       return {
-        subject: EMAIL_TEMPLATES.DATE_CHANGE_APPROVED.subject.replace('{request_code}', request.request_code),
+        subject: EMAIL_TEMPLATES.DATE_CHANGE_APPROVED.subject.replace(
+          "{request_code}",
+          request.request_code,
+        ),
         body: `
           Xin chào,
 
@@ -219,16 +261,19 @@ const generateDateChangeEmailContent = (event, data) => {
           Thông tin:
           - Mã yêu cầu: ${request.request_code}
           - Mã booking: ${booking?.booking_code || request.booking_code}
-          - Ghi chú: ${request.admin_notes || 'Không có'}
+          - Ghi chú: ${request.admin_notes || "Không có"}
 
           Trân trọng,
           Đội ngũ hỗ trợ
         `.trim(),
       };
 
-    case 'DATE_CHANGE_REJECTED':
+    case "DATE_CHANGE_REJECTED":
       return {
-        subject: EMAIL_TEMPLATES.DATE_CHANGE_REJECTED.subject.replace('{request_code}', request.request_code),
+        subject: EMAIL_TEMPLATES.DATE_CHANGE_REJECTED.subject.replace(
+          "{request_code}",
+          request.request_code,
+        ),
         body: `
           Xin chào,
 
@@ -237,7 +282,7 @@ const generateDateChangeEmailContent = (event, data) => {
           Thông tin:
           - Mã yêu cầu: ${request.request_code}
           - Mã booking: ${booking?.booking_code || request.booking_code}
-          - Lý do: ${request.admin_notes || 'Không có'}
+          - Lý do: ${request.admin_notes || "Không có"}
 
           Nếu bạn cần hỗ trợ thêm, vui lòng liên hệ với chúng tôi.
 
@@ -258,21 +303,28 @@ const generateFlightCancellationEmailContent = (data) => {
   const { flight, booking, refund } = data;
 
   return {
-    subject: EMAIL_TEMPLATES.BOOKING_AFFECTED_BY_CANCELLATION.subject.replace('{booking_code}', booking?.booking_code),
+    subject: EMAIL_TEMPLATES.BOOKING_AFFECTED_BY_CANCELLATION.subject.replace(
+      "{booking_code}",
+      booking?.booking_code,
+    ),
     body: `
       Xin chào,
 
-      Chúng tôi xin thông báo rằng chuyến bay ${flight?.flight_number || ''} đã bị hủy bởi hãng hàng không.
+      Chúng tôi xin thông báo rằng chuyến bay ${flight?.flight_number || ""} đã bị hủy bởi hãng hàng không.
 
       Thông tin booking của bạn:
-      - Mã booking: ${booking?.booking_code || ''}
-      - Chuyến bay: ${flight?.flight_number || ''}
+      - Mã booking: ${booking?.booking_code || ""}
+      - Chuyến bay: ${flight?.flight_number || ""}
 
-      ${refund ? `
+      ${
+        refund
+          ? `
       Yêu cầu hoàn tiền đã được tạo tự động:
       - Mã hoàn tiền: ${refund.refund_code}
       - Số tiền hoàn: ${formatCurrency(refund.net_refund_amount)}
-      ` : ''}
+      `
+          : ""
+      }
 
       Nếu bạn cần hỗ trợ thêm, vui lòng liên hệ với chúng tôi.
 
@@ -291,19 +343,19 @@ const sendEmail = async (to, subject, body, options = {}) => {
   // Ví dụ: SendGrid, Mailgun, AWS SES, Nodemailer, etc.
 
   if (!NOTIFICATIONS.email.enabled) {
-    console.log('[Email] Notifications disabled, skipping email');
+    console.log("[Email] Notifications disabled, skipping email");
     return false;
   }
 
   // Mock implementation
-  console.log('[Email] Sending email:');
+  console.log("[Email] Sending email:");
   console.log(`  From: ${FROM_NAME} <${FROM_EMAIL}>`);
   console.log(`  To: ${to}`);
   console.log(`  Subject: ${subject}`);
   console.log(`  Body: ${body.substring(0, 100)}...`);
 
   // Simulate async operation
-  await new Promise(resolve => setTimeout(resolve, 50));
+  await new Promise((resolve) => setTimeout(resolve, 50));
 
   return true;
 };
@@ -329,20 +381,28 @@ const createRefundNotification = async (data) => {
   if (!eventConfig[event]) return;
 
   // Get recipient email - priority: guestEmail > refund.guest_email > refund.user_email > booking.contact_email
-  const recipientEmail = guestEmail || refund?.guest_email || refund?.user_email || booking?.contact_email;
+  const recipientEmail =
+    guestEmail ||
+    refund?.guest_email ||
+    refund?.user_email ||
+    booking?.contact_email;
   if (!recipientEmail) {
-    console.warn('[Notification] No recipient email found');
+    console.warn("[Notification] No recipient email found");
     return;
   }
 
   // Generate email content
-  const content = generateRefundEmailContent(event, { refund, booking, userId });
+  const content = generateRefundEmailContent(event, {
+    refund,
+    booking,
+    userId,
+  });
 
   // Send email
   await sendEmail(recipientEmail, content.subject, content.body);
 
   // Log for admin dashboard if enabled
-  if (NOTIFICATIONS.admin.alertOnNewRefund && event === 'REFUND_REQUESTED') {
+  if (NOTIFICATIONS.admin.alertOnNewRefund && event === "REFUND_REQUESTED") {
     console.log(`[Admin Alert] New refund request: ${refund.refund_code}`);
   }
 };
@@ -354,9 +414,12 @@ const createDateChangeNotification = async (data) => {
 
   // Check if this event type should send notification
   const eventConfig = {
-    DATE_CHANGE_REQUESTED: NOTIFICATIONS.email.sendDateChangeRequestedConfirmation,
-    DATE_CHANGE_APPROVED: NOTIFICATIONS.email.sendDateChangeApprovedNotification,
-    DATE_CHANGE_REJECTED: NOTIFICATIONS.email.sendDateChangeRejectedNotification,
+    DATE_CHANGE_REQUESTED:
+      NOTIFICATIONS.email.sendDateChangeRequestedConfirmation,
+    DATE_CHANGE_APPROVED:
+      NOTIFICATIONS.email.sendDateChangeApprovedNotification,
+    DATE_CHANGE_REJECTED:
+      NOTIFICATIONS.email.sendDateChangeRejectedNotification,
   };
 
   if (!eventConfig[event]) return;
@@ -364,12 +427,16 @@ const createDateChangeNotification = async (data) => {
   // Get recipient email
   const recipientEmail = request?.user_email || booking?.contact_email;
   if (!recipientEmail) {
-    console.warn('[Notification] No recipient email found');
+    console.warn("[Notification] No recipient email found");
     return;
   }
 
   // Generate email content
-  const content = generateDateChangeEmailContent(event, { request, booking, userId });
+  const content = generateDateChangeEmailContent(event, {
+    request,
+    booking,
+    userId,
+  });
 
   // Send email
   await sendEmail(recipientEmail, content.subject, content.body);
@@ -378,7 +445,10 @@ const createDateChangeNotification = async (data) => {
 const createFlightCancellationNotification = async (data) => {
   const { flight, bookings, refunds } = data;
 
-  if (!NOTIFICATIONS.email.enabled || !NOTIFICATIONS.email.sendFlightCancelledNotifications) {
+  if (
+    !NOTIFICATIONS.email.enabled ||
+    !NOTIFICATIONS.email.sendFlightCancelledNotifications
+  ) {
     return;
   }
 
@@ -405,7 +475,9 @@ const createFlightCancellationNotification = async (data) => {
 const notifyAdminNewRefund = async (refund) => {
   if (!NOTIFICATIONS.admin.alertOnNewRefund) return;
 
-  console.log(`[Admin Notification] New refund request pending: ${refund.refund_code}`);
+  console.log(
+    `[Admin Notification] New refund request pending: ${refund.refund_code}`,
+  );
   // TODO: Push notification to admin dashboard
   // Ví dụ: WebSocket, Push notification, Slack, etc.
 };
@@ -415,7 +487,7 @@ const checkAndAlertSLABreach = async () => {
 
   // TODO: Check refunds that have exceeded SLA
   // Gửi alert cho admin
-  console.log('[Admin Notification] Checking SLA breaches...');
+  console.log("[Admin Notification] Checking SLA breaches...");
 };
 
 // =========================================================
@@ -423,21 +495,111 @@ const checkAndAlertSLABreach = async () => {
 // =========================================================
 
 const formatCurrency = (amount) => {
-  return new Intl.NumberFormat('vi-VN', {
-    style: 'currency',
-    currency: 'VND',
+  return new Intl.NumberFormat("vi-VN", {
+    style: "currency",
+    currency: "VND",
   }).format(amount || 0);
 };
 
 const formatDate = (dateString) => {
-  if (!dateString) return 'N/A';
-  return new Date(dateString).toLocaleString('vi-VN', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+  if (!dateString) return "N/A";
+  return new Date(dateString).toLocaleString("vi-VN", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
+};
+
+// =========================================================
+// FLIGHT NOTIFICATION FUNCTIONS
+// =========================================================
+
+/**
+ * Tạo thông báo chuyến bay và gửi email cho khách hàng
+ */
+const createFlightNotification = async ({
+  event,
+  flight,
+  bookings = [],
+  changes = {},
+}) => {
+  const { NOTIFICATIONS } = require("../config/refund.config");
+
+  if (
+    !NOTIFICATIONS.email.enabled ||
+    !NOTIFICATIONS.email.sendFlightStatusChangeNotifications
+  ) {
+    return;
+  }
+
+  for (const booking of bookings) {
+    if (!booking.email) continue;
+
+    const content = generateFlightNotificationContent(event, flight, changes);
+
+    try {
+      await require("../utils/mailer").sendEmail({
+        to: booking.email,
+        subject: content.subject,
+        html: content.body,
+        text: content.text || content.body.replace(/<[^>]+>/g, ""),
+      });
+
+      console.log(
+        `[Flight Notification] Đã gửi email cho booking ${booking.booking_code}`,
+      );
+    } catch (err) {
+      console.error(`[Flight Notification] Lỗi gửi email:`, err.message);
+    }
+  }
+};
+
+/**
+ * Tạo nội dung email thông báo chuyến bay
+ */
+const generateFlightNotificationContent = (event, flight, changes) => {
+  let subject = `Cập nhật chuyến bay ${flight.flight_number || ""}`;
+  let body = "";
+
+  switch (event) {
+    case "FLIGHT_DELAYED":
+      subject = `Chuyến bay ${flight.flight_number} bị trễ`;
+      body = `
+        <h3>Thông báo chuyến bay</h3>
+        <p>Kính gửi Quý khách,</p>
+        <p>Chuyến bay <strong>${flight.flight_number}</strong> từ <strong>${flight.departure_code}</strong> → <strong>${flight.arrival_code}</strong> <strong>đã bị trễ</strong>.</p>
+        <p><strong>Lý do:</strong> ${changes.reason || "Không xác định"}</p>
+        <p><strong>Giờ bay mới:</strong> ${changes.new_departure_time || flight.departure_time}</p>
+        <p>Xin vui lòng kiểm tra lại thông tin trước khi ra sân bay.</p>
+      `.trim();
+      break;
+
+    case "FLIGHT_GATE_CHANGED":
+      subject = `Đổi cổng lên máy bay - ${flight.flight_number}`;
+      body = `
+        <h3>Thông báo thay đổi cổng bay</h3>
+        <p>Cổng lên máy bay của chuyến bay <strong>${flight.flight_number}</strong> đã thay đổi.</p>
+        <p><strong>Cổng cũ:</strong> ${changes.old_gate || "---"}</p>
+        <p><strong>Cổng mới:</strong> ${changes.new_gate}</p>
+      `.trim();
+      break;
+
+    case "FLIGHT_TIME_CHANGED":
+      subject = `Thay đổi giờ bay - ${flight.flight_number}`;
+      body = `Giờ bay của chuyến bay ${flight.flight_number} đã được thay đổi.`;
+      break;
+
+    default:
+      subject = `Cập nhật trạng thái chuyến bay ${flight.flight_number}`;
+      body = `Chuyến bay ${flight.flight_number} có cập nhật mới.`;
+  }
+
+  return {
+    subject,
+    body: `<div style="font-family: Arial, sans-serif;">${body}<p>Trân trọng,<br>Đội ngũ hỗ trợ</p></div>`,
+  };
 };
 
 // =========================================================
@@ -458,4 +620,8 @@ module.exports = {
   sendEmail,
   formatCurrency,
   formatDate,
+
+  // FLIGHT NOTIFICATION FUNCTIONS
+  createFlightNotification,
+  generateFlightNotificationContent,
 };
