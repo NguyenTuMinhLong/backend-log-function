@@ -94,8 +94,7 @@ const saveConfig = async ({ is_enabled, start_date, end_date, flights_per_route,
       start_date       = COALESCE($2::date, start_date),
       end_date         = COALESCE($3::date, end_date),
       flights_per_route = COALESCE($4, flights_per_route),
-      advance_days     = COALESCE($5, advance_days),
-      updated_at       = NOW()
+      advance_days     = COALESCE($5, advance_days)
     WHERE id = 1
     RETURNING *
   `, [
