@@ -381,4 +381,168 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
   }
 };
 
-module.exports = { getConfig, saveConfig, getStatus, getAutoRoutes, runBatch };
+// ─── Tạo chuyến bay từ 1 sân bay cụ thể ─────────────────────────────────────
+const runFromAirport = async ({ airportCode, startDate, endDate, flightsPerRoute, mode }) => {
+  // Lấy sân bay nguồn
+  const srcRes = await pool.query(
+    `SELECT id, code, city, country, lat, lng FROM airports WHERE UPPER(code) = UPPER($1) AND is_active = TRUE`,
+    [airportCode]
+  );
+  if (!srcRes.rows.length) throw new Error(`Sân bay ${airportCode} không tồn tại`);
+  const src = srcRes.rows[0];
+
+  // Lấy tất cả sân bay đích (có tọa độ)
+  const destRes = await pool.query(
+    `SELECT id, code, name, city, country, lat, lng FROM airports
+     WHERE UPPER(code) != UPPER($1) AND is_active = TRUE AND lat IS NOT NULL AND lng IS NOT NULL
+     ORDER BY code`,
+    [airportCode]
+  );
+  const destinations = destRes.rows;
+
+  // Lấy tất cả hãng có country
+  const airlineRes = await pool.query(
+    `SELECT id, code, name, country, price_tier FROM airlines WHERE is_active = TRUE AND country IS NOT NULL ORDER BY id`
+  );
+  const allAirlines = airlineRes.rows;
+
+  // Build mảng ngày
+  const pad = n => String(n).padStart(2, '0');
+  const toLocal = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const dates = [];
+  for (let d = new Date(startDate + 'T00:00:00'); toLocal(d) <= endDate; d.setDate(d.getDate()+1)) {
+    dates.push(toLocal(d));
+  }
+  if (!dates.length) throw new Error('Khoảng ngày không hợp lệ');
+
+  const numDays    = dates.length;
+  const srcCountry = (src.country || '').toLowerCase();
+
+  // Pre-fetch flight numbers đã dùng trong range
+  const usedNumsRes = await pool.query(
+    `SELECT al.code AS airline_code, DATE(f.departure_time)::text AS dep_date, f.flight_number
+     FROM flights f JOIN airlines al ON al.id = f.airline_id
+     WHERE f.departure_airport_id = $1
+       AND DATE(f.departure_time) >= $2 AND DATE(f.departure_time) <= $3`,
+    [src.id, dates[0], dates[dates.length-1]]
+  );
+  const usedNums = {};
+  for (const r of usedNumsRes.rows) {
+    const key = `${r.dep_date}_${r.airline_code}`;
+    if (!usedNums[key]) usedNums[key] = new Set();
+    usedNums[key].add(r.flight_number);
+  }
+
+  // Pre-fetch slots đã tồn tại
+  const existRes = await pool.query(
+    `SELECT airline_id, departure_airport_id, arrival_airport_id,
+            DATE(departure_time)::text AS dep_date,
+            TO_CHAR(departure_time,'HH24:MI') AS dep_slot
+     FROM flights
+     WHERE departure_airport_id = $1
+       AND DATE(departure_time) >= $2 AND DATE(departure_time) <= $3`,
+    [src.id, dates[0], dates[dates.length-1]]
+  );
+  const existSet = new Set(
+    existRes.rows.map(r => `${r.airline_id}_${r.departure_airport_id}_${r.arrival_airport_id}_${r.dep_date}_${r.dep_slot}`)
+  );
+
+  let created = 0, skipped = 0;
+  const client = await pool.connect();
+
+  try {
+    for (const dest of destinations) {
+      const destCountry = (dest.country || '').toLowerCase();
+
+      // Hãng phù hợp: hãng cùng nước với điểm đến HOẶC hãng Việt Nam (vì dep là VN)
+      let compatAirlines = allAirlines.filter(al => {
+        const alc = (al.country || '').toLowerCase();
+        return alc === srcCountry || alc === destCountry;
+      });
+      if (!compatAirlines.length) compatAirlines = allAirlines;
+
+      const km           = haversineKm(Number(src.lat), Number(src.lng), Number(dest.lat), Number(dest.lng));
+      const durationMins = estimateMins(km);
+
+      // Xác định slots cần tạo theo mode
+      // per_day: N slot mỗi ngày → tổng = N × numDays mỗi tuyến
+      // total: N slot tổng/tuyến → trải đều qua từng ngày
+      let schedule = []; // [{ dateStr, slotTime, airlineIdx }]
+      if (mode === 'per_day') {
+        const slots = getTimeSlots(flightsPerRoute);
+        let ai = 0;
+        for (const dateStr of dates) {
+          for (const slotTime of slots) {
+            schedule.push({ dateStr, slotTime, airlineIdx: ai++ });
+          }
+        }
+      } else {
+        // total: chọn N (date, slot) phân bổ đều qua các ngày
+        const totalSlots  = flightsPerRoute;
+        const slotsPerDay = Math.max(1, Math.ceil(totalSlots / numDays));
+        const baseSlots   = getTimeSlots(slotsPerDay);
+        let count = 0, ai = 0;
+        outer: for (const dateStr of dates) {
+          for (const slotTime of baseSlots) {
+            if (count >= totalSlots) break outer;
+            schedule.push({ dateStr, slotTime, airlineIdx: ai++ });
+            count++;
+          }
+        }
+      }
+
+      // Tạo từng flight trong schedule
+      for (const { dateStr, slotTime, airlineIdx } of schedule) {
+        const airline  = compatAirlines[airlineIdx % compatAirlines.length];
+        const depTime  = `${dateStr}T${slotTime}:00`;
+
+        // Bỏ qua slot đã qua
+        if (new Date(depTime) <= new Date(Date.now() + 2 * 60 * 60 * 1000)) { skipped++; continue; }
+
+        const slotKey = `${airline.id}_${src.id}_${dest.id}_${dateStr}_${slotTime}`;
+        if (existSet.has(slotKey)) { skipped++; continue; }
+
+        // Tìm số hiệu chuyến bay chưa dùng
+        const numsKey = `${dateStr}_${airline.code}`;
+        if (!usedNums[numsKey]) usedNums[numsKey] = new Set();
+        const dateUsed = usedNums[numsKey];
+        let flightNum = null;
+        for (let n = 100; n <= 999; n++) {
+          const cand = `${airline.code}${n}`;
+          if (!dateUsed.has(cand)) { flightNum = cand; dateUsed.add(cand); break; }
+        }
+        if (!flightNum) { skipped++; continue; }
+
+        const depHour = parseInt(slotTime.slice(0, 2), 10);
+        const prices  = calcPrices(durationMins, Number(airline.price_tier) || 1.0, depHour);
+        const arrTime = addMins(dateStr, slotTime, durationMins);
+
+        try {
+          await client.query('BEGIN');
+          const fr = await client.query(QF.INSERT_FLIGHT, [flightNum, airline.id, src.id, dest.id, depTime, arrTime, durationMins]);
+          const flight = fr.rows[0];
+          for (const seat of SEAT_CONFIG) {
+            const bp = prices[seat.class] || 0;
+            await client.query(QF.INSERT_FLIGHT_SEAT, [
+              flight.id, seat.class, seat.total_seats, seat.total_seats,
+              bp, seat.baggage_included_kg, seat.carry_on_kg, autoExtraBagPrice(bp, seat.class),
+            ]);
+          }
+          await client.query('COMMIT');
+          existSet.add(slotKey);
+          created++;
+        } catch (err) {
+          await client.query('ROLLBACK');
+          console.error(`[AirportBatch] Insert error ${flightNum}:`, err.message);
+          skipped++;
+        }
+      }
+    }
+
+    return { created, skipped, destinations: destinations.length, airlines: allAirlines.length };
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = { getConfig, saveConfig, getStatus, getAutoRoutes, runBatch, runFromAirport };

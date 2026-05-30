@@ -52,4 +52,27 @@ const runAll = async (req, res) => {
   }
 };
 
-module.exports = { getStatus, getConfig, saveConfig, runNow, runAll };
+const runFromAirport = async (req, res) => {
+  const { airport_code, start_date, end_date, flights_per_route, mode } = req.body;
+  if (!airport_code || !start_date || !end_date || !flights_per_route) {
+    return res.status(400).json({ error: 'Thiếu tham số: airport_code, start_date, end_date, flights_per_route' });
+  }
+  if (!['per_day', 'total'].includes(mode)) {
+    return res.status(400).json({ error: 'mode phải là per_day hoặc total' });
+  }
+  try {
+    const result = await svc.runFromAirport({
+      airportCode:     airport_code.toUpperCase(),
+      startDate:       start_date,
+      endDate:         end_date,
+      flightsPerRoute: parseInt(flights_per_route),
+      mode,
+    });
+    res.json({ message: `Tạo xong: ${result.created} chuyến, bỏ qua ${result.skipped}`, ...result });
+  } catch (err) {
+    console.error('[AirportBatch] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+module.exports = { getStatus, getConfig, saveConfig, runNow, runAll, runFromAirport };
