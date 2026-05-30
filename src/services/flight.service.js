@@ -512,8 +512,9 @@ const getPriceCalendar = async (params = {}) => {
   endDate.setMonth(endDate.getMonth() + 1);
   const endDateStr = endDate.toISOString().split('T')[0];
 
+  const a = Math.max(1, parseInt(adults) || 1);
   const result = await pool.query(QF.GET_MIN_PRICES_CALENDAR, [
-    from.toUpperCase(), to.toUpperCase(), seat_class, startDate, endDateStr
+    from.toUpperCase(), to.toUpperCase(), seat_class, startDate, endDateStr, a
   ]);
 
   return result.rows;

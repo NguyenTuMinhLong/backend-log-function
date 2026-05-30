@@ -292,6 +292,7 @@ const GET_MIN_PRICES_CALENDAR = `
     AND fs.class = $3
     AND DATE(f.departure_time) >= $4
     AND DATE(f.departure_time) <= $5
+    AND fs.available_seats >= $6
   GROUP BY DATE(f.departure_time)
   ORDER BY DATE(f.departure_time)
 `;
