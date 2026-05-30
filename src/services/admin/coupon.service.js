@@ -215,7 +215,35 @@ const createCoupon = async (data) => {
     prepared.name, prepared.description,
   ]);
 
-  return getCouponById(result.rows[0].id);
+  const coupon = await getCouponById(result.rows[0].id);
+
+  // Auto-send newsletter nếu coupon active và không phải welcome_only
+  if (coupon.is_active && !coupon.welcome_only) {
+    setImmediate(async () => {
+      try {
+        const { sendNewsletterBroadcast } = require('../../utils/mailer');
+        const { rows: subs } = await pool.query(
+          `SELECT email, unsubscribe_token FROM newsletter_subscribers WHERE is_active = TRUE`
+        );
+        if (subs.length === 0) return;
+        const discountText = coupon.type === 'percent'
+          ? `${coupon.value}%`
+          : new Intl.NumberFormat('vi-VN').format(coupon.value) + ' VND';
+        await sendNewsletterBroadcast(subs, {
+          subject: `🎁 Mã giảm giá mới: ${coupon.code} — Giảm ${discountText}`,
+          title:   `Ưu đãi mới từ Vivudee!`,
+          body:    `Chúng tôi có một ưu đãi đặc biệt dành cho bạn.\n\nMã giảm giá: ${coupon.code}\nGiảm: ${discountText}${coupon.min_order ? `\nĐơn tối thiểu: ${new Intl.NumberFormat('vi-VN').format(coupon.min_order)} VND` : ''}${coupon.expiry_at ? `\nHết hạn: ${new Date(coupon.expiry_at).toLocaleDateString('vi-VN')}` : ''}\n\n${coupon.description || ''}`,
+          ctaText: 'Đặt vé ngay',
+          ctaUrl:  `${process.env.FRONTEND_URL || 'https://vivudee.vercel.app'}/flights`,
+        });
+        console.log(`[Newsletter] Auto-sent coupon ${coupon.code} to ${subs.length} subscribers`);
+      } catch (err) {
+        console.error('[Newsletter] Auto-send coupon error:', err.message);
+      }
+    });
+  }
+
+  return coupon;
 };
 
 const updateCoupon = async (couponId, data) => {
