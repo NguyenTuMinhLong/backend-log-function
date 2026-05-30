@@ -1,241 +1,52 @@
 // src/services/flight.service.js
 const pool = require('../config/db');
 const QF = require('../queries/flight.queries');
-const priceRuleService = require('./price-rule.service');
-const notificationService = require('./notification.service');
-/**
- * Lưu lịch sử tìm kiếm (fire-and-forget, không block search)
- */
-const saveSearchHistory = async ({
-  userId, sessionId,
-  departureCode, arrivalCode, departureDate, returnDate,
-  seatClass, adults, children, infants,
-  resultsCount, minPriceFound,
-}) => {
-  try {
-    await pool.query(
-      `INSERT INTO search_history (
-         user_id, session_id,
-         departure_code, arrival_code, departure_date, return_date,
-         seat_class, adults, children, infants,
-         results_count, min_price_found
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-      [
-        userId     || null,
-        sessionId  || null,
-        departureCode, arrivalCode,
-        departureDate, returnDate || null,
-        seatClass,
-        adults, children, infants,
-        resultsCount  || 0,
-        minPriceFound || null,
-      ]
-    );
-  } catch (err) {
-    // Không để lỗi log làm hỏng search
-    console.error("[SearchHistory] Lỗi lưu lịch sử:", err.message);
-  }
-};
 
-/**
- * Recommendation Flights
- * 1. Lưu lịch sử tìm kiếm: số tiền bỏ ra, điểm đến yêu thích, thời gian bay
- * 2. Ưu tiên chuyến buổi sáng, không quá cảnh, vé < 5tr
- * 3. Tự động lọc và ưu tiên theo tiêu chí
- * 4. Nếu chưa có lịch sử → TopBuy
- * 5. 10 chuyến gần nhất theo khung thời gian
- */
-const recommendFlights = async ({ userId, sessionId, fromAirport, toAirport, limit = 10 }) => {
-
-  // ── BƯỚC 1: Phân tích lịch sử tìm kiếm + booking ────────────────────────
-  let preferredDestinations = [];
-  let preferredDepartures   = [];
-  let preferredHours        = null;
-  let avgSpending           = null;
-  let hasHistory            = false;
-
-  if (userId || sessionId) {
-    // Lịch sử tìm kiếm
-    const searchHistSQL = userId
-      ? `WHERE user_id = ${parseInt(userId)}`
-      : `WHERE session_id = '${sessionId}'`;
-
-    const searchResult = await pool.query(`
-      SELECT
-        arrival_code,
-        departure_code,
-        COUNT(*)                    AS search_count,
-        AVG(min_price_found)        AS avg_min_price,
-        -- Giờ bay ưa thích: phân tích từ departure_date không đủ
-        -- dùng booking history thay thế
-        MIN(seat_class)             AS preferred_class
-      FROM search_history
-      ${searchHistSQL}
-        AND created_at > NOW() - INTERVAL '90 days'
-      GROUP BY arrival_code, departure_code
-      ORDER BY search_count DESC
-      LIMIT 5
-    `);
-
-    if (searchResult.rows.length > 0) {
-      hasHistory            = true;
-      preferredDestinations = searchResult.rows.map(r => r.arrival_code);
-      preferredDepartures   = searchResult.rows.map(r => r.departure_code);
-      avgSpending           = parseFloat(searchResult.rows[0].avg_min_price) || null;
-    }
-
-    // Lịch sử booking (nếu user đăng nhập)
-    if (userId) {
-      const bookingHistory = await pool.query(`
-        SELECT
-          arr.code                                  AS arr_code,
-          dep.code                                  AS dep_code,
-          COUNT(*)                                  AS trip_count,
-          AVG(b.total_price)                        AS avg_price,
-          AVG(EXTRACT(HOUR FROM f.departure_time))  AS avg_dep_hour
-        FROM bookings b
-        JOIN flights  f   ON f.id   = b.outbound_flight_id
-        JOIN airports dep ON dep.id = f.departure_airport_id
-        JOIN airports arr ON arr.id = f.arrival_airport_id
-        WHERE b.user_id = $1
-          AND b.status IN ('confirmed', 'completed')
-        GROUP BY arr.code, dep.code
-        ORDER BY trip_count DESC
-        LIMIT 5
-      `, [userId]);
-
-      if (bookingHistory.rows.length > 0) {
-        hasHistory    = true;
-        preferredHours = parseFloat(bookingHistory.rows[0].avg_dep_hour) || null;
-        avgSpending    = parseFloat(bookingHistory.rows[0].avg_price)    || avgSpending;
-
-        // Merge destinations từ booking vào
-        for (const r of bookingHistory.rows) {
-          if (!preferredDestinations.includes(r.arr_code)) {
-            preferredDestinations.push(r.arr_code);
-          }
-        }
-      }
-    }
-  }
-
-  // ── BƯỚC 2: Nếu không có lịch sử → TopBuy ────────────────────────────────
-  if (!hasHistory) {
-    const topBuy = await pool.query(`
-      SELECT
-        dep.code  AS dep_code,
-        arr.code  AS arr_code,
-        COUNT(b.id) AS booking_count
-      FROM bookings b
-      JOIN flights  f   ON f.id   = b.outbound_flight_id
-      JOIN airports dep ON dep.id = f.departure_airport_id
-      JOIN airports arr ON arr.id = f.arrival_airport_id
-      WHERE b.status IN ('confirmed', 'completed')
-        AND f.departure_time > NOW()
-      GROUP BY dep.code, arr.code
-      ORDER BY booking_count DESC
-      LIMIT 5
-    `);
-    preferredDestinations = topBuy.rows.map(r => r.arr_code);
-  }
-
-  // ── BƯỚC 3: Scoring ───────────────────────────────────────────────────────
-  const destSQL = preferredDestinations.length > 0
-    ? `CASE WHEN arr.code = ANY(ARRAY['${preferredDestinations.join("','")}']) THEN 30 ELSE 0 END`
-    : '0';
-
-  const avgHourSQL = preferredHours !== null
-    ? `CASE WHEN ABS(EXTRACT(HOUR FROM f.departure_time) - ${preferredHours}) <= 2 THEN 10 ELSE 0 END`
-    : '0';
-
-  // Giá phù hợp với mức chi trung bình của user
-  const budgetSQL = avgSpending
-    ? `CASE WHEN fs.base_price <= ${avgSpending * 1.2} THEN 10 ELSE 0 END`
-    : `CASE WHEN fs.base_price < 5000000 THEN 15 ELSE 0 END`;
-
+const recommendFlights = async ({ userId, fromAirport, toAirport, limit = 15 }) => {
   const query = `
     SELECT
-      f.id                AS flight_id,
+      f.id              AS flight_id,
       f.flight_number,
       f.departure_time,
       f.arrival_time,
       f.duration_minutes,
       f.status,
-      al.id               AS airline_id,
-      al.code             AS airline_code,
-      al.name             AS airline_name,
-      al.logo_url         AS airline_logo,
-      al.logo_dark        AS airline_logo_dark,
-      al.logo_light       AS airline_logo_light,
-      dep.id              AS departure_airport_id,
-      dep.code            AS departure_code,
-      dep.city            AS departure_city,
-      dep.name            AS departure_airport_name,
-      arr.id              AS arrival_airport_id,
-      arr.code            AS arrival_code,
-      arr.city            AS arrival_city,
-      arr.name            AS arrival_airport_name,
-      fs.class            AS seat_class,
+      al.id             AS airline_id,
+      al.code           AS airline_code,
+      al.name           AS airline_name,
+      al.logo_url       AS airline_logo,
+      al.logo_dark      AS airline_logo_dark,
+      al.logo_light     AS airline_logo_light,
+      dep.id            AS departure_airport_id,
+      dep.code          AS departure_code,
+      dep.city          AS departure_city,
+      dep.name          AS departure_airport_name,
+      arr.id            AS arrival_airport_id,
+      arr.code          AS arrival_code,
+      arr.city          AS arrival_city,
+      arr.name          AS arrival_airport_name,
+      fs.class          AS seat_class,
       fs.total_seats,
       fs.available_seats,
       fs.base_price,
       fs.baggage_included_kg,
       fs.carry_on_kg,
-      fs.extra_baggage_price,
-
-      (
-        ${destSQL}
-        + CASE WHEN EXTRACT(HOUR FROM f.departure_time) BETWEEN 5 AND 11 THEN 20 ELSE 0 END
-        + CASE WHEN EXTRACT(HOUR FROM f.departure_time) >= 22
-                 OR EXTRACT(HOUR FROM f.departure_time) <= 4  THEN -10 ELSE 0 END
-        + CASE WHEN f.duration_minutes < 300 THEN 15 ELSE 0 END
-        + ${budgetSQL}
-        + ${avgHourSQL}
-      ) AS score
-
+      fs.extra_baggage_price
     FROM flights f
-    JOIN airlines      al  ON al.id  = f.airline_id
-    JOIN airports      dep ON dep.id = f.departure_airport_id
-    JOIN airports      arr ON arr.id = f.arrival_airport_id
+    JOIN airlines     al  ON al.id  = f.airline_id
+    JOIN airports     dep ON dep.id = f.departure_airport_id
+    JOIN airports     arr ON arr.id = f.arrival_airport_id
     LEFT JOIN flight_seats fs ON fs.flight_id = f.id AND fs.class = 'economy'
+    WHERE f.status = 'scheduled'
+      AND f.is_active = true
+      AND f.departure_time > NOW()
+      AND dep.code = $2
+      AND arr.code = $3
+    ORDER BY f.departure_time ASC
+    LIMIT $1`;
 
-    WHERE f.status          = 'scheduled'
-      AND f.is_active       = TRUE
-      AND fs.available_seats > 0
-      AND f.departure_time > NOW() AND f.departure_time < NOW() + INTERVAL '60 days'
-      ${fromAirport ? `AND dep.code = '${fromAirport}'` : ''}
-      ${toAirport   ? `AND arr.code = '${toAirport}'`   : ''}
-
-    ORDER BY score DESC, f.departure_time ASC
-    LIMIT $1
-  `;
-
-  const { rows } = await pool.query(query, [limit]);
-  const flights   = formatFlights(rows, 1, 0, 0);
-
-  // ── BƯỚC 4: Gắn badges + metadata ────────────────────────────────────────
-  return flights.map((f, i) => {
-    const score = parseInt(rows[i].score) || 0;
-    const hour  = new Date(f.departure.time).getHours();
-    const badges = [];
-
-    if (preferredDestinations.includes(f.arrival.code)) {
-      badges.push(hasHistory
-        ? { label: 'Điểm đến yêu thích', color: 'blue' }
-        : { label: 'Tuyến hot',          color: 'orange' });
-    }
-    if (hour >= 5 && hour <= 11)            badges.push({ label: 'Chuyến sáng',      color: 'yellow' });
-    if (f.duration_minutes < 300)           badges.push({ label: 'Bay thẳng',         color: 'green'  });
-    if (f.seat && f.seat.base_price < 5000000) badges.push({ label: 'Giá tốt < 5tr', color: 'green'  });
-
-    return {
-      ...f,
-      score,
-      badges,
-      is_recommended:        score > 20,
-      recommendation_reason: hasHistory ? 'personalized' : 'top_buy',
-    };
-  });
+  const { rows } = await pool.query(query, [limit, fromAirport, toAirport]);
+  return formatFlights(rows, 1, 0, 0);
 };
 
 const formatDuration = (minutes) => {
@@ -368,7 +179,6 @@ const queryFlights = async ({
   conditions.push(`fs.available_seats >= $${idx++}`);    values.push(seatsNeeded);
   conditions.push(`f.status = 'scheduled'`);
   conditions.push(`f.is_active = TRUE`);
-  conditions.push(`f.departure_time > NOW()`);
 
   if (min_price !== undefined && min_price !== "") { conditions.push(`fs.base_price >= $${idx++}`); values.push(parseFloat(min_price)); }
   if (max_price !== undefined && max_price !== "") { conditions.push(`fs.base_price <= $${idx++}`); values.push(parseFloat(max_price)); }
@@ -410,13 +220,8 @@ const searchFlights = async (params) => {
     airline_code, departure_city, arrival_city,
   };
 
-  const outboundRows       = await queryFlights(baseParams);
-  const outboundFlightsRaw = formatFlights(outboundRows, a, c, i);
-
-  // Áp dụng price rules (tăng/giảm giá theo mùa, lễ hội)
-  const outboundFlights = await Promise.all(
-    outboundFlightsRaw.map(f => priceRuleService.applyPriceRules(f, departure_date))
-  );
+  const outboundRows    = await queryFlights(baseParams);
+  const outboundFlights = formatFlights(outboundRows, a, c, i);
 
   let returnFlights = null;
   if (return_date) {
@@ -426,17 +231,14 @@ const searchFlights = async (params) => {
       arrival_code:   departure_code,
       departure_date: return_date,
     });
-    const returnFlightsRaw = formatFlights(returnRows, a, c, i);
-    returnFlights = await Promise.all(
-      returnFlightsRaw.map(f => priceRuleService.applyPriceRules(f, return_date))
-    );
+    returnFlights = formatFlights(returnRows, a, c, i);
   }
 
   return {
     outbound_flights: outboundFlights,
-    return_flights:   returnFlights,
-    total_outbound:   outboundFlights.length,
-    total_return:     returnFlights ? returnFlights.length : 0,
+    return_flights: returnFlights,
+    total_outbound: outboundFlights.length,
+    total_return: returnFlights ? returnFlights.length : 0,
   };
 };
 
@@ -710,95 +512,16 @@ const getPriceCalendar = async (params = {}) => {
   endDate.setMonth(endDate.getMonth() + 1);
   const endDateStr = endDate.toISOString().split('T')[0];
 
+  const a = Math.max(1, parseInt(adults) || 1);
   const result = await pool.query(QF.GET_MIN_PRICES_CALENDAR, [
-    from.toUpperCase(), to.toUpperCase(), seat_class, startDate, endDateStr
+    from.toUpperCase(), to.toUpperCase(), seat_class, startDate, endDateStr, a
   ]);
 
   return result.rows;
 };
 
-/**
- * Cập nhật thông tin chuyến bay + Gửi thông báo Flight Notification
- */
-const updateFlight = async (flightId, updateData) => {
-  // Cập nhật dữ liệu chuyến bay
-  const result = await pool.query(`
-    UPDATE flights 
-    SET ${Object.keys(updateData).map((key, i) => `${key} = $${i+1}`).join(', ')}
-    WHERE id = $${Object.keys(updateData).length + 1}
-    RETURNING *
-  `, [...Object.values(updateData), flightId]);
-
-  if (result.rows.length === 0) {
-    throw new Error("Không tìm thấy chuyến bay");
-  }
-
-  const updatedFlight = result.rows[0];
-
-  // === GỬI THÔNG BÁO FLIGHT NOTIFICATION ===
-  if (updateData.status || updateData.departure_time || updateData.gate || updateData.baggage_info) {
-    
-    // Lấy danh sách booking bị ảnh hưởng
-    const bookingsResult = await pool.query(`
-      SELECT b.id, b.booking_code, b.email, b.passenger_name 
-      FROM bookings b 
-      WHERE b.outbound_flight_id = $1 
-        AND b.status IN ('confirmed', 'pending')
-    `, [flightId]);
-
-    let eventType = 'FLIGHT_STATUS_CHANGED';
-
-    if (updateData.status === 'delayed' || updateData.status === 'cancelled') {
-      eventType = 'FLIGHT_DELAYED';
-    } else if (updateData.gate) {
-      eventType = 'FLIGHT_GATE_CHANGED';
-    } else if (updateData.departure_time) {
-      eventType = 'FLIGHT_TIME_CHANGED';
-    } else if (updateData.baggage_info) {
-      eventType = 'FLIGHT_BAGGAGE_CHANGED';
-    }
-
-    await notificationService.createFlightNotification({
-      event: eventType,
-      flight: updatedFlight,
-      bookings: bookingsResult.rows,
-      changes: {
-        reason: updateData.reason || 'Cập nhật từ hệ thống',
-        new_departure_time: updateData.departure_time,
-        new_gate: updateData.gate,
-        old_gate: updateData.old_gate,
-        baggage_info: updateData.baggage_info
-      }
-    });
-  }
-
-  return updatedFlight;
-};
-
-/**
- * Lấy danh sách booking của một chuyến bay (dùng cho Flight Notification)
- * Chỉ lấy những booking còn hiệu lực (confirmed hoặc pending)
- */
-const getBookingsByFlight = async (flightId) => {
-  const { rows } = await pool.query(`
-    SELECT 
-      b.id,
-      b.booking_code,
-      b.email,
-      b.passenger_name,
-      b.status
-    FROM bookings b
-    WHERE b.outbound_flight_id = $1 
-      AND b.status IN ('confirmed', 'pending')
-    ORDER BY b.created_at ASC
-  `, [flightId]);
-
-  return rows;
-};
-
 module.exports = { 
   recommendFlights,
-  saveSearchHistory,
   searchFlights,
   getAirports,
   getAirlines,
@@ -807,6 +530,4 @@ module.exports = {
   getPriceCalendar,
   getSeatMap,
   getFlightPosition,
-  updateFlight,
-  getBookingsByFlight,
 };

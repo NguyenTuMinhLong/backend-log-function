@@ -64,7 +64,7 @@ const CREATE_USER_LOYALTY = `
 const GET_LOYALTY_TIER_BY_NAME = `
   SELECT id, name, min_points, multiplier, benefits
   FROM loyalty_tiers
-  WHERE name = $1
+  WHERE LOWER(name) = LOWER($1)
 `;
 
 

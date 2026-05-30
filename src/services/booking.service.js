@@ -121,6 +121,34 @@ const createBooking = async (data, userId = null) => {
   try {
     await client.query("BEGIN");
 
+    if (userId) {
+      // Đã đăng nhập: email/phone phải khớp với tài khoản đang dùng
+      const userRow = await client.query(`SELECT email, phone FROM users WHERE id = $1`, [userId]);
+      const u = userRow.rows[0];
+      if (u && u.email && contact_email.toLowerCase() !== u.email.toLowerCase()) {
+        throw new Error('Email liên hệ phải là email tài khoản của bạn.');
+      }
+      if (u && u.phone && contact_phone && contact_phone.replace(/\s/g,'') !== u.phone) {
+        throw new Error('Số điện thoại liên hệ phải là số điện thoại tài khoản của bạn.');
+      }
+    } else {
+      // Guest: kiểm tra không dùng email/phone đã thuộc tài khoản khác
+      const emailCheck = await client.query(
+        `SELECT id FROM users WHERE LOWER(email) = LOWER($1)`, [contact_email]
+      );
+      if (emailCheck.rows.length > 0) {
+        throw new Error('Email này đã được đăng ký. Vui lòng đăng nhập hoặc dùng email khác.');
+      }
+      if (contact_phone) {
+        const phoneCheck = await client.query(
+          `SELECT id FROM users WHERE phone = $1`, [contact_phone.replace(/\s/g,'')]
+        );
+        if (phoneCheck.rows.length > 0) {
+          throw new Error('Số điện thoại này đã được đăng ký. Vui lòng đăng nhập hoặc dùng số khác.');
+        }
+      }
+    }
+
     const outboundSeat = await checkAndGetSeatInfo(client, outbound_flight_id, outbound_seat_class, seatsNeeded);
 
     let returnSeat = null;
@@ -153,8 +181,13 @@ const createBooking = async (data, userId = null) => {
       baggageTotal += p._baggage_price;
     }
 
-    const totalPrice = outboundTotal + returnTotal + baggageTotal;
-    const basePrice  = outboundPrice;
+    const seatExtraFee = parseFloat(data.seat_extra_fee) || 0;
+    const ancillaryFee = (data.ancillary_options || []).reduce(
+      (sum, opt) => sum + (Number(opt.unit_price || 0) * Number(opt.quantity || 1)), 0
+    );
+    // Lưu 1 giá duy nhất: tất cả gộp vào total_price
+    const totalPrice   = outboundTotal + returnTotal + baggageTotal + seatExtraFee + ancillaryFee;
+    const basePrice    = outboundPrice;
 
     let bookingCode;
     let isUnique = false;

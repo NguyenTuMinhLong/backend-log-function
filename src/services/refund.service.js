@@ -433,7 +433,11 @@ const requestRefund = async (userId, bookingCode, data) => {
 
     const booking = bookingResult.rows[0];
 
-    // 2. Check ownership (user có quyền refund booking của mình)
+    // 2. Check ownership
+    // Booking của user đã đăng ký → bắt buộc phải đăng nhập mới được refund
+    if (booking.user_id && !userId) {
+      throw new Error('Booking này được tạo bởi tài khoản đã đăng nhập. Vui lòng đăng nhập để thực hiện hoàn tiền.');
+    }
     if (userId && booking.user_id && String(booking.user_id) !== String(userId)) {
       throw new Error('Bạn không có quyền thực hiện yêu cầu này');
     }
