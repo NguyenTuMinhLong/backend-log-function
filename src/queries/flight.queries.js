@@ -286,7 +286,7 @@ const GET_MIN_PRICES_CALENDAR = `
   JOIN flight_seats fs ON fs.flight_id = f.id
   WHERE f.status = 'scheduled'
     AND f.is_active = true
-    AND DATE(f.departure_time) >= CURRENT_DATE
+    AND f.departure_time > NOW()
     AND dep.code = $1
     AND arr.code = $2
     AND fs.class = $3
