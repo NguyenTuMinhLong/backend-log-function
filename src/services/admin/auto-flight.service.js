@@ -394,24 +394,13 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
   // Lấy sân bay đích:
   // - Nếu arrAirportCode được chỉ định → chỉ 1 điểm đến, nhưng tất cả hãng phù hợp đều bay
   // - Nếu không → tất cả sân bay còn lại, xoay vòng hãng theo tuyến
-  let destinations;
-  const singleRoute = !!arrAirportCode;
-  if (singleRoute) {
-    const arrRes = await pool.query(
-      `SELECT id, code, name, city, country, lat, lng FROM airports WHERE UPPER(code) = UPPER($1) AND is_active = TRUE`,
-      [arrAirportCode]
-    );
-    if (!arrRes.rows.length) throw new Error(`Sân bay đến ${arrAirportCode} không tồn tại`);
-    destinations = arrRes.rows;
-  } else {
-    const destRes = await pool.query(
-      `SELECT id, code, name, city, country, lat, lng FROM airports
-       WHERE UPPER(code) != UPPER($1) AND is_active = TRUE AND lat IS NOT NULL AND lng IS NOT NULL
-       ORDER BY code`,
-      [airportCode]
-    );
-    destinations = destRes.rows;
-  }
+  const destRes = await pool.query(
+    `SELECT id, code, name, city, country, lat, lng FROM airports
+     WHERE UPPER(code) != UPPER($1) AND is_active = TRUE AND lat IS NOT NULL AND lng IS NOT NULL
+     ORDER BY code`,
+    [airportCode]
+  );
+  const destinations = destRes.rows;
 
   // Lấy tất cả hãng có country
   const airlineRes = await pool.query(
@@ -481,8 +470,8 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
       // ── Chế độ all routes:  xoay vòng hãng qua các slot  ────────────────────
       let schedule = []; // [{ dateStr, slotTime, airlineIdx }]
 
-      if (singleRoute) {
-        // Mỗi hãng đều bay, mỗi hãng N slot/ngày
+      if (mode === 'all_airlines') {
+        // Tất cả hãng phù hợp đều bay tuyến này, mỗi hãng N chuyến/ngày
         const slots = getTimeSlots(flightsPerRoute);
         for (const dateStr of dates) {
           for (let ai = 0; ai < compatAirlines.length; ai++) {

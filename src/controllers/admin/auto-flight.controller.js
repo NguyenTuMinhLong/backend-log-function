@@ -57,13 +57,12 @@ const runFromAirport = async (req, res) => {
   if (!airport_code || !start_date || !end_date || !flights_per_route) {
     return res.status(400).json({ error: 'Thiếu tham số: airport_code, start_date, end_date, flights_per_route' });
   }
-  if (!['per_day', 'total'].includes(mode)) {
-    return res.status(400).json({ error: 'mode phải là per_day hoặc total' });
+  if (!['per_day', 'total', 'all_airlines'].includes(mode)) {
+    return res.status(400).json({ error: 'mode phải là per_day, total hoặc all_airlines' });
   }
   try {
     const result = await svc.runFromAirport({
       airportCode:     airport_code.toUpperCase(),
-      arrAirportCode:  arr_airport_code ? arr_airport_code.toUpperCase() : null,
       startDate:       start_date,
       endDate:         end_date,
       flightsPerRoute: parseInt(flights_per_route),
