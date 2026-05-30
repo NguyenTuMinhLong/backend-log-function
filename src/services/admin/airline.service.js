@@ -87,19 +87,18 @@ const getAirlines = async (params) => {
 const createAirline = async (data) => {
   validateAirlineInput(data);
 
-  const { code, name, logo_url, logo_dark, logo_light, price_tier } = data;
+  const { code, name, country, logo_url, logo_dark, logo_light, price_tier } = data;
 
   const existing = await pool.query(Q.FIND_AIRLINE_BY_CODE, [code]);
   if (existing.rows.length > 0) {
     throw new Error(`Hãng bay với code "${code.toUpperCase()}" đã tồn tại`);
   }
 
-  // Auto-detect tier từ reference map nếu không truyền vào
   const tier = price_tier !== undefined && price_tier !== null && price_tier !== ''
     ? parseFloat(price_tier)
     : (AIRLINE_TIER_REF[code.toUpperCase()] ?? 1.00);
 
-  const result = await pool.query(Q.INSERT_AIRLINE, [code, name, logo_url || null, logo_dark || null, logo_light || null, tier]);
+  const result = await pool.query(Q.INSERT_AIRLINE, [code, name, country || null, logo_url || null, logo_dark || null, logo_light || null, tier]);
   return result.rows[0];
 };
 
@@ -112,13 +111,14 @@ const updateAirline = async (airlineId, data) => {
   const existing = await pool.query(Q.FIND_AIRLINE_BY_ID, [airlineId]);
   if (existing.rows.length === 0) throw new Error("Không tìm thấy hãng hàng không");
 
-  const { name, logo_url, logo_dark, logo_light, price_tier } = data;
+  const { name, country, logo_url, logo_dark, logo_light, price_tier } = data;
 
   const fields = [];
   const values = [];
   let   idx    = 1;
 
   if (name       !== undefined) { fields.push(`name=$${idx++}`);       values.push(name); }
+  if (country    !== undefined) { fields.push(`country=$${idx++}`);    values.push(country); }
   if (logo_url   !== undefined) { fields.push(`logo_url=$${idx++}`);   values.push(logo_url); }
   if (logo_dark  !== undefined) { fields.push(`logo_dark=$${idx++}`);  values.push(logo_dark); }
   if (logo_light !== undefined) { fields.push(`logo_light=$${idx++}`); values.push(logo_light); }

@@ -94,8 +94,7 @@ const saveConfig = async ({ is_enabled, start_date, end_date, flights_per_route,
       start_date       = COALESCE($2::date, start_date),
       end_date         = COALESCE($3::date, end_date),
       flights_per_route = COALESCE($4, flights_per_route),
-      advance_days     = COALESCE($5, advance_days),
-      updated_at       = NOW()
+      advance_days     = COALESCE($5, advance_days)
     WHERE id = 1
     RETURNING *
   `, [
@@ -112,27 +111,55 @@ const saveConfig = async ({ is_enabled, start_date, end_date, flights_per_route,
 
 const getAutoRoutes = async () => {
   const { rows } = await pool.query(`
-    SELECT DISTINCT
-      f.airline_id,
-      al.code  AS airline_code,
-      al.name  AS airline_name,
-      al.price_tier,
-      f.departure_airport_id  AS dep_id,
-      dep.code AS dep_code,
-      dep.lat  AS dep_lat,
-      dep.lng  AS dep_lng,
-      f.arrival_airport_id    AS arr_id,
-      arr.code AS arr_code,
-      arr.lat  AS arr_lat,
-      arr.lng  AS arr_lng
-    FROM flights f
-    JOIN airlines al  ON al.id  = f.airline_id
-    JOIN airports dep ON dep.id = f.departure_airport_id
-    JOIN airports arr ON arr.id = f.arrival_airport_id
-    WHERE f.status NOT IN ('cancelled')
-      AND dep.lat IS NOT NULL AND dep.lng IS NOT NULL
-      AND arr.lat IS NOT NULL AND arr.lng IS NOT NULL
-    ORDER BY al.code, dep.code, arr.code
+    WITH airline_hubs AS (
+      -- Sân bay mà mỗi hãng đã từng bay
+      SELECT DISTINCT airline_id, departure_airport_id AS airport_id
+      FROM flights WHERE status != 'cancelled'
+      UNION
+      SELECT DISTINCT airline_id, arrival_airport_id
+      FROM flights WHERE status != 'cancelled'
+    ),
+    ranked AS (
+      SELECT
+        al.id      AS airline_id,
+        al.code    AS airline_code,
+        al.name    AS airline_name,
+        al.country AS airline_country,
+        al.price_tier,
+        dep.id   AS dep_id,
+        dep.code AS dep_code,
+        dep.lat  AS dep_lat,
+        dep.lng  AS dep_lng,
+        arr.id   AS arr_id,
+        arr.code AS arr_code,
+        arr.lat  AS arr_lat,
+        arr.lng  AS arr_lng,
+        ROW_NUMBER() OVER (
+          PARTITION BY al.id
+          ORDER BY dep.code, arr.code
+        ) AS rn
+      FROM airline_hubs ah
+      JOIN airlines al  ON al.id  = ah.airline_id
+      JOIN airports dep ON dep.id = ah.airport_id
+      CROSS JOIN airports arr
+      WHERE dep.id != arr.id
+        AND arr.is_active = TRUE
+        AND arr.lat IS NOT NULL AND arr.lng IS NOT NULL
+        AND dep.lat IS NOT NULL AND dep.lng IS NOT NULL
+        -- Nếu hãng có country: ít nhất 1 đầu phải là sân bay cùng nước
+        -- Nếu hãng chưa có country: không lọc (giữ behaviour cũ)
+        AND (
+          al.country IS NULL
+          OR LOWER(dep.country) = LOWER(al.country)
+          OR LOWER(arr.country) = LOWER(al.country)
+        )
+    )
+    SELECT airline_id, airline_code, airline_name, price_tier,
+           dep_id, dep_code, dep_lat, dep_lng,
+           arr_id, arr_code, arr_lat, arr_lng
+    FROM ranked
+    WHERE rn <= 20
+    ORDER BY airline_code, dep_code, arr_code
   `);
   return rows;
 };
@@ -151,9 +178,10 @@ const getStatus = async () => {
 
 // ─── Batch runner ─────────────────────────────────────────────────────────────
 
-const runBatch = async (batchSize = 20) => {
+const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
   const config = await getConfig();
-  if (!config || !config.is_enabled) return { created: 0, skipped: 0, reason: 'disabled' };
+  if (!config || (!config.is_enabled && !force)) return { created: 0, skipped: 0, reason: 'disabled' };
+  const limit = unlimited ? Infinity : batchSize;
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -183,7 +211,7 @@ const runBatch = async (batchSize = 20) => {
     // Iterate dates from max(today, configStart) to targetEnd
     const loopStart = new Date(Math.max(today.getTime(), configStart.getTime()));
 
-    for (let d = new Date(loopStart); d <= targetEnd && created < batchSize; d.setDate(d.getDate() + 1)) {
+    for (let d = new Date(loopStart); d <= targetEnd && created < limit; d.setDate(d.getDate() + 1)) {
       const dateStr = d.toISOString().split('T')[0];
 
       // Fetch used flight numbers for this date (all airlines, to detect conflicts per airline)
@@ -209,7 +237,7 @@ const runBatch = async (batchSize = 20) => {
         const usedNums = usedByAirline[airlineId] || new Set();
         const airlineCode = aRoutes[0].airline_code;
 
-        for (let ri = 0; ri < aRoutes.length && created < batchSize; ri++) {
+        for (let ri = 0; ri < aRoutes.length && created < limit; ri++) {
           const route = aRoutes[ri];
           const km  = haversineKm(
             Number(route.dep_lat), Number(route.dep_lng),
@@ -218,7 +246,7 @@ const runBatch = async (batchSize = 20) => {
           const durationMins = estimateMins(km);
           const tierMult     = Number(route.price_tier) || 1.0;
 
-          for (let si = 0; si < timeSlots.length && created < batchSize; si++) {
+          for (let si = 0; si < timeSlots.length && created < limit; si++) {
             const depTime = `${dateStr}T${timeSlots[si]}:00`;
 
             // Bỏ qua nếu giờ khởi hành < 2 tiếng kể từ bây giờ (tránh tạo chuyến sắp hoặc đã qua)

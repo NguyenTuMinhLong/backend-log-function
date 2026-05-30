@@ -81,43 +81,30 @@ const getBoardingMinutes = (depTime, arrTime) => {
   return 90;
 };
 
-const VN_AIRPORTS = new Set([
-  'SGN','HAN','DAD','CXR','PQC','VCA','HPH','DLI','UIH',
-  'HUI','VII','TBB','BMV','VDH','DIN','VCS','VKG','PXU',
-]);
-
 /**
- * Sinh gate tự động theo sân bay + hành trình
- * Dùng hash từ flight_number → cùng chuyến luôn ra cùng gate
+ * Sinh gate tự động dựa theo country từ DB:
+ * - Vietnam → chỉ số (tự động đúng với mọi sân bay VN mới thêm vào)
+ * - Quốc tế → chữ + số (theo chuẩn phổ biến của hub đó)
+ * Hash từ flight_number → cùng chuyến luôn ra cùng gate
  */
-const generateGate = (flightNumber, departureAirport, arrivalAirport) => {
-  const fn  = (flightNumber || '').toUpperCase();
-  const dep = (departureAirport || '').toUpperCase();
-  const arr = (arrivalAirport  || '').toUpperCase();
-  const isIntl = !VN_AIRPORTS.has(arr);
+const generateGate = (flightNumber, departureAirport, departureCountry) => {
+  const fn      = (flightNumber     || '').toUpperCase();
+  const dep     = (departureAirport || '').toUpperCase();
+  const country = (departureCountry || '').toLowerCase();
 
-  // Hash ổn định từ flight number
-  const h = fn.split('').reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) & 0xfffffff, 0);
-
+  const h    = fn.split('').reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) & 0xfffffff, 0);
   const pick = (max) => (h % max) + 1;
 
-  // ── Sân bay Việt Nam ──────────────────────────────────────
-  if (dep === 'SGN') {
-    if (isIntl) {
-      return ['D','E'][h % 2] + pick(['D','E'][h % 2] === 'D' ? 12 : 8);
-    }
-    return ['A','B'][h % 2] + pick(['A','B'][h % 2] === 'A' ? 16 : 12);
+  // ── Sân bay Việt Nam: gate chỉ là số ─────────────────────
+  // Tự động áp dụng cho mọi sân bay có country = 'Vietnam'
+  if (country.includes('viet') || country === 'vn') {
+    if (dep === 'SGN') return String(pick(20));
+    if (dep === 'HAN') return String(pick(30));
+    if (dep === 'DAD') return String(pick(10));
+    return String(pick(8)); // sân bay VN khác mặc định 1-8
   }
-  if (dep === 'HAN') return isIntl ? String(pick(30)) : `G${pick(20)}`;
-  if (dep === 'DAD') return String(pick(10));
-  if (dep === 'CXR') return String(pick(8));
-  if (dep === 'PQC') return String(pick(8));
-  if (dep === 'VCA') return String(pick(4));
-  if (dep === 'HPH') return String(pick(6));
-  if (['DLI','UIH','HUI','VII','BMV','VKG','PXU'].includes(dep)) return String(pick(4));
-  if (['TBB','VDH','VCS','DIN'].includes(dep)) return String(pick(2));
 
-  // ── Sân bay quốc tế phổ biến ─────────────────────────────
+  // ── Sân bay quốc tế: chữ + số theo hub ──────────────────
   if (dep === 'BKK') return 'ABCDE'[h % 5] + pick(10);
   if (dep === 'SIN') { const p = 'ABCD'[h % 4]; return p + pick(p === 'D' ? 10 : 30); }
   if (dep === 'KUL') { const p = 'CD'[h % 2];   return p + pick(p === 'C' ? 30 : 20); }
@@ -129,8 +116,8 @@ const generateGate = (flightNumber, departureAirport, arrivalAirport) => {
   if (dep === 'MNL') return String(pick(20));
   if (['CGK','DPS'].includes(dep)) return 'D' + pick(30);
 
-  // Fallback
-  return isIntl ? 'ABCDE'[h % 5] + pick(10) : String(pick(8));
+  // Fallback quốc tế chưa biết
+  return 'ABCDE'[h % 5] + pick(15);
 };
 
 // =========================================================
@@ -258,7 +245,8 @@ const checkinPassenger = async (bookingCode, passengerId, flightType) => {
     // Get flight info
     const flightResult = await client.query(
       `SELECT f.flight_number, f.departure_time, f.arrival_time,
-              dep.code AS departure_airport, arr.code AS arrival_airport
+              dep.code AS departure_airport, dep.country AS departure_country,
+              arr.code AS arrival_airport
        FROM flights f
        JOIN airports dep ON dep.id = f.departure_airport_id
        JOIN airports arr ON arr.id = f.arrival_airport_id
@@ -276,7 +264,7 @@ const checkinPassenger = async (bookingCode, passengerId, flightType) => {
     const boardingPassCode = generateBoardingPassCode(booking.booking_code, seq);
 
     // Gate theo sân bay
-    const gate = booking.gate || generateGate(flightNumber, flightRow.departure_airport, flightRow.arrival_airport);
+    const gate = booking.gate || generateGate(flightNumber, flightRow.departure_airport, flightRow.departure_country);
 
     // Boarding time theo thực tế
     let boardingTime = null;
@@ -360,18 +348,32 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
       throw new Error('Chuyến bay đã bị hủy, không thể check-in');
     }
 
+    // Fetch flight info once (dùng flightId đã có từ bước validate ở trên)
+    const flightResult = await client.query(
+      `SELECT f.flight_number, f.departure_time, f.arrival_time,
+              dep.code AS departure_airport, dep.country AS departure_country,
+              arr.code AS arrival_airport
+       FROM flights f
+       JOIN airports dep ON dep.id = f.departure_airport_id
+       JOIN airports arr ON arr.id = f.arrival_airport_id
+       WHERE f.id = $1`,
+      [flightId]
+    );
+    const flightRow    = flightResult.rows[0] || {};
+    const flightNumber = flightRow.flight_number || 'N/A';
+
     // Get passengers (except infants)
     const passengersResult = await client.query(
       'SELECT * FROM passengers WHERE booking_id = $1 AND passenger_type != $2',
       [booking.id, 'infant']
     );
-    
+
     const results = [];
-    
+
     for (const passenger of passengersResult.rows) {
       // Determine seat field
       const seatField = flightType === 'return' ? 'return_seat_number' : 'seat_number';
-      
+
       // Skip if no seat
       if (!passenger[seatField]) {
         results.push({
@@ -382,7 +384,7 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
         });
         continue;
       }
-      
+
       // Skip if already checked in
       if (passenger.checked_in) {
         results.push({
@@ -393,26 +395,8 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
         });
         continue;
       }
-      
-      const seatNumber = passenger[seatField];
-      
-      // Get flight number
-      const flightId = flightType === 'return' 
-        ? booking.return_flight_id 
-        : booking.outbound_flight_id;
-      
-      const flightResult = await client.query(
-        `SELECT f.flight_number, f.departure_time, f.arrival_time,
-                dep.code AS departure_airport, arr.code AS arrival_airport
-         FROM flights f
-         JOIN airports dep ON dep.id = f.departure_airport_id
-         JOIN airports arr ON arr.id = f.arrival_airport_id
-         WHERE f.id = $1`,
-        [flightId]
-      );
 
-      const flightRow = flightResult.rows[0] || {};
-      const flightNumber = flightRow.flight_number || 'N/A';
+      const seatNumber = passenger[seatField];
 
       // Get sequence
       const seq = await getNextSequenceNumber(booking.id, flightType);
@@ -421,7 +405,7 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
       const boardingPassCode = generateBoardingPassCode(booking.booking_code, seq);
 
       // Gate theo sân bay
-      const gate = booking.gate || generateGate(flightNumber, flightRow.departure_airport, flightRow.arrival_airport);
+      const gate = booking.gate || generateGate(flightNumber, flightRow.departure_airport, flightRow.departure_country);
 
       // Boarding time theo thực tế
       let boardingTime = null;
@@ -504,9 +488,10 @@ const getBoardingPass = async (boardingPassCode) => {
   const qrCodeUrl = `/api/checkin/${boardingPassCode}/qr`;
   
   return {
-    airline:      data.airline_name || 'VIVUDEE AIR',
-    airline_code: data.airline_code || '',
-    airline_logo: data.airline_logo || null,
+    airline:           data.airline_name || 'VIVUDEE AIR',
+    airline_code:      data.airline_code || '',
+    airline_logo:      data.airline_logo      || null,
+    airline_logo_dark: data.airline_logo_dark || null,
     type: 'BOARDING PASS',
 
     passenger_name: data.full_name,
@@ -524,7 +509,7 @@ const getBoardingPass = async (boardingPassCode) => {
 
     departure_time: departureTime,
     arrival_time:   formatTime(data.arrival_time),
-    gate:           (data.gate && data.gate !== 'TBA') ? data.gate : generateGate(data.flight_number, data.departure_airport, data.arrival_airport),
+    gate:           (data.gate && data.gate !== 'TBA') ? data.gate : generateGate(data.flight_number, data.departure_airport, data.departure_country),
     seat:           data.seat_number,
 
     sequence:          data.sequence_number,

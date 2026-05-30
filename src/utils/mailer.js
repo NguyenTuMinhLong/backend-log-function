@@ -845,4 +845,45 @@ const sendBoardingPassEmail = async (to, { contactName, bookingCode, boardingPas
   }
 };
 
-module.exports = { sendOTPEmail, sendRefundOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail, sendFlightStatusEmail, sendBoardingPassEmail };
+const sendContactEmail = async ({ name, email, subject, message }) => {
+  try {
+    const html = `
+<html><body style="font-family:-apple-system,sans-serif;background:#f1f5f9;padding:24px;">
+  <div style="max-width:540px;margin:auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.08);">
+    <div style="background:#1a56db;padding:20px 28px;">
+      <p style="color:#fff;font-size:16px;font-weight:700;margin:0;">📬 Tin nhắn liên hệ mới — Vivudee</p>
+    </div>
+    <div style="padding:24px 28px;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;color:#6b7280;font-size:13px;width:100px;">Họ và tên</td><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;font-weight:600;color:#111827;">${name}</td></tr>
+        <tr><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;color:#6b7280;font-size:13px;">Email</td><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;font-weight:600;color:#1a56db;">${email}</td></tr>
+        <tr><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;color:#6b7280;font-size:13px;">Chủ đề</td><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;font-weight:600;color:#111827;">${subject || '(không có)'}</td></tr>
+      </table>
+      <div style="margin-top:20px;">
+        <p style="color:#6b7280;font-size:13px;margin:0 0 8px;">Nội dung:</p>
+        <div style="background:#f8fafc;border-radius:8px;padding:16px;font-size:14px;color:#374151;line-height:1.7;white-space:pre-wrap;">${message}</div>
+      </div>
+    </div>
+    <div style="background:#f8faff;padding:14px 28px;text-align:center;border-top:1px solid #e5e7eb;">
+      <p style="color:#9ca3af;font-size:12px;margin:0;">© ${new Date().getFullYear()} Vivudee · vivudee_support@gmail.com</p>
+    </div>
+  </div>
+</body></html>`;
+
+    const { error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM,
+      to: 'daodungvan321@gmail.com',
+      reply_to: email,
+      subject: `[Vivudee Contact] ${subject || 'Tin nhắn mới'} — ${name}`,
+      html,
+    });
+
+    if (error) { console.error('❌ sendContactEmail error:', error); return false; }
+    return true;
+  } catch (err) {
+    console.error('❌ sendContactEmail exception:', err);
+    return false;
+  }
+};
+
+module.exports = { sendOTPEmail, sendRefundOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail, sendFlightStatusEmail, sendBoardingPassEmail, sendContactEmail };
