@@ -51,8 +51,12 @@ const validateFlightInput = (data, isUpdate = false) => {
   }
 };
 
-const validateSeats = (seats) => {
-  if (!seats || !Array.isArray(seats) || seats.length === 0) return;
+const validateSeats = (seats, requireAtLeastOne = false) => {
+  if (!seats || !Array.isArray(seats)) return;
+  if (requireAtLeastOne && seats.length === 0) {
+    throw new Error("Phải có ít nhất 1 hạng ghế (economy) khi tạo chuyến bay");
+  }
+  if (seats.length === 0) return;
 
   for (const s of seats) {
     if (!VALID_CLASSES.includes(s.class)) {
@@ -157,7 +161,7 @@ const createFlight = async (data) => {
   } = data;
 
   validateFlightInput(data);
-  validateSeats(seats);
+  validateSeats(seats, true);
 
   const client = await pool.connect();
   try {
