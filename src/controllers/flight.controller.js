@@ -120,15 +120,21 @@ const getFlightRecommendations = async (req, res) => {
     // Lấy tham số từ query string (?from=SGN&to=HAN&limit=10)
     const { from, to, limit = 10 } = req.query;
 
-    const userId    = req.user?.id || req.query.userId || null;
-    const sessionId = req.headers['x-session-id'] || req.query.session_id || null;
+    // === LẤY USER ID (hỗ trợ cả đăng nhập JWT lẫn test qua query) ===
+    const userId = req.user?.id || req.query.userId || null;
+
+    // Validation
+    if (!from || !to) {
+      return res.status(400).json({ 
+        error: "Thiếu tham số 'from' hoặc 'to' (mã sân bay)" 
+      });
+    }
 
     const recommendations = await flightService.recommendFlights({
-      userId,
-      sessionId,
-      fromAirport: from ? from.toUpperCase() : null,
-      toAirport:   to   ? to.toUpperCase()   : null,
-      limit: parseInt(limit) || 10,
+      userId: userId,                    
+      fromAirport: from.toUpperCase(),
+      toAirport: to.toUpperCase(),
+      limit: parseInt(limit) || 10
     });
 
     res.json({ 
@@ -183,4 +189,14 @@ module.exports = {
   getSeatMap,
   getFlightRecommendations,
   getFlightPosition,
+  browseFlights: async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit) || 40;
+      const data  = await flightService.browseFlights(limit);
+      res.json({ data });
+    } catch (err) {
+      console.error('[Flight Browse]', err);
+      res.status(500).json({ error: 'Lỗi server' });
+    }
+  },
 };
