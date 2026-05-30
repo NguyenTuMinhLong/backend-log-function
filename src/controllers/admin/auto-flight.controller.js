@@ -53,7 +53,7 @@ const runAll = async (req, res) => {
 };
 
 const runFromAirport = async (req, res) => {
-  const { airport_code, start_date, end_date, flights_per_route, mode } = req.body;
+  const { airport_code, arr_airport_code, start_date, end_date, flights_per_route, mode } = req.body;
   if (!airport_code || !start_date || !end_date || !flights_per_route) {
     return res.status(400).json({ error: 'Thiếu tham số: airport_code, start_date, end_date, flights_per_route' });
   }
@@ -63,6 +63,7 @@ const runFromAirport = async (req, res) => {
   try {
     const result = await svc.runFromAirport({
       airportCode:     airport_code.toUpperCase(),
+      arrAirportCode:  arr_airport_code ? arr_airport_code.toUpperCase() : null,
       startDate:       start_date,
       endDate:         end_date,
       flightsPerRoute: parseInt(flights_per_route),

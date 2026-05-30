@@ -382,7 +382,7 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
 };
 
 // ─── Tạo chuyến bay từ 1 sân bay cụ thể ─────────────────────────────────────
-const runFromAirport = async ({ airportCode, startDate, endDate, flightsPerRoute, mode }) => {
+const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate, flightsPerRoute, mode }) => {
   // Lấy sân bay nguồn
   const srcRes = await pool.query(
     `SELECT id, code, city, country, lat, lng FROM airports WHERE UPPER(code) = UPPER($1) AND is_active = TRUE`,
@@ -391,14 +391,27 @@ const runFromAirport = async ({ airportCode, startDate, endDate, flightsPerRoute
   if (!srcRes.rows.length) throw new Error(`Sân bay ${airportCode} không tồn tại`);
   const src = srcRes.rows[0];
 
-  // Lấy tất cả sân bay đích (có tọa độ)
-  const destRes = await pool.query(
-    `SELECT id, code, name, city, country, lat, lng FROM airports
-     WHERE UPPER(code) != UPPER($1) AND is_active = TRUE AND lat IS NOT NULL AND lng IS NOT NULL
-     ORDER BY code`,
-    [airportCode]
-  );
-  const destinations = destRes.rows;
+  // Lấy sân bay đích:
+  // - Nếu arrAirportCode được chỉ định → chỉ 1 điểm đến, nhưng tất cả hãng phù hợp đều bay
+  // - Nếu không → tất cả sân bay còn lại, xoay vòng hãng theo tuyến
+  let destinations;
+  const singleRoute = !!arrAirportCode;
+  if (singleRoute) {
+    const arrRes = await pool.query(
+      `SELECT id, code, name, city, country, lat, lng FROM airports WHERE UPPER(code) = UPPER($1) AND is_active = TRUE`,
+      [arrAirportCode]
+    );
+    if (!arrRes.rows.length) throw new Error(`Sân bay đến ${arrAirportCode} không tồn tại`);
+    destinations = arrRes.rows;
+  } else {
+    const destRes = await pool.query(
+      `SELECT id, code, name, city, country, lat, lng FROM airports
+       WHERE UPPER(code) != UPPER($1) AND is_active = TRUE AND lat IS NOT NULL AND lng IS NOT NULL
+       ORDER BY code`,
+      [airportCode]
+    );
+    destinations = destRes.rows;
+  }
 
   // Lấy tất cả hãng có country
   const airlineRes = await pool.query(
@@ -454,7 +467,7 @@ const runFromAirport = async ({ airportCode, startDate, endDate, flightsPerRoute
     for (const dest of destinations) {
       const destCountry = (dest.country || '').toLowerCase();
 
-      // Hãng phù hợp: hãng cùng nước với điểm đến HOẶC hãng Việt Nam (vì dep là VN)
+      // Hãng phù hợp: hãng cùng nước với điểm đến HOẶC hãng cùng nước dep (VN)
       let compatAirlines = allAirlines.filter(al => {
         const alc = (al.country || '').toLowerCase();
         return alc === srcCountry || alc === destCountry;
@@ -464,11 +477,21 @@ const runFromAirport = async ({ airportCode, startDate, endDate, flightsPerRoute
       const km           = haversineKm(Number(src.lat), Number(src.lng), Number(dest.lat), Number(dest.lng));
       const durationMins = estimateMins(km);
 
-      // Xác định slots cần tạo theo mode
-      // per_day: N slot mỗi ngày → tổng = N × numDays mỗi tuyến
-      // total: N slot tổng/tuyến → trải đều qua từng ngày
+      // ── Chế độ single route: mỗi hãng bay N chuyến/ngày ─────────────────────
+      // ── Chế độ all routes:  xoay vòng hãng qua các slot  ────────────────────
       let schedule = []; // [{ dateStr, slotTime, airlineIdx }]
-      if (mode === 'per_day') {
+
+      if (singleRoute) {
+        // Mỗi hãng đều bay, mỗi hãng N slot/ngày
+        const slots = getTimeSlots(flightsPerRoute);
+        for (const dateStr of dates) {
+          for (let ai = 0; ai < compatAirlines.length; ai++) {
+            for (let si = 0; si < slots.length; si++) {
+              schedule.push({ dateStr, slotTime: slots[si], airlineIdx: ai });
+            }
+          }
+        }
+      } else if (mode === 'per_day') {
         const slots = getTimeSlots(flightsPerRoute);
         let ai = 0;
         for (const dateStr of dates) {
