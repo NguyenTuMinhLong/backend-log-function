@@ -32,9 +32,9 @@ const calcPrices = (durationMins, tierMult, depHour) => {
 };
 
 const autoExtraBagPrice = (basePrice, cls) => {
-  if (!basePrice || cls === 'first') return 0;
+  if (cls === 'first' || !Number.isFinite(basePrice) || basePrice <= 0) return 0;
   const ratio = cls === 'business' ? 0.025 : 0.045;
-  return Math.max(5000, Math.round(basePrice * ratio / 1000) * 1000);
+  return Math.max(50000, Math.round(basePrice * ratio / 1000) * 1000);
 };
 
 const haversineKm = (lat1, lng1, lat2, lng2) => {
@@ -66,10 +66,21 @@ const getTimeSlots = (n) => {
   });
 };
 
+// Format local date thành "YYYY-MM-DD" — tránh lệch ngày do UTC offset
+const toLocalDateStr = (d) => {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+// Tính giờ đến: ghép dateStr + timeStr thành naive local datetime
 const addMins = (dateStr, timeStr, durationMins) => {
-  const dt = new Date(`${dateStr}T${timeStr}:00`);
+  // Tạo Date từ chuỗi local (không có Z) để giữ đúng múi giờ server
+  const [h, m] = timeStr.split(':').map(Number);
+  const [y, mo, dd] = dateStr.split('-').map(Number);
+  const dt = new Date(y, mo - 1, dd, h, m, 0, 0);
   dt.setMinutes(dt.getMinutes() + durationMins);
-  return dt.toISOString().replace('Z', '').replace('T', ' ').slice(0, 19);
+  const pad = n => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}:00`;
 };
 
 // ─── Seat config ──────────────────────────────────────────────────────────────
@@ -164,7 +175,7 @@ const getAutoRoutes = async (maxRoutesPerAirline = 5) => {
         arr.lng  AS arr_lng,
         ROW_NUMBER() OVER (
           PARTITION BY ar.airline_id
-          ORDER BY dep.code, arr.code
+          ORDER BY RANDOM()
         ) AS rn
       FROM airline_region ar
       CROSS JOIN airports dep
@@ -233,11 +244,11 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
   const slotsPerRoute = config.flights_per_route || 3;
   const timeSlots     = getTimeSlots(slotsPerRoute);
 
-  // Build mảng ngày từ loopStart → targetEnd
+  // Build mảng ngày từ loopStart → targetEnd (dùng local date tránh UTC offset)
   const loopStart = new Date(Math.max(today.getTime(), configStart.getTime()));
   const dates = [];
   for (let d = new Date(loopStart); d <= targetEnd; d.setDate(d.getDate() + 1)) {
-    dates.push(d.toISOString().split('T')[0]);
+    dates.push(toLocalDateStr(d));
   }
   if (dates.length === 0) return { created: 0, skipped: 0, reason: 'no_dates' };
 
@@ -329,7 +340,8 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
               const flight = flightRes.rows[0];
 
               for (const seat of SEAT_CONFIG) {
-                const bp = prices[seat.class] || 0;
+                const raw = prices[seat.class];
+                const bp  = Number.isFinite(raw) && raw > 0 ? raw : 0;
                 await client.query(QF.INSERT_FLIGHT_SEAT, [
                   flight.id, seat.class, seat.total_seats, seat.total_seats,
                   bp, seat.baggage_included_kg, seat.carry_on_kg,
