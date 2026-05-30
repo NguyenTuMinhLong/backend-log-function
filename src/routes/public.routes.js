@@ -46,31 +46,26 @@ router.post("/contact", async (req, res) => {
 });
 
 // Đăng ký nhận khuyến mãi qua email
-const crypto = require('crypto');
-const { sendNewsletterWelcomeEmail } = require('../utils/mailer');
-
 router.post("/newsletter/subscribe", async (req, res) => {
   const { email } = req.body;
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
     return res.status(400).json({ error: "Email không hợp lệ" });
   }
   try {
+    const crypto = require('crypto');
     const token = crypto.randomBytes(32).toString('hex');
-    const result = await pool.query(
+    await pool.query(
       `INSERT INTO newsletter_subscribers (email, unsubscribe_token)
        VALUES (LOWER($1), $2)
        ON CONFLICT (email) DO UPDATE
-         SET is_active = TRUE,
-             unsubscribe_token = COALESCE(newsletter_subscribers.unsubscribe_token, EXCLUDED.unsubscribe_token)
-       RETURNING unsubscribe_token, (xmax = 0) AS is_new`,
+         SET is_active = TRUE`,
       [email.trim(), token]
     );
-    const isNew = result.rows[0]?.is_new;
-    const finalToken = result.rows[0]?.unsubscribe_token;
-    // Chỉ gửi welcome email khi lần đầu đăng ký
-    if (isNew) {
-      sendNewsletterWelcomeEmail(email.trim(), { unsubscribeToken: finalToken }).catch(() => {});
-    }
+    // Gửi welcome email bất đồng bộ
+    try {
+      const { sendNewsletterWelcomeEmail } = require('../utils/mailer');
+      sendNewsletterWelcomeEmail(email.trim(), { unsubscribeToken: token }).catch(() => {});
+    } catch (_) {}
     res.json({ success: true });
   } catch (err) {
     console.error("[Newsletter] subscribe error:", err.message);
