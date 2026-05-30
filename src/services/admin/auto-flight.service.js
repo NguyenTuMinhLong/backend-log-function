@@ -290,11 +290,15 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
     let created = 0;
     let skipped = 0;
 
-    // ── Loop order: airline → route → slot → ngày ─────────────────────────────
-    // Date là vòng trong cùng → mỗi route/slot được tạo cho TẤT CẢ ngày trước
-    // khi chuyển sang route/slot tiếp theo → phân bổ đều qua toàn bộ date range
+    // Chia budget đều cho từng hãng → mỗi batch run tất cả hãng đều được tạo
+    const numAirlines      = Object.keys(airlineRoutes).length;
+    const perAirlineBudget = unlimited ? Infinity : Math.max(3, Math.ceil(limit / numAirlines));
+
     outer:
     for (const [airlineId, aRoutes] of Object.entries(airlineRoutes)) {
+      let airlineCreated = 0;
+
+      airline:
       for (let ri = 0; ri < aRoutes.length; ri++) {
         const route        = aRoutes[ri];
         const km           = haversineKm(Number(route.dep_lat), Number(route.dep_lng), Number(route.arr_lat), Number(route.arr_lng));
@@ -306,7 +310,8 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
           const prices  = calcPrices(durationMins, tierMult, depHour);
 
           for (const dateStr of dates) {
-            if (created >= limit) break outer;
+            if (created >= limit)                      break outer;   // hết tổng quota → dừng hẳn
+            if (airlineCreated >= perAirlineBudget)    break airline; // hết budget hãng này → qua hãng tiếp
 
             const depTime = `${dateStr}T${timeSlots[si]}:00`;
 
@@ -350,8 +355,9 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
               }
 
               await client.query('COMMIT');
-              existingSet.add(slotKey); // tránh duplicate trong cùng 1 run
+              existingSet.add(slotKey);
               created++;
+              airlineCreated++;
             } catch (err) {
               await client.query('ROLLBACK');
               console.error(`[AutoFlight] Insert error ${flightNum} ${dateStr}:`, err.message);
