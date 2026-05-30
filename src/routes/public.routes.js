@@ -45,4 +45,24 @@ router.post("/contact", async (req, res) => {
   res.json({ success: true });
 });
 
+// Đăng ký nhận khuyến mãi qua email
+router.post("/newsletter/subscribe", async (req, res) => {
+  const { email } = req.body;
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    return res.status(400).json({ error: "Email không hợp lệ" });
+  }
+  try {
+    await pool.query(
+      `INSERT INTO newsletter_subscribers (email)
+       VALUES (LOWER($1))
+       ON CONFLICT (email) DO UPDATE SET is_active = TRUE`,
+      [email.trim()]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[Newsletter] subscribe error:", err.message);
+    res.status(500).json({ error: "Lỗi server" });
+  }
+});
+
 module.exports = router;
