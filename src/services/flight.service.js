@@ -2,6 +2,42 @@
 const pool = require('../config/db');
 const QF = require('../queries/flight.queries');
 
+// Lấy chuyến bay đa dạng (không cần from/to cụ thể) — dùng cho Browse + homepage
+const browseFlights = async (limit = 40) => {
+  const { rows } = await pool.query(`
+    WITH ranked AS (
+      SELECT
+        f.id AS flight_id, f.flight_number, f.departure_time, f.arrival_time,
+        f.duration_minutes, f.status,
+        al.id AS airline_id, al.code AS airline_code, al.name AS airline_name,
+        al.logo_url AS airline_logo, al.logo_dark AS airline_logo_dark, al.logo_light AS airline_logo_light,
+        dep.id AS departure_airport_id, dep.code AS departure_code,
+        dep.city AS departure_city, dep.name AS departure_airport_name,
+        arr.id AS arrival_airport_id, arr.code AS arrival_code,
+        arr.city AS arrival_city, arr.name AS arrival_airport_name,
+        fs.class AS seat_class, fs.total_seats, fs.available_seats, fs.base_price,
+        fs.baggage_included_kg, fs.carry_on_kg, fs.extra_baggage_price,
+        ROW_NUMBER() OVER (
+          PARTITION BY al.id, dep.code, arr.code
+          ORDER BY f.departure_time ASC
+        ) AS rn
+      FROM flights f
+      JOIN airlines     al  ON al.id  = f.airline_id
+      JOIN airports     dep ON dep.id = f.departure_airport_id
+      JOIN airports     arr ON arr.id = f.arrival_airport_id
+      JOIN flight_seats fs  ON fs.flight_id = f.id AND fs.class = 'economy'
+      WHERE f.status = 'scheduled'
+        AND f.is_active = true
+        AND f.departure_time > NOW()
+        AND fs.available_seats > 0
+    )
+    SELECT * FROM ranked WHERE rn = 1
+    ORDER BY RANDOM()
+    LIMIT $1
+  `, [limit]);
+  return formatFlights(rows, 1, 0, 0);
+};
+
 const recommendFlights = async ({ userId, fromAirport, toAirport, limit = 15 }) => {
   const query = `
     SELECT
@@ -521,6 +557,7 @@ const getPriceCalendar = async (params = {}) => {
 };
 
 module.exports = { 
+  browseFlights,
   recommendFlights,
   searchFlights,
   getAirports,
