@@ -61,4 +61,14 @@ router.post('/:requestCode/approve', authenticate, dateChangeController.approveD
  */
 router.post('/:requestCode/reject', authenticate, dateChangeController.rejectDateChange);
 
+// =========================================================
+// OTP VERIFICATION
+// =========================================================
+
+/**
+ * POST /api/date-changes/confirm
+ * Verify OTP and confirm date change request
+ */
+router.post('/confirm', dateChangeController.confirmDateChange);
+
 module.exports = router;

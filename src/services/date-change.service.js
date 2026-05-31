@@ -13,6 +13,8 @@ const QF = require('../queries/flight.queries');
 const QR = require('../queries/refund.queries');
 const { DATE_CHANGE } = require('../config/refund.config');
 const { createDateChangeNotification } = require('./notification.service');
+const { sendRefundOTPEmail } = require('../utils/mailer');
+const { OTP_CONFIG } = require('../config/refund.config');
 
 const generateRefundCode = () => {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -25,6 +27,8 @@ const generateRefundCode = () => {
 // =========================================================
 // HELPERS
 // =========================================================
+
+const dateChangeOTPStore = new Map(); // In-memory store: requestCode -> { otp, expiresAt, attempts }
 
 const generateRequestCode = () => {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -77,6 +81,40 @@ const validateDateChangeRequest = async (booking, newFlightId, seatClass) => {
   }
 
   return newFlight;
+};
+// Hàm gửi OTP cho email
+const requestDateChangeOTP = async (email, requestCode) => {
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = Date.now() + OTP_CONFIG.expiresInMinutes * 60 * 1000;
+
+  dateChangeOTPStore.set(email.toLowerCase(), {
+    code: otp,
+    requestCode,
+    expiresAt,
+    attempts: 0,
+    verified: false,
+  });
+
+  // Debug: In OTP ra console (neu email la test)
+  console.log(`[DateChange OTP] Code: ${otp} for ${email}`);
+
+  return { expiresIn: OTP_CONFIG.expiresInMinutes };
+}
+// Hàm verify OTP
+const verifyDateChangeOTP = async (email, otp) => {
+  const normalizedEmail = email.toLowerCase().trim();
+  const otpData = dateChangeOTPStore.get(normalizedEmail);
+
+  if (!otpData) throw new Error('Khong tim thay ma OTP');
+  if (Date.now() > otpData.expiresAt) throw new Error('Ma OTP da het han');
+  if (otpData.attempts >= OTP_CONFIG.maxAttempts) throw new Error('Qua so lan thu');
+  if (otpData.code !== otp) {
+    otpData.attempts++;
+    throw new Error('Ma OTP khong dung');
+  }
+
+  otpData.verified = true;
+  return { verified: true };
 };
 
 // =========================================================
@@ -153,12 +191,20 @@ const requestDateChange = async (userId, bookingCode, data) => {
       oldPrice,
       newTotalPrice,
       priceDifference,
-      'pending',
+      'pending_otp', // Status: cho OTP verification
       reason,
       userId,
     ]);
 
     const request = requestResult.rows[0];
+
+    // Gui OTP den email
+    const bookingEmail = booking.contact_email || booking.guest_email;
+    try {
+      await requestDateChangeOTP(bookingEmail, request.request_code);
+    } catch (otpErr) {
+      console.error('[DateChange] OTP send error:', otpErr.message);
+    }
 
     try {
       await createDateChangeNotification({
@@ -190,8 +236,9 @@ const requestDateChange = async (userId, bookingCode, data) => {
         seat_class: new_seat_class,
       },
       price_difference: priceDifference,
-      price_difference_label: priceDifference > 0 ? 'Bạn phải trả thêm' : priceDifference < 0 ? 'Bạn được hoàn' : 'Không phải trả thêm',
-      message: `Yêu cầu đổi ngày bay đã được tiếp nhận. Mã yêu cầu: ${request.request_code}`,
+      price_difference_label: priceDifference > 0 ? 'Ban phai tra them' : priceDifference < 0 ? 'Ban duoc hoan' : 'Khong phai tra them',
+      message: `Ma OTP da gui den ${booking.contact_email || booking.guest_email}. Vui long xac thuc OTP de hoan tat yeu cau.`,
+      requires_otp: true
     };
   } catch (err) {
     await client.query('ROLLBACK');
@@ -202,7 +249,56 @@ const requestDateChange = async (userId, bookingCode, data) => {
 };
 
 // =========================================================
-// APPROVE DATE CHANGE (ADMIN) - FINAL FIX
+// CONFIRM DATE CHANGE (After OTP Verification)
+// =========================================================
+
+const confirmDateChange = async (email, otp, requestCode) => {
+  // 1. Verify OTP
+  await verifyDateChangeOTP(email, otp);
+
+  // 2. Lay request
+  const requestResult = await pool.query(
+    QCD.SELECT_DATE_CHANGE_BY_CODE, [requestCode]
+  );
+  if (requestResult.rows.length === 0) throw new Error('Khong tim thay yeu cau');
+  const request = requestResult.rows[0];
+
+  if (request.status !== 'pending_otp') {
+    throw new Error(`Yeu cau da duoc xu ly (status: ${request.status})`);
+  }
+
+  // 3. Check auto/manual
+  const { AUTO_REFUND } = require('../config/refund.config');
+  const absDiff = Math.abs(request.price_difference);
+
+  let newStatus;
+  if (AUTO_REFUND.enabled && absDiff < AUTO_REFUND.threshold) {
+    // Auto approve
+    newStatus = 'approved';
+  } else {
+    newStatus = 'pending';
+  }
+
+  // 4. Update status (simple - no admin needed for OTP verification)
+  await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, [newStatus, requestCode]);
+
+  // 5. Neu auto -> goi approve luon
+  if (newStatus === 'approved') {
+    await approveDateChange(null, requestCode, 'Auto-approved');
+  }
+
+  return {
+    success: true,
+    status: newStatus,
+    auto_approved: newStatus === 'approved',
+    message: newStatus === 'approved'
+      ? 'Yeu cau da duyet tu dong'
+      : 'Yeu cau da tiep nhan, cho admin duyet',
+  };
+};
+
+// =========================================================
+// APPROVE DATE CHANGE (ADMIN)  \][-p0i]
 // =========================================================
 
 const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
@@ -230,7 +326,7 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
     );
 
     if (newSeatCheck.rows.length === 0) throw new Error('Không tìm thấy ghế chuyến bay mới');
-    
+
     const newSeat = newSeatCheck.rows[0];
     console.log(`[New Flight] Available: ${newSeat.available_seats}/${newSeat.total_seats}`);
 
@@ -456,4 +552,5 @@ module.exports = {
   getBookingDateChanges,
   getUserDateChanges,
   validateDateChangeRequest,
+  confirmDateChange,
 };

@@ -32,20 +32,20 @@ const getGuestSessionId = (req) => {
 const requestRefund = async (req, res) => {
   try {
     const userId = req.user ? req.user.id : null;
-    const bookingCode = req.params.bookingCode.toUpperCase();
 
     if (!userId) {
-      return res.status(401).json({ error: 'Vui lòng đăng nhập để thực hiện yêu cầu hoàn tiền' });
+      return res.status(401).json({ error: 'Vui long dang nhap de thuc hien yeu cau hoan tien' });
     }
 
     const {
+      bookingCode,
       refund_type = 'full',
       requested_items,
       reason,
       user_notes,
     } = req.body;
 
-    const result = await refundService.requestRefund(userId, bookingCode, {
+    const result = await refundService.requestRefund(userId, bookingCode?.toUpperCase(), {
       refund_type,
       requested_items,
       reason,

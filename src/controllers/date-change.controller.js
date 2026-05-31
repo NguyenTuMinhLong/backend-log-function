@@ -133,6 +133,26 @@ const rejectDateChange = async (req, res) => {
   }
 };
 
+// =========================================================
+// CONFIRM DATE CHANGE (After OTP Verification)
+// =========================================================
+
+const confirmDateChange = async (req, res) => {
+  try {
+    const { email, otp, requestCode } = req.body;
+
+    if (!email || !otp || !requestCode) {
+      return res.status(400).json({ error: 'email, otp, requestCode la bat buoc' });
+    }
+
+    const result = await dateChangeService.confirmDateChange(email, otp, requestCode);
+    res.json(result);
+  } catch (err) {
+    console.error('[ConfirmDateChange]', err.message);
+    res.status(400).json({ error: err.message });
+  }
+};
+
 module.exports = {
   requestDateChange,
   getBookingDateChanges,
@@ -141,4 +161,5 @@ module.exports = {
   cancelDateChangeRequest,
   approveDateChange,
   rejectDateChange,
+  confirmDateChange,
 };

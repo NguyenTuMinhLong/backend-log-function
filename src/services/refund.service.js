@@ -469,6 +469,16 @@ const requestRefund = async (userId, bookingCode, data) => {
     // 8. Calculate refund amount
     const refundCalc = calculateRefundAmount(booking, payment, policy, refund_type, requested_items);
 
+    const { AUTO_REFUND } = require('../config/refund.config');
+
+    // Mac dinh la pending, neu < 1M thi auto approve
+    let refundStatus = 'pending';
+    if (AUTO_REFUND.enabled && refundCalc.net_refund_amount < AUTO_REFUND.threshold) {
+      // Auto approve refund < 1M
+      refundStatus = 'approved';
+      console.log(`[Refund] Auto-approved (${refundCalc.net_refund_amount} VND < ${AUTO_REFUND.threshold} VND) for booking ${bookingCode}`);
+    }
+
     // 9. Check minimum refund amount
     if (refundCalc.net_refund_amount < VALIDATION.minRefundAmount) {
       throw new Error(`Số tiền hoàn (${refundCalc.net_refund_amount}) không đủ để xử lý`);
@@ -503,7 +513,7 @@ const requestRefund = async (userId, bookingCode, data) => {
       refundCalc.admin_fee,
       refundCalc.net_refund_amount,
       JSON.stringify(refundCalc.policy),
-      'pending',
+      refundStatus,
       reason,
       user_notes,
       userId,
@@ -1178,18 +1188,26 @@ const requestGuestRefund = async (bookingCode, guestEmail, data, options = {}) =
     // 9. Calculate refund amount
     const refundCalc = calculateRefundAmount(booking, payment, policy, refund_type, requested_items);
 
-    // 10. Check minimum refund amount
+    // 9.5. Check minimum refund amount
     if (refundCalc.net_refund_amount < VALIDATION.minRefundAmount) {
       throw new Error(`Số tiền hoàn (${refundCalc.net_refund_amount}) không đủ để xử lý`);
     }
 
-    // 11. Check OTP requirement based on ORIGINAL BILL AMOUNT (not refund amount)
+    // 10. Check OTP requirement based on ORIGINAL BILL AMOUNT (not refund amount)
     const baseAmount = parseFloat(payment.final_amount || payment.amount);
     if (isOTPRequired(baseAmount)) {
       // OTP is required for large bill amounts - check if verified
       if (!isOTPVerified(guestEmail.toLowerCase())) {
         throw new Error(`Yêu cầu xác thực OTP cho hóa đơn có giá trị lớn (${baseAmount.toLocaleString('vi-VN')} VND). Vui lòng xác thực bằng mã OTP đã được gửi đến email.`);
       }
+    }
+
+    // 11. Check auto-refund threshold
+    const { AUTO_REFUND } = require('../config/refund.config');
+    let refundStatus = 'pending';
+    if (AUTO_REFUND.enabled && refundCalc.net_refund_amount < AUTO_REFUND.threshold) {
+      refundStatus = 'approved';
+      console.log(`[Refund Guest] Auto-approved (${refundCalc.net_refund_amount} < ${AUTO_REFUND.threshold})`);
     }
 
     // 12. Generate refund code
@@ -1211,7 +1229,7 @@ const requestGuestRefund = async (bookingCode, guestEmail, data, options = {}) =
       refundCalc.admin_fee,
       refundCalc.net_refund_amount,
       JSON.stringify(refundCalc.policy),
-      'pending',
+      refundStatus,
       reason,
       user_notes,
       null,     // requested_by = null cho guest
