@@ -204,7 +204,7 @@ const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAm
         <!-- Note -->
         <div class="em-success-box" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 16px;margin-top:24px;">
           <p class="em-success-text" style="color:#166534;font-size:13px;margin:0;line-height:1.6;">
-            📱 <strong>Check-in online</strong> tại <a href="https://vivudee.com/checkin" style="color:#166534;">vivudee.com/checkin</a> trong vòng 24 giờ trước giờ bay để nhận <strong>boarding pass điện tử</strong> gửi qua email này.<br/>
+            📱 <strong>Check-in online</strong> tại <a href="https://vivudee.vercel.app/checkin" style="color:#166534;">vivudee.vercel.app/checkin</a> trong vòng 24 giờ trước giờ bay để nhận <strong>boarding pass điện tử</strong> gửi qua email này.<br/>
             🪪 Vui lòng mang theo giấy tờ tùy thân khi ra sân bay.
           </p>
         </div>
@@ -223,7 +223,7 @@ const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAm
     const { data, error } = await resend.emails.send({
       from: process.env.EMAIL_FROM,
       to,
-      subject: `✈ Xác nhận đặt vé thành công — Mã booking: ${bookingCode}`,
+      subject: `Xác nhận đặt vé thành công — Mã booking: ${bookingCode}`,
       html,
     });
 
@@ -332,9 +332,7 @@ const sendPaymentInitiatedEmail = async (to, { contactName, paymentCode, payment
         <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.06);">
           <!-- Header -->
           <div style="background:#f9fafb;padding:24px;text-align:center;border-bottom:1px solid #e5e7eb;">
-            <img src="https://iili.io/qvDF3Kl.png" width="64" style="margin-bottom:8px;" />
-            <h2 style="color:#1a56db;font-size:20px;margin:0;">Vivudee</h2>
-            <p style="color:#6b7280;font-size:13px;margin:4px 0 0;">Your Journey Starts Here</p>
+            <img src="https://iili.io/qvDF3Kl.png" width="180" style="display:block;margin:0 auto;" />
           </div>
 
           <!-- Body -->
@@ -665,7 +663,13 @@ const buildBoardingPassCard = (bp) => {
       <!-- Blue top bar -->
       <td colspan="3" style="background:linear-gradient(90deg,#1a56db,#2563eb);padding:10px 20px;">
         <table width="100%" cellpadding="0" cellspacing="0"><tr>
-          <td style="color:#bfdbfe;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">VIVUDEE AIR &nbsp;·&nbsp; ${bp.flight_number || ''}</td>
+          <td style="vertical-align:middle;">
+            ${bp.airline_logo
+              ? `<img src="${bp.airline_logo}" alt="${bp.airline || 'airline'}" style="height:24px;width:auto;max-width:90px;object-fit:contain;vertical-align:middle;filter:brightness(0) invert(1);" />`
+              : `<span style="color:#bfdbfe;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">${(bp.airline || 'VIVUDEE AIR').toUpperCase()}</span>`
+            }
+            <span style="color:rgba(255,255,255,0.7);font-size:11px;font-weight:600;margin-left:8px;">${bp.flight_number || ''}</span>
+          </td>
           <td align="right" style="color:#fff;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;">BOARDING PASS</td>
         </tr></table>
       </td>
@@ -690,6 +694,7 @@ const buildBoardingPassCard = (bp) => {
             <td valign="top" style="width:38%;text-align:right;">
               <div style="font-size:30px;font-weight:900;color:#1a56db;line-height:1;">${bp.arrival_airport || '---'}</div>
               <div style="font-size:11px;color:#6b7280;margin-top:2px;">${bp.arrival_city || ''}</div>
+              <div style="font-size:18px;font-weight:800;color:#111827;margin-top:6px;">${bp.arrival_time || '--:--'}</div>
             </td>
           </tr>
         </table>
@@ -840,4 +845,45 @@ const sendBoardingPassEmail = async (to, { contactName, bookingCode, boardingPas
   }
 };
 
-module.exports = { sendOTPEmail, sendRefundOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail, sendFlightStatusEmail, sendBoardingPassEmail };
+const sendContactEmail = async ({ name, email, subject, message }) => {
+  try {
+    const html = `
+<html><body style="font-family:-apple-system,sans-serif;background:#f1f5f9;padding:24px;">
+  <div style="max-width:540px;margin:auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.08);">
+    <div style="background:#1a56db;padding:20px 28px;">
+      <p style="color:#fff;font-size:16px;font-weight:700;margin:0;">📬 Tin nhắn liên hệ mới — Vivudee</p>
+    </div>
+    <div style="padding:24px 28px;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;color:#6b7280;font-size:13px;width:100px;">Họ và tên</td><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;font-weight:600;color:#111827;">${name}</td></tr>
+        <tr><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;color:#6b7280;font-size:13px;">Email</td><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;font-weight:600;color:#1a56db;">${email}</td></tr>
+        <tr><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;color:#6b7280;font-size:13px;">Chủ đề</td><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;font-weight:600;color:#111827;">${subject || '(không có)'}</td></tr>
+      </table>
+      <div style="margin-top:20px;">
+        <p style="color:#6b7280;font-size:13px;margin:0 0 8px;">Nội dung:</p>
+        <div style="background:#f8fafc;border-radius:8px;padding:16px;font-size:14px;color:#374151;line-height:1.7;white-space:pre-wrap;">${message}</div>
+      </div>
+    </div>
+    <div style="background:#f8faff;padding:14px 28px;text-align:center;border-top:1px solid #e5e7eb;">
+      <p style="color:#9ca3af;font-size:12px;margin:0;">© ${new Date().getFullYear()} Vivudee · vivudee_support@gmail.com</p>
+    </div>
+  </div>
+</body></html>`;
+
+    const { error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM,
+      to: 'daodungvan321@gmail.com',
+      reply_to: email,
+      subject: `[Vivudee Contact] ${subject || 'Tin nhắn mới'} — ${name}`,
+      html,
+    });
+
+    if (error) { console.error('❌ sendContactEmail error:', error); return false; }
+    return true;
+  } catch (err) {
+    console.error('❌ sendContactEmail exception:', err);
+    return false;
+  }
+};
+
+module.exports = { sendOTPEmail, sendRefundOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail, sendFlightStatusEmail, sendBoardingPassEmail, sendContactEmail };

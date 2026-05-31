@@ -77,27 +77,16 @@ const buildBaggageOptions = (extraBaggagePrice) => {
   ];
 };
 
-// Demand multiplier: more seats sold → higher price (simulates real-time airline pricing)
-const getDemandMult = (availableSeats, totalSeats) => {
-  const avail = parseInt(availableSeats) || 0;
-  const total = parseInt(totalSeats) || 1;
-  const occupancy = Math.max(0, Math.min(1, (total - avail) / total));
-  if (occupancy >= 0.90) return 1.40;
-  if (occupancy >= 0.75) return 1.25;
-  if (occupancy >= 0.60) return 1.15;
-  if (occupancy >= 0.40) return 1.05;
-  if (occupancy >= 0.20) return 1.00;
-  return 0.95;
-};
+// ── Dynamic pricing helpers (applied at search time) ──────────────────────────
 
-const applyDemand = (basePrice, availableSeats, totalSeats) =>
-  Math.round(basePrice * getDemandMult(availableSeats, totalSeats) / 1000) * 1000;
+// Weekend premium: Fri/Sat/Sun cost more
+const { applyDynamicPricing } = require('../utils/pricing');
 
 const formatFlights = (rows, adults, children, infants) =>
   rows.map((r) => {
     const base        = parseFloat(r.base_price) || 0;
     const extraPrice  = parseFloat(r.extra_baggage_price) || 0;
-    const price       = applyDemand(base, r.available_seats, r.total_seats);
+    const price       = applyDynamicPricing(base, r.available_seats, r.total_seats, r.departure_time);
 
     return {
       flight_id:     r.flight_id,

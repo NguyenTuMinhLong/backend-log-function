@@ -126,7 +126,7 @@ const SELECT_CHECKIN_BY_BOOKING = `
   WHERE c.booking_id = $1`;
 
 const SELECT_CHECKIN_BY_CODE = `
-  SELECT 
+  SELECT
     c.id, c.boarding_pass_code, c.sequence_number, c.flight_type,
     c.checked_in_at, c.status, c.gate, c.boarding_time,
     p.id as passenger_id, p.full_name, p.seat_number, p.passenger_type,
@@ -134,16 +134,21 @@ const SELECT_CHECKIN_BY_CODE = `
     f.flight_number,
     dep.city as departure_city, arr.city as arrival_city,
     f.departure_time, f.arrival_time,
-    dep.code as departure_airport, arr.code as arrival_airport
+    dep.code as departure_airport, arr.code as arrival_airport,
+    dep.name as departure_airport_name, arr.name as arrival_airport_name,
+    dep.country as departure_country,
+    al.name as airline_name, al.code as airline_code,
+    al.logo_url as airline_logo, al.logo_dark as airline_logo_dark
   FROM checkins c
   JOIN passengers p ON p.id = c.passenger_id
   JOIN bookings b ON b.id = c.booking_id
-  JOIN flights f ON f.id = CASE 
-    WHEN c.flight_type = 'outbound' THEN b.outbound_flight_id 
+  JOIN flights f ON f.id = CASE
+    WHEN c.flight_type = 'outbound' THEN b.outbound_flight_id
     ELSE b.return_flight_id
   END
   JOIN airports dep ON dep.id = f.departure_airport_id
   JOIN airports arr ON arr.id = f.arrival_airport_id
+  JOIN airlines al ON al.id = f.airline_id
   WHERE c.boarding_pass_code = $1`;
 
 const CHECK_BOOKING_CHECKIN_STATUS = `

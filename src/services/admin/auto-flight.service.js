@@ -5,8 +5,10 @@ const QF   = require('../../queries/flight.queries');
 
 // ─── Price helpers (mirrors frontend calcPrices) ─────────────────────────────
 
-const BASE_ECO_PER_MIN = 5000;
+// Base price per minute — tuned to match real Vietnamese airline pricing
+const BASE_ECO_PER_MIN = 15000;
 
+// Peak-hour multiplier (baked into base_price at creation)
 const getTimeMult = (hour) => {
   const h = Number(hour);
   if (h >= 5  && h <= 7)  return 1.10;
@@ -17,34 +19,11 @@ const getTimeMult = (hour) => {
   return 0.85;
 };
 
-// Friday/Saturday/Sunday cost more; Mon–Thu is baseline
-const getDayOfWeekMult = (dateStr) => {
-  const day = new Date(`${dateStr}T12:00:00`).getDay(); // 0=Sun 5=Fri 6=Sat
-  if (day === 0) return 1.18;
-  if (day === 5) return 1.12;
-  if (day === 6) return 1.08;
-  return 1.00;
-};
-
-// Last-minute flights cost more; booking far in advance is cheaper
-const getAdvanceMult = (dateStr) => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const diffDays = Math.round((new Date(`${dateStr}T00:00:00`) - today) / 86400000);
-  if (diffDays <= 3)  return 1.30;
-  if (diffDays <= 7)  return 1.18;
-  if (diffDays <= 14) return 1.08;
-  if (diffDays <= 21) return 1.03;
-  if (diffDays <= 30) return 1.00;
-  if (diffDays <= 45) return 0.95;
-  return 0.90;
-};
-
-const calcPrices = (durationMins, tierMult, depHour, dateStr) => {
+// Day-of-week + advance mults are applied at search time (flight.service.js),
+// so base_price only reflects route distance + tier + departure hour.
+const calcPrices = (durationMins, tierMult, depHour) => {
   const timeMult = getTimeMult(depHour);
-  const dayMult  = getDayOfWeekMult(dateStr);
-  const advMult  = getAdvanceMult(dateStr);
-  const eco = Math.round(durationMins * BASE_ECO_PER_MIN * tierMult * timeMult * dayMult * advMult / 10000) * 10000;
+  const eco = Math.round(durationMins * BASE_ECO_PER_MIN * tierMult * timeMult / 10000) * 10000;
   return {
     economy:  eco,
     business: Math.round(eco * 2.8 / 10000) * 10000,
@@ -115,8 +94,7 @@ const saveConfig = async ({ is_enabled, start_date, end_date, flights_per_route,
       start_date       = COALESCE($2::date, start_date),
       end_date         = COALESCE($3::date, end_date),
       flights_per_route = COALESCE($4, flights_per_route),
-      advance_days     = COALESCE($5, advance_days),
-      updated_at       = NOW()
+      advance_days     = COALESCE($5, advance_days)
     WHERE id = 1
     RETURNING *
   `, [
@@ -133,27 +111,30 @@ const saveConfig = async ({ is_enabled, start_date, end_date, flights_per_route,
 
 const getAutoRoutes = async () => {
   const { rows } = await pool.query(`
-    SELECT DISTINCT
-      f.airline_id,
+    SELECT
+      al.id    AS airline_id,
       al.code  AS airline_code,
       al.name  AS airline_name,
       al.price_tier,
-      f.departure_airport_id  AS dep_id,
+      dep.id   AS dep_id,
       dep.code AS dep_code,
       dep.lat  AS dep_lat,
       dep.lng  AS dep_lng,
-      f.arrival_airport_id    AS arr_id,
+      arr.id   AS arr_id,
       arr.code AS arr_code,
       arr.lat  AS arr_lat,
       arr.lng  AS arr_lng
-    FROM flights f
-    JOIN airlines al  ON al.id  = f.airline_id
-    JOIN airports dep ON dep.id = f.departure_airport_id
-    JOIN airports arr ON arr.id = f.arrival_airport_id
-    WHERE f.status NOT IN ('cancelled')
+    FROM airlines al
+    CROSS JOIN airports dep
+    CROSS JOIN airports arr
+    WHERE dep.id  != arr.id
+      AND al.is_active  = TRUE
+      AND dep.is_active = TRUE
+      AND arr.is_active = TRUE
       AND dep.lat IS NOT NULL AND dep.lng IS NOT NULL
       AND arr.lat IS NOT NULL AND arr.lng IS NOT NULL
     ORDER BY al.code, dep.code, arr.code
+    LIMIT 999
   `);
   return rows;
 };
@@ -172,9 +153,10 @@ const getStatus = async () => {
 
 // ─── Batch runner ─────────────────────────────────────────────────────────────
 
-const runBatch = async (batchSize = 20) => {
+const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
   const config = await getConfig();
-  if (!config || !config.is_enabled) return { created: 0, skipped: 0, reason: 'disabled' };
+  if (!config || (!config.is_enabled && !force)) return { created: 0, skipped: 0, reason: 'disabled' };
+  const limit = unlimited ? Infinity : batchSize;
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -204,7 +186,7 @@ const runBatch = async (batchSize = 20) => {
     // Iterate dates from max(today, configStart) to targetEnd
     const loopStart = new Date(Math.max(today.getTime(), configStart.getTime()));
 
-    for (let d = new Date(loopStart); d <= targetEnd && created < batchSize; d.setDate(d.getDate() + 1)) {
+    for (let d = new Date(loopStart); d <= targetEnd && created < limit; d.setDate(d.getDate() + 1)) {
       const dateStr = d.toISOString().split('T')[0];
 
       // Fetch used flight numbers for this date (all airlines, to detect conflicts per airline)
@@ -230,7 +212,7 @@ const runBatch = async (batchSize = 20) => {
         const usedNums = usedByAirline[airlineId] || new Set();
         const airlineCode = aRoutes[0].airline_code;
 
-        for (let ri = 0; ri < aRoutes.length && created < batchSize; ri++) {
+        for (let ri = 0; ri < aRoutes.length && created < limit; ri++) {
           const route = aRoutes[ri];
           const km  = haversineKm(
             Number(route.dep_lat), Number(route.dep_lng),
@@ -239,7 +221,7 @@ const runBatch = async (batchSize = 20) => {
           const durationMins = estimateMins(km);
           const tierMult     = Number(route.price_tier) || 1.0;
 
-          for (let si = 0; si < timeSlots.length && created < batchSize; si++) {
+          for (let si = 0; si < timeSlots.length && created < limit; si++) {
             const depTime = `${dateStr}T${timeSlots[si]}:00`;
 
             // Bỏ qua nếu giờ khởi hành < 2 tiếng kể từ bây giờ (tránh tạo chuyến sắp hoặc đã qua)
@@ -266,7 +248,7 @@ const runBatch = async (batchSize = 20) => {
             if (!flightNum) { skipped++; continue; } // No numbers available
 
             const depHour  = parseInt(timeSlots[si].slice(0, 2), 10);
-            const prices   = calcPrices(durationMins, tierMult, depHour, dateStr);
+            const prices   = calcPrices(durationMins, tierMult, depHour);
             const arrTime  = addMins(dateStr, timeSlots[si], durationMins);
 
             try {
