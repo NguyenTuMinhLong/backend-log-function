@@ -10,17 +10,22 @@ router.get("/airports", flightController.getAirports);
 router.get("/airlines", flightController.getAirlines);
 // Guest: kiểm tra email/phone có thuộc tài khoản nào không (guest không được dùng email/phone đã đăng ký)
 router.post("/check-contact", async (req, res) => {
-  const { email, phone } = req.body;
-  const result = { email_taken: false, phone_taken: false };
-  if (email) {
-    const r = await pool.query(`SELECT id FROM users WHERE LOWER(email) = LOWER($1)`, [email]);
-    result.email_taken = r.rows.length > 0;
+  try {
+    const { email, phone } = req.body;
+    const result = { email_taken: false, phone_taken: false };
+    if (email) {
+      const r = await pool.query(`SELECT id FROM users WHERE LOWER(email) = LOWER($1)`, [email]);
+      result.email_taken = r.rows.length > 0;
+    }
+    if (phone) {
+      const r = await pool.query(`SELECT id FROM users WHERE phone = $1`, [phone.replace(/\s/g, "")]);
+      result.phone_taken = r.rows.length > 0;
+    }
+    res.json(result);
+  } catch (err) {
+    console.error("[check-contact] DB error:", err.message);
+    res.status(500).json({ error: "Không thể kiểm tra thông tin liên hệ" });
   }
-  if (phone) {
-    const r = await pool.query(`SELECT id FROM users WHERE phone = $1`, [phone.replace(/\s/g,'')]);
-    result.phone_taken = r.rows.length > 0;
-  }
-  res.json(result);
 });
 
 router.get("/airport-countries", async (req, res) => {
