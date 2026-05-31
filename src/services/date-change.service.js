@@ -28,8 +28,6 @@ const generateRefundCode = () => {
 // HELPERS
 // =========================================================
 
-const dateChangeOTPStore = new Map(); // In-memory store: requestCode -> { otp, expiresAt, attempts }
-
 const generateRequestCode = () => {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -82,38 +80,63 @@ const validateDateChangeRequest = async (booking, newFlightId, seatClass) => {
 
   return newFlight;
 };
-// Hàm gửi OTP cho email
+// Bug 2 + 3 + 4 Fix: OTP lưu vào DB (persistent, không mất khi server restart)
+// Key theo requestCode (không phải email), tránh collision khi cùng email có nhiều yêu cầu
 const requestDateChangeOTP = async (email, requestCode) => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiresAt = Date.now() + OTP_CONFIG.expiresInMinutes * 60 * 1000;
+  const expiresAt = new Date(Date.now() + OTP_CONFIG.expiresInMinutes * 60 * 1000);
 
-  dateChangeOTPStore.set(email.toLowerCase(), {
-    code: otp,
-    requestCode,
-    expiresAt,
-    attempts: 0,
-    verified: false,
-  });
+  // Lưu OTP vào cột của date_change_requests (persist qua DB)
+  await pool.query(
+    `UPDATE date_change_requests
+     SET otp_code = $1, otp_expires_at = $2, otp_attempts = 0
+     WHERE request_code = $3`,
+    [otp, expiresAt, requestCode]
+  );
 
-  // Debug: In OTP ra console (neu email la test)
-  console.log(`[DateChange OTP] Code: ${otp} for ${email}`);
-
-  return { expiresIn: OTP_CONFIG.expiresInMinutes };
-}
-// Hàm verify OTP
-const verifyDateChangeOTP = async (email, otp) => {
-  const normalizedEmail = email.toLowerCase().trim();
-  const otpData = dateChangeOTPStore.get(normalizedEmail);
-
-  if (!otpData) throw new Error('Khong tim thay ma OTP');
-  if (Date.now() > otpData.expiresAt) throw new Error('Ma OTP da het han');
-  if (otpData.attempts >= OTP_CONFIG.maxAttempts) throw new Error('Qua so lan thu');
-  if (otpData.code !== otp) {
-    otpData.attempts++;
-    throw new Error('Ma OTP khong dung');
+  // Bug 2 Fix: Thực sự gửi email (trước đây chỉ console.log)
+  try {
+    await sendRefundOTPEmail(email, otp);
+  } catch (emailErr) {
+    console.error('[DateChange OTP] Email send failed:', emailErr.message);
   }
 
-  otpData.verified = true;
+  console.log(`[DateChange OTP] Sent to ${email} for request ${requestCode}`);
+  return { expiresIn: OTP_CONFIG.expiresInMinutes };
+};
+
+// Bug 3 + 4 Fix: Verify từ DB, key theo requestCode
+const verifyDateChangeOTP = async (email, otp, requestCode) => {
+  const result = await pool.query(
+    `SELECT otp_code, otp_expires_at, otp_attempts
+     FROM date_change_requests
+     WHERE request_code = $1 AND status = 'pending_otp'`,
+    [requestCode]
+  );
+
+  if (result.rows.length === 0) {
+    throw new Error('Không tìm thấy yêu cầu đổi ngày hoặc yêu cầu đã được xử lý');
+  }
+
+  const row = result.rows[0];
+
+  if (!row.otp_code) {
+    throw new Error('Không tìm thấy mã OTP. Vui lòng tạo yêu cầu mới.');
+  }
+  if (new Date() > new Date(row.otp_expires_at)) {
+    throw new Error('Mã OTP đã hết hạn. Vui lòng tạo yêu cầu đổi ngày mới.');
+  }
+  if (row.otp_attempts >= OTP_CONFIG.maxAttempts) {
+    throw new Error('Quá số lần thử OTP. Vui lòng tạo yêu cầu mới.');
+  }
+  if (row.otp_code !== otp) {
+    await pool.query(
+      `UPDATE date_change_requests SET otp_attempts = otp_attempts + 1 WHERE request_code = $1`,
+      [requestCode]
+    );
+    throw new Error('Mã OTP không đúng');
+  }
+
   return { verified: true };
 };
 
@@ -253,47 +276,39 @@ const requestDateChange = async (userId, bookingCode, data) => {
 // =========================================================
 
 const confirmDateChange = async (email, otp, requestCode) => {
-  // 1. Verify OTP
-  await verifyDateChangeOTP(email, otp);
+  // 1. Verify OTP từ DB (Bug 3+4 Fix: dùng requestCode làm key)
+  await verifyDateChangeOTP(email, otp, requestCode);
 
-  // 2. Lay request
-  const requestResult = await pool.query(
-    QCD.SELECT_DATE_CHANGE_BY_CODE, [requestCode]
-  );
-  if (requestResult.rows.length === 0) throw new Error('Khong tim thay yeu cau');
+  // 2. Lấy request
+  const requestResult = await pool.query(QCD.SELECT_DATE_CHANGE_BY_CODE, [requestCode]);
+  if (requestResult.rows.length === 0) throw new Error('Không tìm thấy yêu cầu');
   const request = requestResult.rows[0];
 
   if (request.status !== 'pending_otp') {
-    throw new Error(`Yeu cau da duoc xu ly (status: ${request.status})`);
+    throw new Error(`Yêu cầu đã được xử lý (status: ${request.status})`);
   }
 
-  // 3. Check auto/manual
+  // 3. Kiểm tra auto-approve hay chờ admin
   const { AUTO_REFUND } = require('../config/refund.config');
-  const absDiff = Math.abs(request.price_difference);
+  const absDiff = Math.abs(parseFloat(request.price_difference));
+  const autoApprove = AUTO_REFUND.enabled && absDiff < AUTO_REFUND.threshold;
 
-  let newStatus;
-  if (AUTO_REFUND.enabled && absDiff < AUTO_REFUND.threshold) {
-    // Auto approve
-    newStatus = 'approved';
-  } else {
-    newStatus = 'pending';
-  }
+  // Bug 1 Fix: Luôn set thành 'pending' trước — approveDateChange yêu cầu status = 'pending'
+  // Không set 'approved' trước rồi gọi approveDateChange (sẽ throw vì status không phải 'pending')
+  await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', requestCode]);
 
-  // 4. Update status (simple - no admin needed for OTP verification)
-  await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, [newStatus, requestCode]);
-
-  // 5. Neu auto -> goi approve luon
-  if (newStatus === 'approved') {
-    await approveDateChange(null, requestCode, 'Auto-approved');
+  // 4. Nếu auto-approve: gọi approveDateChange (lúc này status đã là 'pending', hàm sẽ chạy đúng)
+  if (autoApprove) {
+    await approveDateChange(null, requestCode, 'Auto-approved sau OTP verification');
   }
 
   return {
     success: true,
-    status: newStatus,
-    auto_approved: newStatus === 'approved',
-    message: newStatus === 'approved'
-      ? 'Yeu cau da duyet tu dong'
-      : 'Yeu cau da tiep nhan, cho admin duyet',
+    status: autoApprove ? 'approved' : 'pending',
+    auto_approved: autoApprove,
+    message: autoApprove
+      ? 'Yêu cầu đổi ngày bay đã được duyệt tự động'
+      : 'Yêu cầu đổi ngày bay đã được tiếp nhận, chờ admin duyệt',
   };
 };
 
@@ -426,7 +441,8 @@ const rejectDateChange = async (adminId, requestCode, reason) => {
 
     const request = requestResult.rows[0];
 
-    if (request.status !== 'pending') {
+    // Bug 5 Fix: cho phép reject cả 'pending_otp' (chưa xác nhận OTP) và 'pending'
+    if (!['pending', 'pending_otp'].includes(request.status)) {
       throw new Error(`Không thể từ chối yêu cầu có trạng thái "${request.status}"`);
     }
 
@@ -474,7 +490,8 @@ const cancelDateChangeRequest = async (userId, requestCode) => {
 
     const request = requestResult.rows[0];
 
-    if (request.status !== 'pending') {
+    // Bug 5 Fix: cho phép user hủy cả khi chưa xác nhận OTP ('pending_otp') lẫn 'pending'
+    if (!['pending', 'pending_otp'].includes(request.status)) {
       throw new Error(`Không thể hủy yêu cầu có trạng thái "${request.status}"`);
     }
 

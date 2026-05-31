@@ -21,3 +21,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_date_changes_unique_pending
   WHERE status IN ('pending', 'pending_otp');
 
 COMMENT ON COLUMN date_change_requests.status IS 'pending | pending_otp | approved | rejected | completed | cancelled';
+
+-- Add OTP columns to date_change_requests for persistent OTP storage
+ALTER TABLE date_change_requests
+  ADD COLUMN IF NOT EXISTS otp_code        VARCHAR(6),
+  ADD COLUMN IF NOT EXISTS otp_expires_at  TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS otp_attempts    INTEGER NOT NULL DEFAULT 0;
