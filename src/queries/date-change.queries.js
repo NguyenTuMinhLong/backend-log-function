@@ -198,6 +198,16 @@ const UPDATE_DATE_CHANGE_STATUS = `
   RETURNING *
 `;
 
+// Simple status update (for OTP verification - no processed_by needed)
+const UPDATE_DATE_CHANGE_STATUS_SIMPLE = `
+  UPDATE date_change_requests
+  SET
+    status = $1,
+    updated_at = NOW()
+  WHERE request_code = $2
+  RETURNING *
+`;
+
 const UPDATE_DATE_CHANGE_COMPLETED = `
   UPDATE date_change_requests
   SET
@@ -220,7 +230,7 @@ const CHECK_DATE_CHANGE_EXISTS_BY_CODE = `
 const CHECK_PENDING_DATE_CHANGE_FOR_BOOKING = `
   SELECT id FROM date_change_requests
   WHERE booking_id = $1
-    AND status = 'pending'
+    AND status IN ('pending', 'pending_otp')
   LIMIT 1
 `;
 
@@ -270,6 +280,7 @@ module.exports = {
 
   // Update
   UPDATE_DATE_CHANGE_STATUS,
+  UPDATE_DATE_CHANGE_STATUS_SIMPLE,
   UPDATE_DATE_CHANGE_COMPLETED,
   UPDATE_BOOKING_FLIGHT,
 

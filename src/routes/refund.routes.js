@@ -121,6 +121,20 @@ router.get('/guest/otp-status', refundController.getOTPStatus);
  */
 router.post('/user/request-otp', authenticate, refundController.requestUserOTP);
 
+/**
+ * POST /api/refund/user/verify-otp
+ * User verify OTP de tao refund
+ * Body: { email, code }
+ */
+router.post('/user/verify-otp', refundController.verifyGuestOTP);
+
+/**
+ * POST /api/refund/user
+ * User submit refund request
+ * Body: { bookingCode, refund_type, reason, user_notes }
+ */
+router.post('/user', authenticate, refundController.requestRefund);
+
 // User xem danh sách refund của mình
 router.get('/my', authenticate, refundController.getMyRefunds);
 

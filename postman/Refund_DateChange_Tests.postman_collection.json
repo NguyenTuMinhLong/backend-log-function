@@ -1,0 +1,504 @@
+{
+	"info": {
+		"name": "Vivudee - Refund & Date Change Tests",
+		"description": "Test collection for Refund + Date Change with OTP and Auto/Manual approval",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:3000/api"
+		},
+		{
+			"key": "bookingCode",
+			"value": "UB421473"
+		},
+		{
+			"key": "userEmail",
+			"value": "test@example.com"
+		},
+		{
+			"key": "userToken",
+			"value": ""
+		},
+		{
+			"key": "adminToken",
+			"value": ""
+		}
+	],
+	"item": [
+		{
+			"name": "===== REFUND TESTS =====",
+			"item": [
+				{
+					"name": "1. [USER] Request OTP for Refund",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    console.log('OTP requested successfully');",
+									"    var data = pm.response.json();",
+									"    if (data._debug_code) {",
+									"        console.log('DEBUG OTP:', data._debug_code);",
+									"        pm.collectionVariables.set('debug_otp', data._debug_code);",
+									"    }",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{userToken}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"bookingCode\": \"{{bookingCode}}\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/refunds/user/request-otp",
+							"host": ["{{baseUrl}}"],
+							"path": ["refunds", "user", "request-otp"]
+						}
+					}
+				},
+				{
+					"name": "2. [USER] Verify OTP",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"{{userEmail}}\",\n    \"code\": \"123456\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/refunds/user/verify-otp",
+							"host": ["{{baseUrl}}"],
+							"path": ["refunds", "user", "verify-otp"]
+						}
+					}
+				},
+				{
+					"name": "3. [USER] Submit Refund (< 1M = Auto)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200 || pm.response.code === 201) {",
+									"    var data = pm.response.json();",
+									"    console.log('Status:', data.status);",
+									"    console.log('Message:', data.message);",
+									"    ",
+									"    if (data.status === 'approved') {",
+									"        console.log('AUTO APPROVED - Refund < 1M');",
+									"    } else if (data.status === 'pending') {",
+									"        console.log('PENDING - Refund >= 1M, need admin approval');",
+									"    }",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{userToken}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"bookingCode\": \"{{bookingCode}}\",\n    \"refund_type\": \"full\",\n    \"reason\": \"Khong con nhu yen\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/refunds/user",
+							"host": ["{{baseUrl}}"],
+							"path": ["refunds", "user"]
+						}
+					}
+				},
+				{
+					"name": "4. [GUEST] Request OTP",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var data = pm.response.json();",
+									"    if (data._debug_code) {",
+									"        console.log('DEBUG OTP:', data._debug_code);",
+									"    }",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"bookingCode\": \"{{bookingCode}}\",\n    \"email\": \"{{userEmail}}\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/refunds/guest/request-otp",
+							"host": ["{{baseUrl}}"],
+							"path": ["refunds", "guest", "request-otp"]
+						}
+					}
+				},
+				{
+					"name": "5. [GUEST] Verify OTP",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"{{userEmail}}\",\n    \"code\": \"123456\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/refunds/guest/verify-otp",
+							"host": ["{{baseUrl}}"],
+							"path": ["refunds", "guest", "verify-otp"]
+						}
+					}
+				},
+				{
+					"name": "6. [GUEST] Submit Refund",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200 || pm.response.code === 201) {",
+									"    var data = pm.response.json();",
+									"    console.log('Status:', data.data?.status);",
+									"    console.log('Message:', data.message);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"bookingCode\": \"{{bookingCode}}\",\n    \"guestEmail\": \"{{userEmail}}\",\n    \"refund_type\": \"full\",\n    \"reason\": \"Thay doi lich trinh\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/refunds/guest",
+							"host": ["{{baseUrl}}"],
+							"path": ["refunds", "guest"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "===== DATE CHANGE TESTS =====",
+			"item": [
+				{
+					"name": "1. [USER] Request Date Change (sends OTP)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var data = pm.response.json();",
+									"    console.log('Status:', data.data?.status);",
+									"    console.log('Request Code:', data.data?.request_code);",
+									"    console.log('Message:', data.message);",
+									"    pm.collectionVariables.set('dateChangeCode', data.data?.request_code);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{userToken}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"new_flight_id\": 2,\n    \"new_seat_class\": \"economy\",\n    \"reason\": \"Muon doi ngay di som hon\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/date-changes/bookings/{{bookingCode}}/change-flight",
+							"host": ["{{baseUrl}}"],
+							"path": ["date-changes", "bookings", "{{bookingCode}}", "change-flight"]
+						}
+					}
+				},
+				{
+					"name": "2. [USER] Confirm Date Change (verify OTP)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var data = pm.response.json();",
+									"    console.log('Status:', data.status);",
+									"    console.log('Auto Approved:', data.auto_approved);",
+									"    console.log('Message:', data.message);",
+									"    ",
+									"    if (data.auto_approved === true) {",
+									"        console.log('AUTO APPROVED - Price diff < 1M');",
+									"    } else if (data.status === 'pending') {",
+									"        console.log('PENDING - Price diff >= 1M, need admin approval');",
+									"    }",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"{{userEmail}}\",\n    \"otp\": \"123456\",\n    \"requestCode\": \"{{dateChangeCode}}\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/date-changes/confirm",
+							"host": ["{{baseUrl}}"],
+							"path": ["date-changes", "confirm"]
+						}
+					}
+				},
+				{
+					"name": "3. Get Date Change Detail",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/date-changes/{{dateChangeCode}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["date-changes", "{{dateChangeCode}}"]
+						}
+					}
+				},
+				{
+					"name": "4. Cancel Date Change",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{userToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/date-changes/{{dateChangeCode}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["date-changes", "{{dateChangeCode}}"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "===== ADMIN TESTS =====",
+			"item": [
+				{
+					"name": "1. Get All Pending Refunds",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{adminToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/refunds?status=pending",
+							"host": ["{{baseUrl}}"],
+							"path": ["admin", "refunds"],
+							"query": [
+								{
+									"key": "status",
+									"value": "pending"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "2. Get All Pending Date Changes",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{adminToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/date-changes?status=pending",
+							"host": ["{{baseUrl}}"],
+							"path": ["admin", "date-changes"],
+							"query": [
+								{
+									"key": "status",
+									"value": "pending"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "3. Approve Refund",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{adminToken}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"admin_notes\": \"Da kiem tra, chap nhan refund\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/refunds/{{refundCode}}/approve",
+							"host": ["{{baseUrl}}"],
+							"path": ["admin", "refunds", "{{refundCode}}", "approve"]
+						}
+					}
+				},
+				{
+					"name": "4. Reject Refund",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{adminToken}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"reason\": \"Khong nam trong chinh sach hoan tien\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/refunds/{{refundCode}}/reject",
+							"host": ["{{baseUrl}}"],
+							"path": ["admin", "refunds", "{{refundCode}}", "reject"]
+						}
+					}
+				},
+				{
+					"name": "5. Approve Date Change",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{adminToken}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"admin_notes\": \"Da kiem tra, chap nhan doi ngay\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/date-changes/{{dateChangeCode}}/approve",
+							"host": ["{{baseUrl}}"],
+							"path": ["date-changes", "{{dateChangeCode}}", "approve"]
+						}
+					}
+				},
+				{
+					"name": "6. Reject Date Change",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{adminToken}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"reason\": \"Chuyen bay moi khong con ghe\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/date-changes/{{dateChangeCode}}/reject",
+							"host": ["{{baseUrl}}"],
+							"path": ["date-changes", "{{dateChangeCode}}", "reject"]
+						}
+					}
+				}
+			]
+		}
+	]
+}
