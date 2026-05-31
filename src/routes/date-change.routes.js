@@ -50,6 +50,12 @@ router.delete('/:requestCode', authenticate, dateChangeController.cancelDateChan
 // =========================================================
 
 /**
+ * GET /api/date-changes/admin
+ * Admin lấy toàn bộ danh sách (filter status, phân trang)
+ */
+router.get('/admin', authenticate, dateChangeController.getAdminDateChanges);
+
+/**
  * POST /api/date-changes/:requestCode/approve
  * Admin duyệt yêu cầu đổi ngày bay
  */

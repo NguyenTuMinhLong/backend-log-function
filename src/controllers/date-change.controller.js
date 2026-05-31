@@ -153,6 +153,16 @@ const confirmDateChange = async (req, res) => {
   }
 };
 
+const getAdminDateChanges = async (req, res) => {
+  try {
+    const { status = '', page = 1, limit = 15 } = req.query;
+    const result = await dateChangeService.getAdminDateChanges(status, page, limit);
+    res.json({ message: 'Lấy danh sách đổi ngày thành công', data: result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
 module.exports = {
   requestDateChange,
   getBookingDateChanges,
@@ -162,4 +172,5 @@ module.exports = {
   approveDateChange,
   rejectDateChange,
   confirmDateChange,
+  getAdminDateChanges,
 };

@@ -560,6 +560,37 @@ const getUserDateChanges = async (userId, page = 1, limit = 10) => {
   };
 };
 
+const getAdminDateChanges = async (status = '', page = 1, limit = 15) => {
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+  const values = [];
+  let idx = 1;
+
+  let whereClause = '';
+  if (status) {
+    whereClause = `WHERE dcr.status = $${idx++}`;
+    values.push(status);
+  }
+
+  const countValues = status ? [status] : [];
+  const countWhere  = status ? `WHERE dcr.status = $1` : '';
+
+  const [dataResult, countResult] = await Promise.all([
+    pool.query(QCD.SELECT_DATE_CHANGES_ADMIN(whereClause, idx, idx + 1), [...values, parseInt(limit), offset]),
+    pool.query(QCD.COUNT_DATE_CHANGES_ADMIN(countWhere), countValues),
+  ]);
+
+  const total = parseInt(countResult.rows[0].count);
+  return {
+    data: dataResult.rows,
+    pagination: {
+      total,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      total_pages: Math.ceil(total / parseInt(limit)),
+    },
+  };
+};
+
 module.exports = {
   requestDateChange,
   approveDateChange,
@@ -570,4 +601,5 @@ module.exports = {
   getUserDateChanges,
   validateDateChangeRequest,
   confirmDateChange,
+  getAdminDateChanges,
 };
