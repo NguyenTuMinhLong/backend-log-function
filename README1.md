@@ -120,6 +120,55 @@ completed    - Hoan tat
 cancelled    - Da huy
 ```
 
+### 2.5 Price Difference Logic
+
+**Tinh chenh lech gia:**
+```javascript
+oldPrice = booking.total_price
+newPrice = newFlight.base_price * so_ve
+priceDifference = newPrice - oldPrice
+```
+
+**Xu ly:**
+| priceDifference | Hanh dong |
+|-----------------|-----------|
+| > 0 (tang) | Khach phai tra them. Neu auto approve -> Tao payment de thu them |
+| = 0 (bang) | Khong phai tra them/hoan. Approve binh thuong |
+| < 0 (giam) | Khach duoc hoan tien. Neu auto approve -> Hoan tien |
+
+**Config hien tai:**
+```javascript
+DATE_CHANGE = {
+  priceDifference: {
+    chargeIfPositive: true,  // Thu them neu price > 0
+    refundIfNegative: true,   // Hoan tien neu price < 0
+    requirePayment: false,    // Khong can thanh toan truoc
+  }
+}
+```
+
+### 2.6 Vi du tinh toan
+
+```
+Booking hien tai:
+- 2 nguoi lon + 1 tre em
+- Gia cu: 3,000,000 VND
+- Chuyen bay: Flight A (economy)
+
+Yeu cau doi sang:
+- Flight B (economy)
+- Gia moi: 1,800,000 VND/ghe
+
+Tinh toan:
+- so_ve = 3
+- newPrice = 1,800,000 * 3 = 5,400,000 VND
+- priceDifference = 5,400,000 - 3,000,000 = +2,400,000 VND
+
+Ket qua:
+- Khach phai tra them 2,400,000 VND
+- price_difference_label = "Ban phai tra them"
+```
+
 ---
 
 ## 3. OTP SYSTEM
