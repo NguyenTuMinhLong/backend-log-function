@@ -194,7 +194,7 @@ const VALIDATION = {
 // OTP Configuration for Guest Refunds
 const OTP_CONFIG = {
   enabled: true,
-  threshold: 5000000, // Yêu cầu OTP khi refund amount > 5,000,000 VND
+  threshold: 0, // Mọi refund đều phải có OTP
   codeLength: 6,
   expiresInMinutes: 5,
   maxAttempts: 3,

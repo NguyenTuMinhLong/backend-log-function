@@ -886,4 +886,89 @@ const sendContactEmail = async ({ name, email, subject, message }) => {
   }
 };
 
-module.exports = { sendOTPEmail, sendRefundOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail, sendFlightStatusEmail, sendBoardingPassEmail, sendContactEmail };
+// ─── Newsletter: Welcome email ────────────────────────────────────────────────
+const sendNewsletterWelcomeEmail = async (to, { unsubscribeToken }) => {
+  const frontendBase   = process.env.FRONTEND_URL || 'https://vivudee.vercel.app';
+  const unsubscribeUrl = `${frontendBase}/newsletter/unsubscribe?token=${unsubscribeToken}`;
+  try {
+    const html = `<!DOCTYPE html>
+<html lang="vi">
+<head><meta charset="UTF-8"/>${DARK_MODE_STYLE}</head>
+<body class="em-body" style="margin:0;padding:0;background:#f3f4f6;">
+  <div style="max-width:560px;margin:auto;padding:20px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+    <div class="em-card" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+      <div style="background:linear-gradient(135deg,#1a56db,#1e40af);padding:36px 24px;text-align:center;">
+        <img src="https://iili.io/qvDF3Kl.png" width="100" style="display:block;margin:0 auto 14px;filter:brightness(0) invert(1);" />
+        <h1 style="color:#fff;font-size:22px;margin:0 0 6px;font-weight:700;">Đăng ký thành công! ✉️</h1>
+        <p style="color:#bfdbfe;font-size:14px;margin:0;">Cảm ơn bạn đã đăng ký nhận ưu đãi từ Vivudee</p>
+      </div>
+      <div style="padding:28px 24px;">
+        <p style="color:#374151;font-size:15px;margin:0 0 16px;line-height:1.7;">
+          Bạn sẽ nhận được thông báo về các <strong>khuyến mãi</strong>, <strong>giá vé tốt</strong> và <strong>ưu đãi du lịch</strong> từ Vivudee qua email này.
+        </p>
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:16px;text-align:center;margin:20px 0;">
+          <p style="color:#1a56db;font-size:13px;margin:0;">🎫 Đặt vé ngay tại <a href="${frontendBase}" style="color:#1a56db;font-weight:700;">vivudee.vercel.app</a></p>
+        </div>
+        <p style="color:#9ca3af;font-size:12px;text-align:center;margin:20px 0 0;">
+          Không muốn nhận email nữa? <a href="${unsubscribeUrl}" style="color:#6b7280;">Hủy đăng ký tại đây</a>
+        </p>
+      </div>
+      <div class="em-footer" style="background:#f9fafb;padding:16px 24px;text-align:center;border-top:1px solid #e5e7eb;">
+        <p style="color:#9ca3af;font-size:12px;margin:0;">© ${new Date().getFullYear()} Vivudee · Đặt vé máy bay trực tuyến</p>
+      </div>
+    </div>
+  </div>
+</body></html>`;
+    const { error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM, to,
+      subject: '✉️ Đăng ký nhận ưu đãi Vivudee thành công!', html,
+    });
+    if (error) { console.error('❌ sendNewsletterWelcomeEmail:', error); return false; }
+    return true;
+  } catch (err) { console.error('❌ sendNewsletterWelcomeEmail:', err); return false; }
+};
+
+// ─── Newsletter: Broadcast (admin gửi đến tất cả subscriber) ─────────────────
+const sendNewsletterBroadcast = async (subscribers, { subject, title, body, ctaText, ctaUrl }) => {
+  const frontendBase = process.env.FRONTEND_URL || 'https://vivudee.vercel.app';
+  let sent = 0, failed = 0;
+
+  for (const sub of subscribers) {
+    const unsubUrl = `${frontendBase}/newsletter/unsubscribe?token=${sub.unsubscribe_token}`;
+    const html = `<!DOCTYPE html>
+<html lang="vi">
+<head><meta charset="UTF-8"/>${DARK_MODE_STYLE}</head>
+<body class="em-body" style="margin:0;padding:0;background:#f3f4f6;">
+  <div style="max-width:560px;margin:auto;padding:20px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+    <div class="em-card" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+      <div style="background:linear-gradient(135deg,#1a56db,#1e40af);padding:36px 24px;text-align:center;">
+        <img src="https://iili.io/qvDF3Kl.png" width="100" style="display:block;margin:0 auto 14px;filter:brightness(0) invert(1);" />
+        <h1 style="color:#fff;font-size:22px;margin:0;font-weight:700;">${title}</h1>
+      </div>
+      <div style="padding:28px 24px;">
+        <div style="color:#374151;font-size:15px;line-height:1.8;white-space:pre-wrap;">${body}</div>
+        ${ctaText && ctaUrl ? `
+        <div style="text-align:center;margin:28px 0 0;">
+          <a href="${ctaUrl}" style="display:inline-block;background:#1a56db;color:#fff;padding:14px 36px;border-radius:8px;font-weight:700;font-size:15px;text-decoration:none;">${ctaText}</a>
+        </div>` : ''}
+        <p style="color:#9ca3af;font-size:12px;text-align:center;margin:28px 0 0;">
+          Không muốn nhận email nữa? <a href="${unsubUrl}" style="color:#6b7280;">Hủy đăng ký</a>
+        </p>
+      </div>
+      <div class="em-footer" style="background:#f9fafb;padding:16px 24px;text-align:center;border-top:1px solid #e5e7eb;">
+        <p style="color:#9ca3af;font-size:12px;margin:0;">© ${new Date().getFullYear()} Vivudee</p>
+      </div>
+    </div>
+  </div>
+</body></html>`;
+    try {
+      const { error } = await resend.emails.send({
+        from: process.env.EMAIL_FROM, to: sub.email, subject, html,
+      });
+      if (error) failed++; else sent++;
+    } catch { failed++; }
+  }
+  return { sent, failed };
+};
+
+module.exports = { sendOTPEmail, sendRefundOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail, sendFlightStatusEmail, sendBoardingPassEmail, sendContactEmail, sendNewsletterWelcomeEmail, sendNewsletterBroadcast };

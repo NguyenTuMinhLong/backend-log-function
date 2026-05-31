@@ -8,6 +8,7 @@ router.get("/airlines",        flightController.getAirlines);
 router.get("/alternatives",    flightController.getAlternativeFlights);
 router.get("/price-calendar",  flightController.getPriceCalendar);
 router.get("/recommendations", flightController.getFlightRecommendations);
+router.get("/browse",          flightController.browseFlights);
 router.get("/:id/seat-map",    flightController.getSeatMap);
 router.get("/:id/position",    flightController.getFlightPosition);
 router.get("/:id",             flightController.getFlightById);

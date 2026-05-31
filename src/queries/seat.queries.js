@@ -180,7 +180,6 @@ const GET_BOOKING_DETAILS_FOR_CHECKIN = `
     b.id, b.booking_code, b.trip_type, b.status,
     b.outbound_flight_id, b.return_flight_id,
     b.outbound_seat_class, b.return_seat_class,
-    b.gate, b.boarding_time,
     f_out.flight_number as outbound_flight_number,
     dep_out.city as outbound_departure,
     arr_out.city as outbound_arrival,
@@ -214,11 +213,11 @@ const GET_PASSENGERS_FOR_CHECKIN = `
   WHERE p.booking_id = $1
   ORDER BY p.passenger_type, p.full_name`;
 
-const UPDATE_BOOKING_GATE = `
-  UPDATE bookings SET gate = $1, updated_at = NOW() WHERE id = $2`;
-
-const UPDATE_BOOKING_BOARDING_TIME = `
-  UPDATE bookings SET boarding_time = $1, updated_at = NOW() WHERE id = $2`;
+const SELECT_CHECKIN_GATE_INFO = `
+  SELECT gate, boarding_time
+  FROM checkins
+  WHERE booking_id = $1 AND flight_type = $2
+  LIMIT 1`;
 
 module.exports = {
   // Seat Assignment
@@ -247,6 +246,5 @@ module.exports = {
   GET_NEXT_SEQUENCE_NUMBER,
   GET_BOOKING_DETAILS_FOR_CHECKIN,
   GET_PASSENGERS_FOR_CHECKIN,
-  UPDATE_BOOKING_GATE,
-  UPDATE_BOOKING_BOARDING_TIME,
+  SELECT_CHECKIN_GATE_INFO,
 };

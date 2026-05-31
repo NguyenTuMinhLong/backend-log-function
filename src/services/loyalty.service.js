@@ -37,9 +37,9 @@ Cron annual reset  —           - 20%     —      → check downgrade
 // Sửa mốc điểm tại đây — đồng bộ với loyalty.cron.js
 // =========================================================
 const TIERS = [
-  { name: 'Member', min_points: 0, multiplier: 1.0 },
-  { name: 'Silver', min_points: 5000, multiplier: 1.25 },
-  { name: 'Gold', min_points: 20000, multiplier: 1.5 },
+  { name: 'Bronze',   min_points: 0,     multiplier: 1.0  },
+  { name: 'Silver',   min_points: 5000,  multiplier: 1.25 },
+  { name: 'Gold',     min_points: 20000, multiplier: 1.5  },
   { name: 'Platinum', min_points: 50000, multiplier: 1.75 },
 ];
 
@@ -113,7 +113,7 @@ exports.getMembershipInfo = async (userId, lang = 'vi') => {
     console.log(`[Loyalty] User ${userId} chưa có membership → tạo mới`);
 
     const tierResult = await db.query(
-      queries.GET_LOYALTY_TIER_BY_NAME, ['Member']
+      queries.GET_LOYALTY_TIER_BY_NAME, ['Bronze']
     );
 
     const tierId = tierResult.rows[0].id;
@@ -126,25 +126,41 @@ exports.getMembershipInfo = async (userId, lang = 'vi') => {
     result = await db.query(queries.GET_USER_LOYALTY, [userId]);
   }
 
-  const data = result.rows[0];
+  const data       = result.rows[0];
   const tierPoints = parseInt(data.tier_points);
 
-  const { next_tier, progress } = calcNextTierAndProgress(
-    data.tier_name, tierPoints
-  );
+  // Tính tier ĐÚNG theo điểm từ DB loyalty_tiers — không tin vào stored tier_id
+  const correctTierRow = await db.query(`
+    SELECT id, name, min_points, multiplier
+    FROM loyalty_tiers
+    WHERE min_points <= $1
+    ORDER BY min_points DESC
+    LIMIT 1
+  `, [tierPoints]);
+
+  const correctTier = correctTierRow.rows[0];
+  const correctTierName = correctTier?.name || data.tier_name;
+
+  // Cập nhật DB nếu sai tier (background, không block response)
+  if (correctTier && correctTier.id !== data.tier_id) {
+    db.query(`UPDATE user_loyalty SET tier_id = $1, updated_at = NOW() WHERE user_id = $2`,
+      [correctTier.id, userId]).catch(() => {});
+  }
+
+  const { next_tier, progress } = calcNextTierAndProgress(correctTierName, tierPoints);
 
   return {
     membership_number: data.membership_number,
-    tier: data.tier_name,
-    lifetime_points: parseInt(data.lifetime_points),  // chỉ đọc, không tiêu được
-    tier_points: tierPoints,                       // xét tier
-    current_points: parseInt(data.current_points),   // tiêu được
-    multiplier: parseFloat(data.multiplier),
+    tier:              correctTierName,
+    lifetime_points:   parseInt(data.lifetime_points),
+    tier_points:       tierPoints,
+    current_points:    parseInt(data.current_points),
+    multiplier:        correctTier?.multiplier ?? parseFloat(data.multiplier),
     next_tier,
     progress,
-    benefits:       (TIER_BENEFITS[data.tier_name]?.[lang]) || data.benefits || [],
-    badge_url_light: data.badge_url_light || null,
-    badge_url_dark:  data.badge_url_dark  || null,
+    benefits:          (TIER_BENEFITS[correctTierName]?.[lang]) || data.benefits || [],
+    badge_url_light:   data.badge_url_light || null,
+    badge_url_dark:    data.badge_url_dark  || null,
   };
 };
 
@@ -545,9 +561,7 @@ exports.triggerAnnualReset = async () => {
 const syncTierAfterChange = async (userId, direction = 'both') => {
 
   const result = await db.query(`
-    SELECT
-      ul.tier_points,
-      lt.name AS current_tier
+    SELECT ul.tier_points, ul.tier_id, lt.min_points AS current_min
     FROM user_loyalty ul
     JOIN loyalty_tiers lt ON ul.tier_id = lt.id
     WHERE ul.user_id = $1
@@ -555,26 +569,29 @@ const syncTierAfterChange = async (userId, direction = 'both') => {
 
   if (result.rows.length === 0) return;
 
-  const { tier_points, current_tier } = result.rows[0];
-  const correctTier = resolveTier(parseInt(tier_points));
+  const { tier_points, tier_id: currentTierId, current_min } = result.rows[0];
 
-  // Không cần thay đổi gì
-  if (correctTier.name === current_tier) return;
+  // Tìm tier đúng theo min_points trong DB — không phụ thuộc vào tên
+  const tierResult = await db.query(`
+    SELECT id, name, min_points
+    FROM loyalty_tiers
+    WHERE min_points <= $1
+    ORDER BY min_points DESC
+    LIMIT 1
+  `, [parseInt(tier_points)]);
 
-  const currentIdx = TIERS.findIndex(t => t.name === current_tier);
-  const correctIdx = TIERS.findIndex(t => t.name === correctTier.name);
-  const isUpgrade = correctIdx > currentIdx;
+  if (tierResult.rows.length === 0) return;
+
+  const correctTier = tierResult.rows[0];
+
+  // Không cần thay đổi
+  if (correctTier.id === currentTierId) return;
+
+  const isUpgrade = correctTier.min_points > current_min;
 
   // Bỏ qua nếu không đúng chiều
   if (direction === 'upgrade' && !isUpgrade) return;
   if (direction === 'downgrade' && isUpgrade) return;
-
-  // Lấy id tier mới
-  const tierResult = await db.query(
-    queries.GET_LOYALTY_TIER_BY_NAME, [correctTier.name]
-  );
-
-  if (tierResult.rows.length === 0) return;
 
   await db.query(`
     UPDATE user_loyalty
@@ -591,12 +608,12 @@ const syncTierAfterChange = async (userId, direction = 'both') => {
       VALUES ($1, 'tier_downgrade', $2, NOW())
     `, [
       userId,
-      `Hạng thành viên của bạn đã thay đổi từ ${current_tier} xuống ${correctTier.name}.`,
+      `Hạng thành viên của bạn đã thay đổi xuống ${correctTier.name}.`,
     ]);
 
-    console.log(`[Loyalty] User ${userId} tụt tier: ${current_tier} → ${correctTier.name}`);
+    console.log(`[Loyalty] User ${userId} tụt tier → ${correctTier.name}`);
   } else {
-    console.log(`[Loyalty] User ${userId} lên tier: ${current_tier} → ${correctTier.name}`);
+    console.log(`[Loyalty] User ${userId} lên tier → ${correctTier.name}`);
   }
 };
 

@@ -20,7 +20,13 @@ const { expireHeldBookings }   = require("./services/booking.service");
 const { autoGenerateFlights }  = require("./services/admin/flight.service");
 const { checkAndAlertSLABreach } = require("./services/notification.service");
 const { runBatch: autoFlightBatch } = require("./services/admin/auto-flight.service");
-require("./scripts/Loyalty.cron"); // Loyalty annual reset cron job
+const pool = require("./config/db");
+require("./scripts/Loyalty.cron");
+
+// Migration: thêm cột country vào airlines nếu chưa có
+pool.query(`ALTER TABLE airlines ADD COLUMN IF NOT EXISTS country VARCHAR(100)`)
+  .then(() => console.log('[Migration] airlines.country OK'))
+  .catch(err => console.error('[Migration] airlines.country:', err.message)); // Loyalty annual reset cron job
 
 const app = express();
 

@@ -189,4 +189,14 @@ module.exports = {
   getSeatMap,
   getFlightRecommendations,
   getFlightPosition,
+  browseFlights: async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit) || 40;
+      const data  = await flightService.browseFlights(limit);
+      res.json({ data });
+    } catch (err) {
+      console.error('[Flight Browse]', err);
+      res.status(500).json({ error: 'Lỗi server' });
+    }
+  },
 };

@@ -157,17 +157,7 @@ const getBookingForPayment = async (client, bookingCode, userId, lockRow = false
     throw new Error("Bạn không có quyền thao tác với booking này");
   }
 
-  // Cộng thêm ancillary total vào total_price để tính đúng số tiền cần thanh toán
-  const ancResult = await client.query(
-    `SELECT COALESCE(SUM(total_price), 0) AS ancillary_total
-     FROM booking_ancillaries
-     WHERE booking_id = $1 AND status != 'cancelled'`,
-    [booking.id]
-  );
-  const ancillaryTotal = parseFloat(ancResult.rows[0].ancillary_total || 0);
-  booking.ticket_price  = parseFloat(booking.total_price);
-  booking.total_price   = booking.ticket_price + ancillaryTotal;
-
+  // total_price đã bao gồm tất cả (vé + hành lý + seat fee + ancillary)
   return booking;
 };
 
