@@ -189,10 +189,11 @@ const requestDateChange = async (userId, bookingCode, data) => {
       }
     }
 
-    const oldPrice = parseFloat(booking.total_price);
     const seatsNeeded = passenger_ids?.length || (parseInt(booking.total_adults) + parseInt(booking.total_children));
     const newFlightPrice = parseFloat(newFlight.base_price);
     const newTotalPrice = newFlightPrice * seatsNeeded;
+    // So sánh đúng: giá vé outbound × số ghế (không bao gồm hành lý, ancillary, chuyến về)
+    const oldPrice = parseFloat(booking.base_price) * seatsNeeded;
     const priceDifference = newTotalPrice - oldPrice;
 
     let requestCode;
@@ -377,7 +378,82 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
     );
     console.log(`[DateChange] Reserved ${passengers} seats on new flight`);
 
-    // Update booking & status
+    // === HUỶ ANCILLARY OUTBOUND (trừ bảo hiểm) ===
+    const cancelAncResult = await client.query(`
+      UPDATE booking_ancillaries ba
+      SET status = 'cancelled', updated_at = NOW()
+      FROM ancillary_options ao
+      WHERE ba.ancillary_option_id = ao.id
+        AND ba.booking_id = $1
+        AND ba.flight_type = 'outbound'
+        AND ao.type != 'insurance'
+        AND ba.status != 'cancelled'
+      RETURNING ba.total_price
+    `, [request.booking_id]);
+    const cancelledAncillaryTotal = cancelAncResult.rows
+      .reduce((sum, r) => sum + parseFloat(r.total_price), 0);
+    console.log(`[DateChange] Cancelled ancillary total: ${cancelledAncillaryTotal}`);
+
+    // === CẬP NHẬT TOTAL_PRICE BOOKING ===
+    const bookingRow = await client.query(
+      `SELECT total_price FROM bookings WHERE id = $1`, [request.booking_id]
+    );
+    const currentBookingTotal = parseFloat(bookingRow.rows[0]?.total_price || 0);
+    const oldTicketPrice = parseFloat(request.old_price);
+    const newTicketPrice = parseFloat(request.new_price);
+    const ticketDiff = newTicketPrice - oldTicketPrice;
+    const updatedBookingTotal = Math.max(0, currentBookingTotal + ticketDiff - cancelledAncillaryTotal);
+
+    await client.query(
+      `UPDATE bookings SET total_price = $1, updated_at = NOW() WHERE id = $2`,
+      [updatedBookingTotal, request.booking_id]
+    );
+    console.log(`[DateChange] Updated booking total: ${currentBookingTotal} → ${updatedBookingTotal}`);
+
+    // === AUTO-CREATE REFUND NẾU USER ĐƯỢC HOÀN TIỀN ===
+    // Hoàn = tiền vé giảm (nếu có) + tiền dịch vụ đã huỷ
+    const ticketRefund = Math.max(0, -ticketDiff);
+    const refundableAmount = ticketRefund + cancelledAncillaryTotal;
+    let relatedRefundCode = null;
+
+    if (refundableAmount > 0) {
+      const refundCode = generateRefundCode();
+      const parts = [];
+      if (ticketRefund > 0) parts.push(`chênh lệch vé ${ticketRefund.toLocaleString('vi-VN')} VND`);
+      if (cancelledAncillaryTotal > 0) parts.push(`dịch vụ huỷ ${cancelledAncillaryTotal.toLocaleString('vi-VN')} VND`);
+
+      const refundResult = await client.query(`
+        INSERT INTO refunds (
+          refund_code, booking_id, refund_type, requested_items,
+          refund_amount, admin_fee, net_refund_amount, refund_policy_applied,
+          status, reason, requested_by
+        ) VALUES ($1, $2, 'partial_leg', $3::jsonb, $4, 0, $4, $5::jsonb, 'pending', $6, $7)
+        RETURNING id
+      `, [
+        refundCode,
+        request.booking_id,
+        JSON.stringify({ type: 'date_change', request_code: requestCode }),
+        refundableAmount,
+        JSON.stringify({ name: 'date_change_refund' }),
+        `Hoàn tiền do đổi ngày bay (${requestCode}): ${parts.join(' + ')}`,
+        adminId || null,
+      ]);
+      relatedRefundCode = refundCode;
+
+      await client.query(
+        `UPDATE date_change_requests SET related_refund_id = $1 WHERE request_code = $2`,
+        [refundResult.rows[0].id, requestCode]
+      );
+      console.log(`[DateChange] Auto-created refund ${refundCode}: ${refundableAmount} VND`);
+    }
+
+    // === GHI NOTE PHỤ THU NẾU USER CẦN TRẢ THÊM ===
+    const surchargeAmount = Math.max(0, ticketDiff - cancelledAncillaryTotal);
+    const finalAdminNotes = surchargeAmount > 0
+      ? `${adminNotes ? adminNotes + ' | ' : ''}PHỤ THU: ${surchargeAmount.toLocaleString('vi-VN')} VND chưa thu từ khách`
+      : adminNotes;
+
+    // Update booking flight & status
     await client.query(QCD.UPDATE_BOOKING_FLIGHT, [
       request.new_flight_id,
       request.new_seat_class,
@@ -387,7 +463,7 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
     await client.query(QCD.UPDATE_DATE_CHANGE_STATUS, [
       'approved',
       adminId,
-      adminNotes,
+      finalAdminNotes,
       requestCode,
     ]);
 
@@ -399,6 +475,13 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
       request_code: requestCode,
       status: 'approved',
       message: 'Yêu cầu đổi ngày bay đã được duyệt thành công',
+      price_settled: {
+        ticket_difference:        ticketDiff,
+        cancelled_ancillary_total: cancelledAncillaryTotal,
+        refund_amount:            refundableAmount,
+        refund_code:              relatedRefundCode,
+        surcharge_amount:         surchargeAmount,
+      },
     };
 
   } catch (err) {
