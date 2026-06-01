@@ -1,9 +1,7 @@
 'use strict';
 
 /*
-=========================================================
 DATE CHANGE SERVICE - Business Logic
-=========================================================
 */
 
 const pool = require('../config/db');
@@ -24,9 +22,7 @@ const generateRefundCode = () => {
   return `REF-DC-${date}-${s}`;
 };
 
-// =========================================================
 // HELPERS
-// =========================================================
 
 const dateChangeOTPStore = new Map(); // In-memory store: requestCode -> { otp, expiresAt, attempts }
 
@@ -117,9 +113,7 @@ const verifyDateChangeOTP = async (email, otp) => {
   return { verified: true };
 };
 
-// =========================================================
 // REQUEST DATE CHANGE (USER)
-// =========================================================
 
 const requestDateChange = async (userId, bookingCode, data) => {
   const {
@@ -248,9 +242,7 @@ const requestDateChange = async (userId, bookingCode, data) => {
   }
 };
 
-// =========================================================
 // CONFIRM DATE CHANGE (After OTP Verification)
-// =========================================================
 
 const confirmDateChange = async (email, otp, requestCode) => {
   // 1. Verify OTP
@@ -297,9 +289,7 @@ const confirmDateChange = async (email, otp, requestCode) => {
   };
 };
 
-// =========================================================
 // APPROVE DATE CHANGE (ADMIN)  \][-p0i]
-// =========================================================
 
 const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
   const client = await pool.connect();
@@ -408,9 +398,8 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
   }
 };
 
-// =========================================================
+
 // REJECT + CANCEL + GET (giữ nguyên)
-// =========================================================
 
 const rejectDateChange = async (adminId, requestCode, reason) => {
   if (!reason || reason.trim().length < 10) {

@@ -1,14 +1,11 @@
 'use strict';
 
-/*
-=========================================================
-DATE CHANGE CONTROLLER - User + Admin
-=========================================================
-*/
+
+// DATE CHANGE CONTROLLER - User + Admin
 
 const dateChangeService = require('../services/date-change.service');
 
-// ==================== USER ====================
+//  USER 
 
 const requestDateChange = async (req, res) => {
   try {
@@ -93,7 +90,7 @@ const cancelDateChangeRequest = async (req, res) => {
   }
 };
 
-// ==================== ADMIN ====================
+// ADMIN 
 
 const approveDateChange = async (req, res) => {
   try {
