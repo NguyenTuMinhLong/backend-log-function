@@ -230,6 +230,11 @@ const hoursBeforeDeparture = (departureTime) => {
   const diffMs = departure - now;
   return diffMs > 0 ? diffMs / (1000 * 60 * 60) : 0;
 };
+// Auto refund chỉ được áp dụng với bill dưới 1tr + otp
+const AUTO_REFUND = {
+  enabled: true,
+  threshold: 1000000, // 1 triệu
+}
 
 module.exports = {
   // Policies
@@ -264,4 +269,7 @@ module.exports = {
   // Helpers
   findPolicy,
   hoursBeforeDeparture,
+
+  // Auto Refund
+  AUTO_REFUND,
 };

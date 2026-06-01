@@ -32,12 +32,13 @@ const getGuestSessionId = (req) => {
 const requestRefund = async (req, res) => {
   try {
     const userId = req.user ? req.user.id : null;
-    const bookingCode = req.params.bookingCode.toUpperCase();
 
     if (!userId) {
-      return res.status(401).json({ error: 'Vui lòng đăng nhập để thực hiện yêu cầu hoàn tiền' });
+      return res.status(401).json({ error: 'Vui long dang nhap de thuc hien yeu cau hoan tien' });
     }
 
+    // Bug 6 Fix: hỗ trợ cả URL param (/bookings/:bookingCode/...) lẫn body ({bookingCode: ...})
+    const bookingCode = req.params.bookingCode || req.body.bookingCode;
     const {
       refund_type = 'full',
       requested_items,
@@ -45,7 +46,11 @@ const requestRefund = async (req, res) => {
       user_notes,
     } = req.body;
 
-    const result = await refundService.requestRefund(userId, bookingCode, {
+    if (!bookingCode) {
+      return res.status(400).json({ error: 'bookingCode là bắt buộc' });
+    }
+
+    const result = await refundService.requestRefund(userId, bookingCode.toUpperCase(), {
       refund_type,
       requested_items,
       reason,
