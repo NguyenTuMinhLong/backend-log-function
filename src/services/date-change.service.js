@@ -221,14 +221,6 @@ const requestDateChange = async (userId, bookingCode, data) => {
 
     const request = requestResult.rows[0];
 
-    // Gui OTP den email
-    const bookingEmail = booking.contact_email || booking.guest_email;
-    try {
-      await requestDateChangeOTP(bookingEmail, request.request_code);
-    } catch (otpErr) {
-      console.error('[DateChange] OTP send error:', otpErr.message);
-    }
-
     try {
       await createDateChangeNotification({
         event: 'DATE_CHANGE_REQUESTED',
@@ -241,6 +233,14 @@ const requestDateChange = async (userId, bookingCode, data) => {
     }
 
     await client.query('COMMIT');
+
+    // Gửi OTP SAU KHI COMMIT — dùng pool.query() nên cần row đã được commit trước
+    const bookingEmail = booking.contact_email || booking.guest_email;
+    try {
+      await requestDateChangeOTP(bookingEmail, request.request_code);
+    } catch (otpErr) {
+      console.error('[DateChange] OTP send error:', otpErr.message);
+    }
 
     return {
       success: true,
