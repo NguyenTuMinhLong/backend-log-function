@@ -288,27 +288,14 @@ const confirmDateChange = async (email, otp, requestCode) => {
     throw new Error(`Yêu cầu đã được xử lý (status: ${request.status})`);
   }
 
-  // 3. Kiểm tra auto-approve hay chờ admin
-  const { AUTO_REFUND } = require('../config/refund.config');
-  const absDiff = Math.abs(parseFloat(request.price_difference));
-  const autoApprove = AUTO_REFUND.enabled && absDiff < AUTO_REFUND.threshold;
-
-  // Bug 1 Fix: Luôn set thành 'pending' trước — approveDateChange yêu cầu status = 'pending'
-  // Không set 'approved' trước rồi gọi approveDateChange (sẽ throw vì status không phải 'pending')
+  // Luôn chuyển sang 'pending' — bắt buộc admin duyệt thủ công
   await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', requestCode]);
-
-  // 4. Nếu auto-approve: gọi approveDateChange (lúc này status đã là 'pending', hàm sẽ chạy đúng)
-  if (autoApprove) {
-    await approveDateChange(null, requestCode, 'Auto-approved sau OTP verification');
-  }
 
   return {
     success: true,
-    status: autoApprove ? 'approved' : 'pending',
-    auto_approved: autoApprove,
-    message: autoApprove
-      ? 'Yêu cầu đổi ngày bay đã được duyệt tự động'
-      : 'Yêu cầu đổi ngày bay đã được tiếp nhận, chờ admin duyệt',
+    status: 'pending',
+    auto_approved: false,
+    message: 'Yêu cầu đổi ngày bay đã được tiếp nhận, chờ admin duyệt',
   };
 };
 
