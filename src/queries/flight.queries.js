@@ -277,9 +277,12 @@ const SEARCH_ALTERNATIVE_FLIGHTS = `
 // ── Price Calendar ────────────────────────────────────────────────────────────
 
 const GET_MIN_PRICES_CALENDAR = `
-  SELECT
+  SELECT DISTINCT ON (DATE(f.departure_time + INTERVAL '7 hours'))
     DATE(f.departure_time + INTERVAL '7 hours') AS flight_date,
-    MIN(fs.base_price) AS min_price
+    fs.base_price                               AS min_price,
+    fs.available_seats,
+    fs.total_seats,
+    f.departure_time
   FROM flights f
   JOIN airports dep ON dep.id = f.departure_airport_id
   JOIN airports arr ON arr.id = f.arrival_airport_id
@@ -293,8 +296,7 @@ const GET_MIN_PRICES_CALENDAR = `
     AND DATE(f.departure_time + INTERVAL '7 hours') >= $4
     AND DATE(f.departure_time + INTERVAL '7 hours') <= $5
     AND fs.available_seats >= $6
-  GROUP BY DATE(f.departure_time + INTERVAL '7 hours')
-  ORDER BY DATE(f.departure_time + INTERVAL '7 hours')
+  ORDER BY DATE(f.departure_time + INTERVAL '7 hours'), fs.base_price ASC
 `;
 
 // ── Airports & Airlines ───────────────────────────────────────────────────────

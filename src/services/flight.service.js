@@ -553,7 +553,16 @@ const getPriceCalendar = async (params = {}) => {
     from.toUpperCase(), to.toUpperCase(), seat_class, startDate, endDateStr, a
   ]);
 
-  return result.rows;
+  // Áp dụng dynamic pricing giống flight search để giá hiển thị nhất quán
+  return result.rows.map(row => ({
+    flight_date: row.flight_date,
+    min_price: applyDynamicPricing(
+      Number(row.min_price),
+      row.available_seats,
+      row.total_seats,
+      row.departure_time
+    ),
+  }));
 };
 
 module.exports = { 
