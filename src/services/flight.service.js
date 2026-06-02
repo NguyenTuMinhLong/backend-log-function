@@ -557,7 +557,7 @@ const getPriceCalendar = async (params = {}) => {
   // (không dùng DISTINCT ON vì min base_price ≠ min dynamic price)
   const dateMap = {};
   for (const row of result.rows) {
-    const date = String(row.flight_date).slice(0, 10);
+    const date = new Date(row.flight_date).toISOString().slice(0, 10);
     const dynamicPrice = applyDynamicPricing(
       Number(row.base_price),
       row.available_seats,
