@@ -553,16 +553,22 @@ const getPriceCalendar = async (params = {}) => {
     from.toUpperCase(), to.toUpperCase(), seat_class, startDate, endDateStr, a
   ]);
 
-  // Áp dụng dynamic pricing giống flight search để giá hiển thị nhất quán
-  return result.rows.map(row => ({
-    flight_date: row.flight_date,
-    min_price: applyDynamicPricing(
-      Number(row.min_price),
+  // Tính min dynamic price thật sự cho mỗi ngày
+  // (không dùng DISTINCT ON vì min base_price ≠ min dynamic price)
+  const dateMap = {};
+  for (const row of result.rows) {
+    const date = String(row.flight_date).slice(0, 10);
+    const dynamicPrice = applyDynamicPricing(
+      Number(row.base_price),
       row.available_seats,
       row.total_seats,
       row.departure_time
-    ),
-  }));
+    );
+    if (!dateMap[date] || dynamicPrice < dateMap[date]) {
+      dateMap[date] = dynamicPrice;
+    }
+  }
+  return Object.entries(dateMap).map(([flight_date, min_price]) => ({ flight_date, min_price }));
 };
 
 module.exports = { 
