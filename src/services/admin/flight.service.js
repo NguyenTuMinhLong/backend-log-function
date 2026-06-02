@@ -262,6 +262,14 @@ const createFlight = async (data) => {
 /**
  * Cập nhật thông tin chuyến bay (giờ bay, giá vé theo hạng)
  */
+const getBoardingMinutes = (depTime, arrTime) => {
+  if (!depTime || !arrTime) return 45;
+  const durationMins = (new Date(arrTime) - new Date(depTime)) / 60000;
+  if (durationMins <= 120) return 45;
+  if (durationMins <= 300) return 60;
+  return 75;
+};
+
 const updateFlight = async (flightId, data) => {
   const {
     flight_number,
@@ -271,6 +279,7 @@ const updateFlight = async (flightId, data) => {
     departure_time,
     arrival_time,
     duration_minutes,
+    gate,
     seats,
   } = data;
 
@@ -317,11 +326,46 @@ const updateFlight = async (flightId, data) => {
       fields.push(`duration_minutes=$${idx++}`);
       values.push(parseInt(duration_minutes));
     }
+    if (gate !== undefined) {
+      fields.push(`gate=$${idx++}`);
+      values.push(gate || null);
+    }
 
     if (fields.length > 0) {
       fields.push(`updated_at=NOW()`);
       values.push(flightId);
       await client.query(QF.UPDATE_FLIGHT_FIELDS(fields, idx), values);
+    }
+
+    // ── Lấy flight info sau update để dùng cho notify ──
+    const flightAfter = (await client.query(QF.FIND_FLIGHT_BY_ID, [flightId])).rows[0];
+
+    // ── Nếu đổi departure_time → update boarding_time trong checkin_records ──
+    if (departure_time) {
+      const newArr = arrival_time || flightAfter?.arrival_time;
+      const mins   = getBoardingMinutes(departure_time, newArr);
+      const newBoarding = new Date(new Date(departure_time).getTime() - mins * 60 * 1000);
+      await client.query(
+        `UPDATE checkin_records cr
+         SET boarding_time = $1, updated_at = NOW()
+         FROM bookings b
+         WHERE cr.booking_id = b.id
+           AND b.outbound_flight_id = $2
+           AND cr.boarding_time IS NOT NULL`,
+        [newBoarding, flightId]
+      );
+    }
+
+    // ── Nếu đổi gate → update gate trong checkin_records ──
+    if (gate !== undefined && gate !== null) {
+      await client.query(
+        `UPDATE checkin_records cr
+         SET gate = $1, updated_at = NOW()
+         FROM bookings b
+         WHERE cr.booking_id = b.id
+           AND b.outbound_flight_id = $2`,
+        [gate, flightId]
+      );
     }
 
     if (seats && seats.length > 0) {
@@ -405,6 +449,45 @@ const updateFlight = async (flightId, data) => {
     }
 
     await client.query("COMMIT");
+
+    // ── Gửi email thông báo sau COMMIT ──
+    const shouldNotify = departure_time || (gate !== undefined && gate !== null);
+    if (shouldNotify) {
+      try {
+        const { sendFlightStatusEmail } = require("../../utils/mailer");
+        const affectedBookings = await pool.query(
+          `SELECT b.contact_email, b.contact_name, b.booking_code
+           FROM bookings b
+           WHERE b.outbound_flight_id = $1
+             AND b.status IN ('confirmed', 'pending')`,
+          [flightId]
+        );
+
+        const fd = flightAfter;
+        for (const booking of affectedBookings.rows) {
+          if (!booking.contact_email) continue;
+
+          // Tạo message mô tả thay đổi
+          let changeMsg = '';
+          if (departure_time) changeMsg += `Giờ khởi hành mới: ${new Date(departure_time).toLocaleString('vi-VN', { timeZone: 'UTC' })}. `;
+          if (gate) changeMsg += `Cổng khởi hành mới: ${gate}. `;
+
+          sendFlightStatusEmail(booking.contact_email, {
+            contactName:    booking.contact_name || 'Hành khách',
+            bookingCode:    booking.booking_code,
+            flightNumber:   fd?.flight_number,
+            statusLabel:    departure_time ? 'Thay đổi giờ bay' : 'Thay đổi cổng khởi hành',
+            reason:         changeMsg.trim(),
+            departureTime:  departure_time || fd?.departure_time,
+            originCode:     fd?.departure_code,
+            destCode:       fd?.arrival_code,
+          }).catch(() => {});
+        }
+      } catch (notifyErr) {
+        console.error('[updateFlight notify]', notifyErr.message);
+      }
+    }
+
     return {
       message: "Cập nhật chuyến bay thành công",
       flight_id: parseInt(flightId),
