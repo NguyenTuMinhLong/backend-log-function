@@ -242,9 +242,9 @@ const checkinPassenger = async (bookingCode, passengerId, flightType) => {
       ? booking.return_flight_id 
       : booking.outbound_flight_id;
     
-    // Get flight info
+    // Get flight info (bao gồm gate nếu admin đã set)
     const flightResult = await client.query(
-      `SELECT f.flight_number, f.departure_time, f.arrival_time,
+      `SELECT f.flight_number, f.departure_time, f.arrival_time, f.gate,
               dep.code AS departure_airport, dep.country AS departure_country,
               arr.code AS arrival_airport
        FROM flights f
@@ -263,8 +263,8 @@ const checkinPassenger = async (bookingCode, passengerId, flightType) => {
     // Generate boarding pass code
     const boardingPassCode = generateBoardingPassCode(booking.booking_code, seq);
 
-    // Gate theo sân bay
-    const gate = generateGate(flightNumber, flightRow.departure_airport, flightRow.departure_country);
+    // Gate: ưu tiên gate do admin set, fallback về generate tự động
+    const gate = flightRow.gate || generateGate(flightNumber, flightRow.departure_airport, flightRow.departure_country);
 
     // Boarding time theo thực tế
     let boardingTime = null;
@@ -348,9 +348,9 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
       throw new Error('Chuyến bay đã bị hủy, không thể check-in');
     }
 
-    // Fetch flight info once (dùng flightId đã có từ bước validate ở trên)
+    // Fetch flight info once (bao gồm gate nếu admin đã set)
     const flightResult = await client.query(
-      `SELECT f.flight_number, f.departure_time, f.arrival_time,
+      `SELECT f.flight_number, f.departure_time, f.arrival_time, f.gate,
               dep.code AS departure_airport, dep.country AS departure_country,
               arr.code AS arrival_airport
        FROM flights f
@@ -404,8 +404,8 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
       // Generate boarding pass code
       const boardingPassCode = generateBoardingPassCode(booking.booking_code, seq);
 
-      // Gate theo sân bay
-      const gate = generateGate(flightNumber, flightRow.departure_airport, flightRow.departure_country);
+      // Gate: ưu tiên gate do admin set, fallback về generate tự động
+      const gate = flightRow.gate || generateGate(flightNumber, flightRow.departure_airport, flightRow.departure_country);
 
       // Boarding time theo thực tế
       let boardingTime = null;
