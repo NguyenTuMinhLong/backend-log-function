@@ -156,11 +156,8 @@ const createBooking = async (data, userId = null) => {
       returnSeat = await checkAndGetSeatInfo(client, return_flight_id, return_seat_class, seatsNeeded);
     }
 
-    const outboundPrice = applyDemand(parseFloat(outboundSeat.base_price), outboundSeat.available_seats, outboundSeat.total_seats, outboundSeat.departure_time);
-    const returnPrice   = returnSeat ? applyDemand(parseFloat(returnSeat.base_price), returnSeat.available_seats, returnSeat.total_seats, returnSeat.departure_time) : 0;
-
-    const outboundTotal = calcTotalPrice(outboundPrice, a, c, i);
-    const returnTotal   = returnSeat ? calcTotalPrice(returnPrice, a, c, i) : 0;
+    const outboundTotal = calcTotalPrice(parseFloat(outboundSeat.base_price), a, c, i);
+    const returnTotal   = returnSeat ? calcTotalPrice(parseFloat(returnSeat.base_price), a, c, i) : 0;
 
     let baggageTotal = 0;
     const outboundPassengers = passengers.filter((p) => (p.flight_type || "outbound") === "outbound");
@@ -181,13 +178,8 @@ const createBooking = async (data, userId = null) => {
       baggageTotal += p._baggage_price;
     }
 
-    const seatExtraFee = parseFloat(data.seat_extra_fee) || 0;
-    const ancillaryFee = (data.ancillary_options || []).reduce(
-      (sum, opt) => sum + (Number(opt.unit_price || 0) * Number(opt.quantity || 1)), 0
-    );
-    // Lưu 1 giá duy nhất: tất cả gộp vào total_price
-    const totalPrice   = outboundTotal + returnTotal + baggageTotal + seatExtraFee + ancillaryFee;
-    const basePrice    = outboundPrice;
+    const totalPrice = outboundTotal + returnTotal + baggageTotal;
+    const basePrice  = parseFloat(outboundSeat.base_price);
 
     let bookingCode;
     let isUnique = false;
@@ -570,12 +562,12 @@ const autoCompleteFlights = async () => {
     await client.query("BEGIN");
 
     // 1. Chuyển tất cả chuyến bay đã khởi hành sang "completed"
+    //    Buffer 3 tiếng — khớp với cấp 3 ở search query
     const completedResult = await client.query(`
       UPDATE flights
       SET    status     = 'completed',
              updated_at = NOW()
-      WHERE  departure_time < NOW()
-        AND  (departure_time + (duration_minutes * 0.3 * INTERVAL '1 minute')) < NOW()
+      WHERE  departure_time < NOW() - INTERVAL '3 hours'
         AND  status NOT IN ('cancelled', 'completed')
       RETURNING id, flight_number
     `);

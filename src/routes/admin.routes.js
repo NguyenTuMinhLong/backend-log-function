@@ -14,7 +14,8 @@ const adminFlightCancellationController = require("../controllers/admin/flight-c
 const adminUserController = require("../controllers/admin/user.controller");
 const adminChatController = require("../controllers/admin/chat.controller");
 const adminCronController      = require("../controllers/admin/cron.controller");
-const adminAutoFlightController = require("../controllers/admin/auto-flight.controller");
+
+const adminPriceRuleController = require("../controllers/admin/price-rule.controller");
 
 // Tất cả routes admin: phải đăng nhập + role = 'admin'
 router.use(authenticate, authorize("admin"));
@@ -112,36 +113,13 @@ router.get("/chat/conversations/:id", adminChatController.getSupportConversation
 router.post("/chat/conversations/:id/message", adminChatController.replySupportConversation);
 router.patch("/chat/conversations/:id/status", adminChatController.updateSupportConversationStatus);
 
-// ── Newsletter ────────────────────────────────────────────────────────────────
-const { sendNewsletterBroadcast } = require('../utils/mailer');
-const pool = require('../config/db');
-
-router.get("/newsletter/subscribers", async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT id, email, is_active, created_at FROM newsletter_subscribers ORDER BY created_at DESC`
-    );
-    res.json({ data: rows, total: rows.length });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post("/newsletter/send", async (req, res) => {
-  const { subject, title, body, ctaText, ctaUrl } = req.body;
-  if (!subject || !title || !body) {
-    return res.status(400).json({ error: "Thiếu subject, title hoặc body" });
-  }
-  try {
-    const { rows } = await pool.query(
-      `SELECT email, unsubscribe_token FROM newsletter_subscribers WHERE is_active = TRUE`
-    );
-    if (rows.length === 0) return res.json({ sent: 0, failed: 0, message: "Không có subscriber nào" });
-    const result = await sendNewsletterBroadcast(rows, { subject, title, body, ctaText, ctaUrl });
-    res.json({ ...result, total: rows.length });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// Price Rules (Dynamic Pricing)
+router.get("/price-rules/preview",    adminPriceRuleController.previewPrice);
+router.get("/price-rules",            adminPriceRuleController.getAllRules);
+router.get("/price-rules/:id",        adminPriceRuleController.getRuleById);
+router.post("/price-rules",           adminPriceRuleController.createRule);
+router.put("/price-rules/:id",        adminPriceRuleController.updateRule);
+router.delete("/price-rules/:id",     adminPriceRuleController.deleteRule);
+router.patch("/price-rules/:id/toggle", adminPriceRuleController.toggleRule);
 
 module.exports = router;
