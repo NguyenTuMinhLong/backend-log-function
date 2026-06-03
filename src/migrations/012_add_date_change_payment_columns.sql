@@ -3,7 +3,7 @@
 
 -- Add payment_id column
 ALTER TABLE date_change_requests 
-ADD COLUMN IF NOT EXISTS payment_id BIGINT REFERENCES payments(id);
+ADD COLUMN IF NOT EXISTS payment_id UUID REFERENCES payments(id);
 
 -- Add payment_code column for easier lookup
 ALTER TABLE date_change_requests 
