@@ -154,7 +154,13 @@ const getAdminDateChanges = async (req, res) => {
     const result = await dateChangeService.getAdminDateChanges(status, page, limit);
     res.json({ message: 'Lấy danh sách đổi ngày thành công', data: result });
   } catch (err) {
-// ==================================================// DATE CHANGE PAYMENT ENDPOINTS
+    res.status(400).json({ error: err.message });
+  }
+};
+
+// =========================================================
+// DATE CHANGE PAYMENT ENDPOINTS
+// =========================================================
 // ==================================================
 const createDateChangePayment = async (req, res) => {
   try {
