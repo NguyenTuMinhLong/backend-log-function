@@ -1,66 +1,80 @@
-# Vivudee - Flight Booking System - Backend
+# Vivudee - Flight Booking Backend
 
-Backend API cho hệ thống **Vivudee - Flight Booking System**, xây dựng bằng **Node.js + Express + PostgreSQL**. Project cung cấp các chức năng xác thực người dùng, tìm kiếm chuyến bay, tạo booking, thanh toán, quản trị dữ liệu hệ thống và tích hợp social auth / gửi OTP qua email.
+Node.js + Express + PostgreSQL backend cho hệ thống đặt vé máy bay.
 
-## 1. Tech stack
+## Chức năng chính
 
-- **Runtime:** Node.js
-- **Framework:** Express.js
-- **Database:** PostgreSQL (`pg`)
-- **Authentication:** JWT + Refresh Token + OTP
-- **Social Auth:** Supabase Auth
-- **Email Service:** Resend / Nodemailer wrapper
-- **Password Hashing:** bcrypt
-- **Dev tool:** nodemon
-
-## 2. Chức năng chính
-
-### Authentication
-- Đăng ký tài khoản
-- Xác thực OTP đăng ký
-- Gửi lại OTP
-- Đăng nhập
-- Refresh token
-- Lấy thông tin user hiện tại
-- Đổi mật khẩu
-- Quên mật khẩu / reset mật khẩu bằng OTP
-- Đăng xuất
-- Social auth profile với Supabase
-- Tự khóa tạm thời khi đăng nhập sai nhiều lần
+### Auth
+Register, login, OTP, refresh token, social auth, forgot/reset password, auto lock khi sai nhiều lần.
 
 ### Flight
-- Tìm kiếm chuyến bay theo điểm đi, điểm đến, ngày bay, hạng ghế
-- Lấy danh sách sân bay
-- Lấy danh sách hãng hàng không
-- Xem chi tiết chuyến bay
+Tìm kiếm chuyến bay, xem chi tiết, multi-leg (one-way / round-trip / multi-city).
 
 ### Booking
-- Tạo booking cho guest hoặc user đã đăng nhập
-- Xem booking theo mã
-- Xem danh sách booking của tôi
-- Hủy booking
-- Tự động expire booking giữ chỗ quá hạn
+Tạo booking, xem booking, hủy booking, tự động expire giữ chỗ quá hạn.
 
 ### Payment
-- Preview thanh toán
-- Tạo payment
-- Confirm payment
-- Xem lịch sử thanh toán của user
-- Hỗ trợ voucher / coupon trong luồng thanh toán
+Hỗ trợ PayOS, MoMo, PayPal, BANK_QR. Preview, tạo, confirm payment.
 
 ### Admin
-- Quản lý chuyến bay
-- Quản lý sân bay
-- Quản lý hãng hàng không
-- Quản lý user
-- Quản lý coupon
-- Quản lý booking
-- Xem thống kê hệ thống
+Quản lý flight, airport, airline, user, coupon, booking, thống kê.
 
-### Public API
-- Danh sách sân bay
-- Danh sách hãng hàng không
-- Danh sách coupon public / available
+---
 
+## Date Change & Payment
 
-Những nào không dùng tách ra, fix mấy cái query còn sót
+### Luồng đổi ngày bay
+
+```
+1. POST /api/date-changes/bookings/:bookingCode/change-flight  → gửi OTP, status = pending_otp
+2. POST /api/date-changes/confirm                            → verify OTP, xử lý chênh lệch giá
+3. Admin approve nếu chênh lệch >= 1M
+```
+
+### Tính chênh lệch giá
+
+```javascript
+priceDifference = (newFlight.base_price * số_vé) - booking.total_price
+
+// Kết quả:
+// priceDifference > 0  → khách trả thêm (auto: tạo payment)
+// priceDifference = 0  → không thay đổi
+// priceDifference < 0  → hoàn tiền (auto: refund)
+// priceDifference có |value| < 1M → auto approve
+```
+
+### OTP bắt buộc cho mọi date change
+
+---
+
+## Flight Brand / Airline
+
+Đơn giản: mỗi flight join bảng `airlines` là có đủ thông tin.
+
+```sql
+-- Flight query luôn join airlines
+SELECT f.*, al.code AS airline_code, al.name AS airline_name, al.logo_url ...
+FROM flights f
+JOIN airlines al ON al.id = f.airline_id
+```
+
+Frontend nhận:
+```json
+{
+  "airline": {
+    "code": "VN",
+    "name": "Vietnam Airlines",
+    "logo_url": "https://..."
+  }
+}
+```
+
+---
+
+## Config
+
+Xem `src/config/` - mỗi feature có config riêng: `auth.config.js`, `payment.config.js`, `refund.config.js`.
+
+## API Docs
+
+Postman collection trong `postman/` folder.

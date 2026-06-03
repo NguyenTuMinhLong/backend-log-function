@@ -1,14 +1,11 @@
 'use strict';
 
-/*
-=========================================================
-DATE CHANGE CONTROLLER - User + Admin
-=========================================================
-*/
+
+// DATE CHANGE CONTROLLER - User + Admin
 
 const dateChangeService = require('../services/date-change.service');
 
-// ==================== USER ====================
+//  USER 
 
 const requestDateChange = async (req, res) => {
   try {
@@ -93,7 +90,7 @@ const cancelDateChangeRequest = async (req, res) => {
   }
 };
 
-// ==================== ADMIN ====================
+// ADMIN 
 
 const approveDateChange = async (req, res) => {
   try {
@@ -153,6 +150,63 @@ const confirmDateChange = async (req, res) => {
   }
 };
 
+// =========================================================
+// DATE CHANGE PAYMENT ENDPOINTS
+// =========================================================
+
+const createDateChangePayment = async (req, res) => {
+  try {
+    const requestCode = req.params.requestCode?.toUpperCase();
+    const { payment_method } = req.body;
+    const userId = req.user?.id;
+
+    if (!payment_method) {
+      return res.status(400).json({ error: 'payment_method la bat buoc' });
+    }
+
+    const result = await dateChangeService.createDateChangePayment(requestCode, payment_method, userId);
+
+    res.status(201).json({
+      message: 'Tao thanh toan thanh cong',
+      data: result,
+    });
+  } catch (err) {
+    console.error('[CreateDateChangePayment]', err.message);
+    const status = err.message.includes('Khong tim thay') ? 404 : 400;
+    res.status(status).json({ error: err.message });
+  }
+};
+
+const getDateChangePaymentStatus = async (req, res) => {
+  try {
+    const requestCode = req.params.requestCode?.toUpperCase();
+    const result = await dateChangeService.getDateChangePaymentStatus(requestCode);
+
+    res.json({
+      message: 'Lay trang thai thanh toan thanh cong',
+      data: result,
+    });
+  } catch (err) {
+    console.error('[GetDateChangePaymentStatus]', err.message);
+    res.status(404).json({ error: err.message });
+  }
+};
+
+const cancelDateChangePayment = async (req, res) => {
+  try {
+    const requestCode = req.params.requestCode?.toUpperCase();
+    const result = await dateChangeService.cancelDateChangePayment(requestCode);
+
+    res.json({
+      message: 'Huy thanh toan thanh cong',
+      data: result,
+    });
+  } catch (err) {
+    console.error('[CancelDateChangePayment]', err.message);
+    res.status(400).json({ error: err.message });
+  }
+};
+
 module.exports = {
   requestDateChange,
   getBookingDateChanges,
@@ -162,4 +216,7 @@ module.exports = {
   approveDateChange,
   rejectDateChange,
   confirmDateChange,
+  createDateChangePayment,
+  getDateChangePaymentStatus,
+  cancelDateChangePayment,
 };
