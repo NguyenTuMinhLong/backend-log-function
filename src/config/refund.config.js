@@ -128,12 +128,20 @@ const DATE_CHANGE = {
   // Price difference handling
   priceDifference: {
     chargeIfPositive: true, // User phải trả thêm nếu price diff > 0
-    refundIfNegative: true, // Hoàn tiền nếu price diff < 0
-    requirePayment: false, // Có cần thanh toán trước khi approve không
+    refundIfNegative: false, // Tạm thời không hoàn tiền nếu price diff < 0
+    requirePayment: true, // Yêu cầu thanh toán trước khi approve (khi price diff > 0)
   },
 
   // Seat availability check
   checkSeatAvailability: true, // Kiểm tra ghế còn trước khi tạo request
+
+  // Payment settings
+  payment: {
+    enabled: true,
+    methods: ['BANK_QR', 'MOMO', 'PAYPAL'], // Các phương thức thanh toán hỗ trợ
+    expiryMinutes: 30, // Thời hạn thanh toán (30 phút)
+    autoApproveOnPayment: true, // Tự động approve date change sau khi payment thành công
+  },
 };
 
 // Notification Settings
