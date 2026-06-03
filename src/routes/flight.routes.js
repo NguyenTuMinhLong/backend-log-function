@@ -1,11 +1,14 @@
 const express = require("express");
 const router = express.Router();
 const flightController = require("../controllers/flight.controller");
+const flightComboController = require("../controllers/flight-combo.controller");
 
 router.get("/search",          flightController.searchFlights);
+router.get("/mixed-search",     flightComboController.mixedSearch);
 router.get("/airports",        flightController.getAirports);
 router.get("/airlines",        flightController.getAirlines);
 router.get("/alternatives",    flightController.getAlternativeFlights);
+router.get("/combo",           flightController.getFlightCombos);
 router.get("/price-calendar",  flightController.getPriceCalendar);
 router.get("/recommendations", flightController.getFlightRecommendations);
 router.get("/browse",               flightController.browseFlights);

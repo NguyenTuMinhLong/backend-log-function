@@ -565,6 +565,164 @@ const getAlternativeFlights = async (flightId, params = {}) => {
   return formatFlights(result.rows, a, c, i);
 };
 
+// ─── getFlightCombos ───────────────────────────────────────────────────────────
+
+const DEFAULT_COMBO_RULES = {
+  minLayoverMinutes: 45,
+  maxLayoverMinutes: 8 * 60,
+  maxStops: 1,
+};
+
+const minutesBetween = (start, end) => Math.round((new Date(end).getTime() - new Date(start).getTime()) / 60000);
+
+const rankCombo = (combo) => {
+  const totalPrice = combo.legs.reduce((sum, leg) => sum + (leg.seat?.total_price || 0), 0);
+  const totalDuration = combo.legs.reduce((sum, leg) => sum + (leg.duration_minutes || 0), 0) + combo.total_layover_minutes;
+  const avgSeatFill = combo.legs.reduce((sum, leg) => sum + (leg.seat?.available_seats || 0), 0) / combo.legs.length;
+
+  const priceScore = totalPrice;
+  const durationScore = totalDuration;
+  const layoverPenalty = combo.total_layover_minutes < DEFAULT_COMBO_RULES.minLayoverMinutes
+    ? 999999
+    : combo.total_layover_minutes > DEFAULT_COMBO_RULES.maxLayoverMinutes
+      ? 999999
+      : combo.total_layover_minutes;
+  const seatScore = -avgSeatFill;
+
+  return {
+    ...combo,
+    total_price: totalPrice,
+    total_duration_minutes: totalDuration,
+    score: priceScore * 0.5 + durationScore * 0.3 + layoverPenalty * 0.15 + seatScore * 0.05,
+  };
+};
+
+const buildComboLeg = (row, adults, children, infants) => {
+  const base = parseFloat(row.base_price) || 0;
+  const price = applyDynamicPricing(base, row.available_seats, row.total_seats, row.departure_time);
+
+  return {
+    flight_id: row.flight_id,
+    flight_number: row.flight_number,
+    status: row.status,
+    airline: {
+      id: row.airline_id,
+      code: row.airline_code,
+      name: row.airline_name,
+      logo_url: row.airline_logo,
+      logo_dark: row.airline_logo_dark,
+      logo_light: row.airline_logo_light,
+    },
+    departure: {
+      airport_id: row.departure_airport_id,
+      code: row.departure_code,
+      airport_name: row.departure_airport_name,
+      city: row.departure_city,
+      time: row.departure_time,
+    },
+    arrival: {
+      airport_id: row.arrival_airport_id,
+      code: row.arrival_code,
+      airport_name: row.arrival_airport_name,
+      city: row.arrival_city,
+      time: row.arrival_time,
+    },
+    duration_minutes: row.duration_minutes,
+    duration_label: formatDuration(row.duration_minutes),
+    seat: {
+      class: row.seat_class,
+      available_seats: row.available_seats,
+      total_seats: row.total_seats,
+      base_price: price,
+      baggage_included_kg: row.baggage_included_kg,
+      carry_on_kg: row.carry_on_kg,
+      extra_baggage_price: parseFloat(row.extra_baggage_price) || 0,
+      total_price: calcTotalPrice(price, adults, children, infants),
+    },
+  };
+};
+
+const getFlightCombos = async (params = {}) => {
+  const {
+    departure_code,
+    arrival_code,
+    departure_date,
+    adults = 1,
+    children = 0,
+    infants = 0,
+    seat_class = 'economy',
+    min_layover_minutes = DEFAULT_COMBO_RULES.minLayoverMinutes,
+    max_layover_minutes = DEFAULT_COMBO_RULES.maxLayoverMinutes,
+    max_stops = DEFAULT_COMBO_RULES.maxStops,
+    limit = 10,
+  } = params;
+
+  if (!departure_code || !arrival_code || !departure_date) {
+    throw new Error("Thiếu tham số bắt buộc: departure_code, arrival_code, departure_date");
+  }
+
+  const a = Math.max(1, parseInt(adults) || 1);
+  const c = Math.max(0, parseInt(children) || 0);
+  const i = Math.max(0, parseInt(infants) || 0);
+  const cls = seat_class.toLowerCase();
+  const seatsNeeded = a + c;
+  const directRows = await pool.query(QF.SEARCH_FLIGHTS_FOR_COMBO, [
+    departure_code.toUpperCase(),
+    arrival_code.toUpperCase(),
+    cls,
+    seatsNeeded,
+    departure_date,
+  ]);
+
+  const directCombos = directRows.rows.map((row) => ({
+    stops: 0,
+    total_layover_minutes: 0,
+    legs: [buildComboLeg(row, a, c, i)],
+  }));
+
+  const combos = [...directCombos];
+
+  if (Number(max_stops) >= 1) {
+    // Tìm tất cả flights khởi hành từ departure (không filter arrival)
+    const firstLegs = await pool.query(QF.SEARCH_FLIGHTS_FOR_CONNECTING, [
+      departure_code.toUpperCase(),
+      cls,
+      seatsNeeded,
+      departure_date,
+    ]).catch(() => ({ rows: [] }));
+
+    const firstLegRows = firstLegs.rows.length ? firstLegs.rows : [];
+    for (const leg1 of firstLegRows) {
+      const transferCode = leg1.arrival_code;
+      if (!transferCode || transferCode === departure_code.toUpperCase() || transferCode === arrival_code.toUpperCase()) continue;
+
+      const secondLegs = await pool.query(QF.SEARCH_FLIGHTS_FOR_COMBO, [
+        transferCode,
+        arrival_code.toUpperCase(),
+        cls,
+        seatsNeeded,
+        departure_date,
+      ]);
+
+      for (const leg2 of secondLegs.rows) {
+        const layoverMinutes = minutesBetween(leg1.arrival_time, leg2.departure_time);
+        if (layoverMinutes < parseInt(min_layover_minutes) || layoverMinutes > parseInt(max_layover_minutes)) continue;
+
+        combos.push({
+          stops: 1,
+          total_layover_minutes: layoverMinutes,
+          legs: [buildComboLeg(leg1, a, c, i), buildComboLeg(leg2, a, c, i)],
+        });
+      }
+    }
+  }
+
+  return combos
+    .map(rankCombo)
+    .sort((x, y) => x.score - y.score)
+    .slice(0, parseInt(limit) || 10);
+};
+
 // ─── getPriceCalendar ──────────────────────────────────────────────────────────
 
 const getPriceCalendar = async (params = {}) => {

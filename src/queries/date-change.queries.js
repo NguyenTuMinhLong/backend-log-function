@@ -259,6 +259,52 @@ const UPDATE_BOOKING_FLIGHT_ROUND_TRIP = `
 `;
 
 // =========================================================
+// PAYMENT QUERIES
+// =========================================================
+
+const SELECT_DATE_CHANGE_BY_PAYMENT_ID = `
+  SELECT
+    dcr.*,
+    b.booking_code,
+    b.contact_email,
+    b.contact_name
+  FROM date_change_requests dcr
+  JOIN bookings b ON dcr.booking_id = b.id
+  WHERE dcr.payment_id = $1
+`;
+
+const SELECT_DATE_CHANGE_BY_PAYMENT_CODE = `
+  SELECT
+    dcr.*,
+    b.booking_code,
+    b.contact_email,
+    b.contact_name
+  FROM date_change_requests dcr
+  JOIN bookings b ON dcr.booking_id = b.id
+  WHERE dcr.payment_code = $1
+`;
+
+const UPDATE_DATE_CHANGE_PAYMENT_ID = `
+  UPDATE date_change_requests
+  SET
+    payment_id = $1,
+    payment_code = $2,
+    updated_at = NOW()
+  WHERE request_code = $3
+  RETURNING *
+`;
+
+const UPDATE_DATE_CHANGE_PAID = `
+  UPDATE date_change_requests
+  SET
+    status = 'approved',
+    paid_at = NOW(),
+    updated_at = NOW()
+  WHERE payment_code = $1
+  RETURNING *
+`;
+
+// =========================================================
 // EXPORTS
 // =========================================================
 
@@ -271,6 +317,12 @@ module.exports = {
   SELECT_DATE_CHANGE_BY_ID,
   SELECT_DATE_CHANGES_BY_BOOKING,
   SELECT_USER_DATE_CHANGES,
+
+  // Payment
+  SELECT_DATE_CHANGE_BY_PAYMENT_ID,
+  SELECT_DATE_CHANGE_BY_PAYMENT_CODE,
+  UPDATE_DATE_CHANGE_PAYMENT_ID,
+  UPDATE_DATE_CHANGE_PAID,
 
   // Admin
   SELECT_PENDING_DATE_CHANGES,

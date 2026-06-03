@@ -1,7 +1,13 @@
 const express = require("express");
 const router = express.Router();
 const paymentService = require("../services/payment.service");
+const dateChangeService = require("../services/date-change.service");
 const { authenticate, authenticateOptional } = require("../middlewares/auth.middleware");
+
+// Helper to check if payment is a date change payment
+const isDateChangePayment = (paymentCode) => {
+  return String(paymentCode || '').startsWith('PAY-DC-');
+};
 
 // Customer payment routes
 router.post("/preview", authenticateOptional, async (req, res) => {
@@ -96,6 +102,17 @@ router.get("/:paymentCode", async (req, res) => {
 // PayOS Webhook
 router.post("/webhook/payos", async (req, res) => {
   try {
+    // Check if this is a date change payment
+    const description = String(req.body.description || '').trim();
+    const paymentCode = description.startsWith('PAY-DC-') ? description : null;
+    
+    if (paymentCode) {
+      // Handle date change payment
+      const result = await dateChangeService.confirmDateChangePayment(paymentCode);
+      return res.json({ success: true, data: result });
+    }
+    
+    // Handle regular booking payment
     const result = await paymentService.handlePayosWebhook(req.body);
     res.json({ success: true, data: result });
   } catch (error) {
@@ -106,6 +123,16 @@ router.post("/webhook/payos", async (req, res) => {
 // Bank Webhook (cho VietQR reconciliation)
 router.post("/webhook/bank", async (req, res) => {
   try {
+    // Check if this is a date change payment
+    const paymentCode = String(req.body.payment_code || '').trim();
+    
+    if (isDateChangePayment(paymentCode)) {
+      // Handle date change payment
+      const result = await dateChangeService.confirmDateChangePayment(paymentCode);
+      return res.json({ success: true, data: result });
+    }
+    
+    // Handle regular booking payment
     const result = await paymentService.handleBankWebhook(req.body);
     res.json({ success: true, data: result });
   } catch (error) {
@@ -116,6 +143,16 @@ router.post("/webhook/bank", async (req, res) => {
 // MoMo IPN (server-to-server)
 router.post("/webhook/momo", async (req, res) => {
   try {
+    // Check if this is a date change payment
+    const paymentCode = String(req.body.orderId || req.body.order_id || '').trim();
+    
+    if (isDateChangePayment(paymentCode)) {
+      // Handle date change payment
+      const result = await dateChangeService.confirmDateChangePayment(paymentCode);
+      return res.json({ resultCode: 0, message: 'Success', data: result });
+    }
+    
+    // Handle regular booking payment
     const result = await paymentService.handleMomoIpn(req.body);
     res.json({ resultCode: result.resultCode, message: result.message });
   } catch (error) {
@@ -130,6 +167,21 @@ router.get("/return/momo", async (req, res) => {
   const resultPage = `${frontendBase}/payment/momo/result`;
 
   try {
+    // Check if this is a date change payment
+    const paymentCode = String(req.query.orderId || req.query.order_id || '').trim();
+    
+    if (isDateChangePayment(paymentCode)) {
+      // Handle date change payment return
+      const result = await dateChangeService.confirmDateChangePayment(paymentCode);
+      const params = new URLSearchParams({
+        status: result.status === 'approved' ? 'success' : 'pending',
+        paymentCode: paymentCode,
+        requestCode: result.request_code || '',
+      });
+      return res.redirect(`${frontendBase}/date-change/result?${params.toString()}`);
+    }
+    
+    // Handle regular booking payment
     const result = await paymentService.handleMomoReturn(req.query);
     const status = result.return_status || (result.ok && result.resultCode === 0 ? 'success' : 'error');
     const params = new URLSearchParams({
@@ -151,6 +203,21 @@ router.get("/return/payos/:status", async (req, res) => {
   const resultPage = `${frontendBase}/payment/payos/result`;
 
   try {
+    // Check if this is a date change payment
+    const paymentCode = String(req.query.payment_code || '').trim();
+    
+    if (isDateChangePayment(paymentCode)) {
+      // Handle date change payment return
+      const result = await dateChangeService.confirmDateChangePayment(paymentCode);
+      const params = new URLSearchParams({
+        status: result.status === 'approved' ? 'success' : 'pending',
+        paymentCode: paymentCode,
+        requestCode: result.request_code || '',
+      });
+      return res.redirect(`${frontendBase}/date-change/result?${params.toString()}`);
+    }
+    
+    // Handle regular booking payment
     const result = await paymentService.handlePayosReturn(req.params.status, req.query);
     const params = new URLSearchParams({
       status: result.status || 'pending',
@@ -171,6 +238,21 @@ router.get("/return/paypal", async (req, res) => {
   const resultPage = `${frontendBase}/payment/paypal/result`;
 
   try {
+    // Check if this is a date change payment
+    const paymentCode = String(req.query.payment_code || '').trim();
+    
+    if (isDateChangePayment(paymentCode)) {
+      // Handle date change payment return
+      const result = await dateChangeService.confirmDateChangePayment(paymentCode);
+      const params = new URLSearchParams({
+        status: result.status === 'approved' ? 'success' : 'pending',
+        paymentCode: paymentCode,
+        requestCode: result.request_code || '',
+      });
+      return res.redirect(`${frontendBase}/date-change/result?${params.toString()}`);
+    }
+    
+    // Handle regular booking payment
     const result = await paymentService.handlePaypalReturn(req.query);
     const params = new URLSearchParams({
       status: result.status || 'success',
@@ -194,6 +276,15 @@ router.get("/cancel/paypal", async (req, res) => {
   const resultPage = `${frontendBase}/payment/paypal/result`;
 
   try {
+    // Check if this is a date change payment
+    const paymentCode = String(req.query.payment_code || '').trim();
+    
+    if (isDateChangePayment(paymentCode)) {
+      // For date change payment, redirect back to date change page
+      return res.redirect(`${frontendBase}/date-change?cancelled=true`);
+    }
+    
+    // Handle regular booking payment
     const result = await paymentService.handlePaypalCancel(req.query);
     const params = new URLSearchParams({
       status: 'cancel',

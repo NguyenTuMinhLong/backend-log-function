@@ -80,6 +80,19 @@ const getAlternativeFlights = async (req, res) => {
 };
 
 /**
+ * GET /api/flights/combo
+ * Tìm combo chuyến bay 1 chặng hoặc nối chuyến
+ */
+const getFlightCombos = async (req, res) => {
+  try {
+    const result = await flightService.getFlightCombos(req.query);
+    res.json({ message: "Lấy combo chuyến bay thành công", data: result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
+/**
  * GET /api/flights/price-calendar?from=HAN&to=SGN&month=2025-04&seat_class=economy&adults=1
  * SB-02: Lịch giá vé – giá thấp nhất mỗi ngày trong tháng
  */
@@ -185,6 +198,7 @@ module.exports = {
   getAirlines,
   getFlightById,
   getAlternativeFlights,
+  getFlightCombos,
   getPriceCalendar,
   getSeatMap,
   getFlightRecommendations,

@@ -1,9 +1,7 @@
 'use strict';
 
 /*
-=========================================================
 DATE CHANGE SERVICE - Business Logic
-=========================================================
 */
 
 const pool = require('../config/db');
@@ -11,10 +9,19 @@ const QCD = require('../queries/date-change.queries');
 const QB = require('../queries/booking.queries');
 const QF = require('../queries/flight.queries');
 const QR = require('../queries/refund.queries');
+const QP = require('../queries/payment.queries');
 const { DATE_CHANGE } = require('../config/refund.config');
 const { createDateChangeNotification } = require('./notification.service');
 const { sendRefundOTPEmail } = require('../utils/mailer');
 const { OTP_CONFIG } = require('../config/refund.config');
+const { buildPaymentInstruction } = require('../utils/formatters');
+const paymentConfig = require('../config/payment.config');
+
+// Import providers
+const { createPayosPaymentInstruction } = require('../providers/payos.provider');
+const { createMomoPaymentInstruction } = require('../providers/momo.provider');
+const { createPayPalOrder } = require('../providers/paypal.provider');
+const { createBankQrInstruction } = require('../providers/bankqr.provider');
 
 const generateRefundCode = () => {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -24,9 +31,7 @@ const generateRefundCode = () => {
   return `REF-DC-${date}-${s}`;
 };
 
-// =========================================================
 // HELPERS
-// =========================================================
 
 const generateRequestCode = () => {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -140,9 +145,64 @@ const verifyDateChangeOTP = async (email, otp, requestCode) => {
   return { verified: true };
 };
 
-// =========================================================
+// HELPERS FOR PAYMENT
+
+const generateDateChangePaymentCode = () => {
+  const timestamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+  const random = Math.random().toString(16).slice(2, 8).toUpperCase();
+  return `PAY-DC-${timestamp}-${random}`;
+};
+
+const mapDateChangePayment = (payment, providerPayload = {}) => ({
+  ...payment,
+  method: payment.payment_method,
+  instruction: buildPaymentInstruction({
+    payment,
+    providerPayload,
+    bankConfig: paymentConfig.bankQr,
+    payosConfig: paymentConfig.payos,
+    momoConfig: paymentConfig.momo,
+    paypalConfig: paymentConfig.paypal,
+  }),
+});
+
+const isTerminalPaidStatus = (status) =>
+  ['PAID', 'SUCCESS', 'COMPLETED', 'CONFIRMED'].includes(String(status || '').toUpperCase());
+
+const getDateChangePaymentByCodeRow = async (paymentCode) => {
+  const { rows } = await pool.query(
+    'SELECT * FROM payments WHERE payment_code = $1 LIMIT 1',
+    [paymentCode]
+  );
+  return rows[0] || null;
+};
+
+const updateDateChangePaymentProviderFields = async (paymentCode, fields = {}) => {
+  const query = `
+    UPDATE payments SET
+      qr_payload = COALESCE($2, qr_payload),
+      bank_code = COALESCE($3, bank_code),
+      bank_account = COALESCE($4, bank_account),
+      transfer_content = COALESCE($5, transfer_content),
+      gateway_transaction_id = COALESCE($6, gateway_transaction_id),
+      gateway_response = COALESCE($7::jsonb, gateway_response)
+    WHERE payment_code = $1
+    RETURNING *
+  `;
+  const values = [
+    paymentCode,
+    fields.qr_payload || null,
+    fields.bank_code || null,
+    fields.bank_account || null,
+    fields.transfer_content || null,
+    fields.gateway_transaction_id || null,
+    fields.gateway_response ? JSON.stringify(fields.gateway_response) : null,
+  ];
+  const { rows } = await pool.query(query, values);
+  return rows[0] || null;
+};
+
 // REQUEST DATE CHANGE (USER)
-// =========================================================
 
 const requestDateChange = async (userId, bookingCode, data) => {
   const {
@@ -272,9 +332,7 @@ const requestDateChange = async (userId, bookingCode, data) => {
   }
 };
 
-// =========================================================
 // CONFIRM DATE CHANGE (After OTP Verification)
-// =========================================================
 
 const confirmDateChange = async (email, otp, requestCode) => {
   // 1. Verify OTP từ DB (Bug 3+4 Fix: dùng requestCode làm key)
@@ -289,8 +347,32 @@ const confirmDateChange = async (email, otp, requestCode) => {
     throw new Error(`Yêu cầu đã được xử lý (status: ${request.status})`);
   }
 
-  // Luôn chuyển sang 'pending' — bắt buộc admin duyệt thủ công
+  // 3. Kiểm tra payment có cần không (price_difference > 0)
+  const absDiff = Math.abs(parseFloat(request.price_difference));
+  const requiresPayment = request.price_difference > 0 && DATE_CHANGE.priceDifference?.chargeIfPositive;
+
+  if (requiresPayment) {
+    await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending_payment', requestCode]);
+    return {
+      success: true,
+      status: 'pending_payment',
+      requires_payment: true,
+      price_difference: parseFloat(request.price_difference),
+      message: 'Quý khách cần thanh toán phụ phí để hoàn tất yêu cầu đổi ngày bay',
+    };
+  }
+
+  // 4. Không cần payment → auto approve hoặc chờ admin
+  const { AUTO_REFUND } = require('../config/refund.config');
+  const autoApprove = AUTO_REFUND.enabled && absDiff < AUTO_REFUND.threshold;
+
+  // Fix Bug 2: luôn set 'pending' trước — approveDateChange yêu cầu status = 'pending'
   await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', requestCode]);
+
+  if (autoApprove) {
+    await approveDateChange(null, requestCode, 'Auto-approved sau OTP verification');
+  }
+
 
   return {
     success: true,
@@ -300,9 +382,281 @@ const confirmDateChange = async (email, otp, requestCode) => {
   };
 };
 
-// =========================================================
+// CREATE PAYMENT FOR DATE CHANGE (When price_difference > 0)
+
+const createDateChangePayment = async (requestCode, paymentMethod, userId = null) => {
+  // 1. Validate payment method early
+  const validMethods = DATE_CHANGE.payment?.methods || ['BANK_QR', 'MOMO', 'PAYPAL'];
+  const normalizedMethod = String(paymentMethod || '').toUpperCase();
+  if (!validMethods.includes(normalizedMethod)) {
+    throw new Error(`Phuong thuc thanh toan phai la: ${validMethods.join(', ')}`);
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 2. Lock the date change request to prevent race condition
+    const lockQuery = `
+      SELECT dcr.*, b.booking_code 
+      FROM date_change_requests dcr
+      JOIN bookings b ON dcr.booking_id = b.id
+      WHERE dcr.request_code = $1
+      FOR UPDATE OF dcr
+    `;
+    const lockedResult = await client.query(lockQuery, [requestCode]);
+    if (lockedResult.rows.length === 0) throw new Error('Khong tim thay yeu cau doi ngay bay');
+    const request = lockedResult.rows[0];
+
+    if (request.status !== 'pending_payment') {
+      throw new Error(`Khong the tao thanh toan cho yeu cau o trang thai "${request.status}"`);
+    }
+
+    if (request.price_difference <= 0) {
+      throw new Error('Yeu cau nay khong can thanh toan them');
+    }
+
+    // 3. Check if payment already exists (with lock held)
+    if (request.payment_id && request.payment_code) {
+      const existingPayment = await getDateChangePaymentByCodeRow(request.payment_code);
+      if (existingPayment && !isTerminalPaidStatus(existingPayment.status)) {
+        await client.query('COMMIT');
+        return {
+          ...mapDateChangePayment(existingPayment),
+          request_code: requestCode,
+          price_difference: parseFloat(request.price_difference),
+        };
+      }
+    }
+
+    // 4. Create payment record
+    const paymentCode = generateDateChangePaymentCode();
+    const amount = parseFloat(request.price_difference);
+    const expiresAt = new Date(Date.now() + (DATE_CHANGE.payment?.expiryMinutes || 30) * 60 * 1000);
+
+    const paymentResult = await client.query(`
+      INSERT INTO payments (
+        booking_id, user_id, payment_code, payment_method,
+        amount, discount_amount, final_amount,
+        status, expires_at, created_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, 0, $5, 'PENDING', $6, NOW(), NOW())
+      RETURNING *
+    `, [
+      request.booking_id,
+      request.requested_by || userId,
+      paymentCode,
+      normalizedMethod,
+      amount,
+      expiresAt,
+    ]);
+
+    const payment = paymentResult.rows[0];
+
+    // 5. Update date_change_request with payment info
+    await client.query(QCD.UPDATE_DATE_CHANGE_PAYMENT_ID, [
+      payment.id,
+      paymentCode,
+      requestCode,
+    ]);
+
+    await client.query('COMMIT');
+
+    // 5. Generate payment instruction based on method
+    let providerPayload = {};
+
+    if (normalizedMethod === 'BANK_QR') {
+      if (paymentConfig.payos.enabled) {
+        providerPayload = await createPayosPaymentInstruction(payment);
+      } else {
+        providerPayload = createBankQrInstruction(payment);
+      }
+      await updateDateChangePaymentProviderFields(paymentCode, {
+        qr_payload: providerPayload.qr_payload,
+        bank_code: providerPayload.bank_code,
+        bank_account: providerPayload.bank_account,
+        transfer_content: providerPayload.transfer_content || paymentCode,
+        gateway_response: {
+          provider: paymentConfig.payos.enabled ? 'PAYOS' : 'BANK_QR',
+          generatedAt: new Date().toISOString(),
+        },
+      });
+    }
+
+    if (normalizedMethod === 'MOMO') {
+      if (!paymentConfig.momo.enabled) {
+        throw new Error('MoMo payment is not configured');
+      }
+      providerPayload = await createMomoPaymentInstruction(payment);
+      await updateDateChangePaymentProviderFields(paymentCode, {
+        qr_payload: providerPayload.qr_payload,
+        gateway_response: {
+          ...providerPayload,
+          provider: 'MOMO',
+          generatedAt: new Date().toISOString(),
+        },
+      });
+    }
+
+    if (normalizedMethod === 'PAYPAL') {
+      if (!paymentConfig.paypal.enabled) {
+        throw new Error('PayPal payment is not configured');
+      }
+      providerPayload = await createPayPalOrder(payment);
+      await updateDateChangePaymentProviderFields(paymentCode, {
+        gateway_response: {
+          ...providerPayload,
+          provider: 'PAYPAL',
+          generatedAt: new Date().toISOString(),
+        },
+      });
+    }
+
+    // Fetch updated payment
+    const updatedPayment = await getDateChangePaymentByCodeRow(paymentCode);
+
+    return {
+      ...mapDateChangePayment(updatedPayment, providerPayload),
+      request_code: requestCode,
+      price_difference: amount,
+      expires_at: expiresAt,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// CONFIRM DATE CHANGE PAYMENT (After payment success)
+
+const confirmDateChangePayment = async (paymentCode) => {
+  // 1. Find payment
+  const payment = await getDateChangePaymentByCodeRow(paymentCode);
+  if (!payment) throw new Error('Khong tim thay thanh toan');
+
+  if (isTerminalPaidStatus(payment.status)) {
+    const requestResult = await pool.query(QCD.SELECT_DATE_CHANGE_BY_PAYMENT_CODE, [paymentCode]);
+    return {
+      success: true,
+      already_processed: true,
+      status: requestResult.rows[0]?.status,
+      message: 'Payment already processed',
+    };
+  }
+
+  // 2. Find date change request
+  const requestResult = await pool.query(QCD.SELECT_DATE_CHANGE_BY_PAYMENT_CODE, [paymentCode]);
+  if (requestResult.rows.length === 0) throw new Error('Khong tim thay yeu cau doi ngay bay');
+  const request = requestResult.rows[0];
+
+  if (request.status !== 'pending_payment') {
+    throw new Error(`Yeu cau da duoc xu ly (status: ${request.status})`);
+  }
+
+  // 3. Check payment expiry
+  if (payment.expires_at && new Date() > new Date(payment.expires_at)) {
+    await pool.query(`
+      UPDATE payments SET status = 'EXPIRED', updated_at = NOW() WHERE payment_code = $1
+    `, [paymentCode]);
+    throw new Error('Payment da het han. Vui long tao thanh toan moi.');
+  }
+
+  // 4. Validate amount matches
+  const expectedAmount = parseFloat(request.price_difference);
+  const receivedAmount = parseFloat(payment.amount);
+  if (receivedAmount !== expectedAmount) {
+    throw new Error(`So tien khong dung. Expected: ${expectedAmount}, Received: ${receivedAmount}`);
+  }
+
+  // 5. Update payment to SUCCESS
+  await pool.query(`
+    UPDATE payments 
+    SET status = 'SUCCESS', paid_at = NOW(), updated_at = NOW()
+    WHERE payment_code = $1
+  `, [paymentCode]);
+
+  // 6. Set status='pending' trước để approveDateChange có thể chạy
+  // (approveDateChange yêu cầu status='pending', không được set 'approved' trước)
+  await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', request.request_code]);
+
+  // 7. Execute the actual date change (release old seats, reserve new seats, update booking)
+  await approveDateChange(null, request.request_code, 'Payment confirmed automatically');
+
+  // 8. Mark paid_at
+  await pool.query(`UPDATE date_change_requests SET paid_at = NOW() WHERE request_code = $1`, [request.request_code]);
+
+  return {
+    success: true,
+    status: 'approved',
+    message: 'Thanh toan thanh cong. Yeu cau doi ngay bay da duoc duyet.',
+  };
+};
+
+// GET DATE CHANGE PAYMENT STATUS
+
+const getDateChangePaymentStatus = async (requestCode) => {
+  const requestResult = await pool.query(QCD.SELECT_DATE_CHANGE_BY_CODE, [requestCode]);
+  if (requestResult.rows.length === 0) throw new Error('Khong tim thay yeu cau doi ngay bay');
+  const request = requestResult.rows[0];
+
+  if (!request.payment_code) {
+    return {
+      request_code: requestCode,
+      status: request.status,
+      price_difference: parseFloat(request.price_difference),
+      payment: null,
+    };
+  }
+
+  const payment = await getDateChangePaymentByCodeRow(request.payment_code);
+
+  return {
+    request_code: requestCode,
+    status: request.status,
+    price_difference: parseFloat(request.price_difference),
+    payment: payment ? mapDateChangePayment(payment) : null,
+  };
+};
+
+// CANCEL DATE CHANGE PAYMENT
+
+const cancelDateChangePayment = async (requestCode) => {
+  const requestResult = await pool.query(QCD.SELECT_DATE_CHANGE_BY_CODE, [requestCode]);
+  if (requestResult.rows.length === 0) throw new Error('Khong tim thay yeu cau doi ngay bay');
+  const request = requestResult.rows[0];
+
+  if (request.status !== 'pending_payment') {
+    throw new Error(`Khong the huy thanh toan cho yeu cau o trang thai "${request.status}"`);
+  }
+
+  if (!request.payment_code) {
+    throw new Error('Yeu cau nay chua co thanh toan de huy');
+  }
+
+  const payment = await getDateChangePaymentByCodeRow(request.payment_code);
+  if (!payment) throw new Error('Khong tim thay thanh toan');
+
+  if (isTerminalPaidStatus(payment.status)) {
+    throw new Error('Khong the huy thanh toan da hoan tat');
+  }
+
+  await pool.query(`
+    UPDATE payments 
+    SET status = 'CANCELLED', updated_at = NOW() 
+    WHERE payment_code = $1
+  `, [request.payment_code]);
+
+  return {
+    success: true,
+    request_code: requestCode,
+    payment_code: request.payment_code,
+    message: 'Da huy thanh toan thanh cong',
+  };
+};
+
 // APPROVE DATE CHANGE (ADMIN)  \][-p0i]
-// =========================================================
 
 const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
   const client = await pool.connect();
@@ -314,6 +668,11 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
 
     const request = requestResult.rows[0];
     console.log(`[DateChange Approve] Request: ${requestCode}, Status: ${request.status}`);
+
+    // Block approval if request is waiting for payment
+    if (request.status === 'pending_payment') {
+      throw new Error('Yeu cau dang cho thanh toan. Vui long thanh toan truoc khi duyet.');
+    }
 
     if (request.status !== 'pending') {
       throw new Error(`Không thể duyệt yêu cầu có trạng thái "${request.status}"`);
@@ -493,9 +852,8 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
   }
 };
 
-// =========================================================
+
 // REJECT + CANCEL + GET (giữ nguyên)
-// =========================================================
 
 const rejectDateChange = async (adminId, requestCode, reason) => {
   if (!reason || reason.trim().length < 10) {
@@ -560,13 +918,24 @@ const cancelDateChangeRequest = async (userId, requestCode) => {
 
     const request = requestResult.rows[0];
 
-    // Bug 5 Fix: cho phép user hủy cả khi chưa xác nhận OTP ('pending_otp') lẫn 'pending'
-    if (!['pending', 'pending_otp'].includes(request.status)) {
+    // Cho phép hủy: pending, pending_otp, pending_payment
+    const cancellableStatuses = ['pending', 'pending_otp', 'pending_payment'];
+    if (!cancellableStatuses.includes(request.status)) {
       throw new Error(`Không thể hủy yêu cầu có trạng thái "${request.status}"`);
     }
 
     if (userId && request.requested_by !== userId) {
       throw new Error('Bạn không có quyền hủy yêu cầu này');
+    }
+
+    // Cancel associated payment if exists
+    if (request.payment_code) {
+      await client.query(`
+        UPDATE payments 
+        SET status = 'CANCELLED', updated_at = NOW() 
+        WHERE payment_code = $1 AND status NOT IN ('SUCCESS', 'PAID', 'COMPLETED')
+      `, [request.payment_code]);
+      console.log(`[DateChange Cancel] Cancelled payment: ${request.payment_code}`);
     }
 
     await client.query(QCD.UPDATE_DATE_CHANGE_STATUS, [
@@ -671,5 +1040,9 @@ module.exports = {
   getUserDateChanges,
   validateDateChangeRequest,
   confirmDateChange,
-  getAdminDateChanges,
+  createDateChangePayment,
+  confirmDateChangePayment,
+  getDateChangePaymentStatus,
+  cancelDateChangePayment,
+
 };

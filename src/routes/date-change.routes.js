@@ -77,4 +77,26 @@ router.post('/:requestCode/reject', authenticate, dateChangeController.rejectDat
  */
 router.post('/confirm', dateChangeController.confirmDateChange);
 
+// =========================================================
+// PAYMENT ROUTES
+// =========================================================
+
+/**
+ * POST /api/date-changes/:requestCode/payment
+ * User tạo payment cho date change (khi price_difference > 0)
+ */
+router.post('/:requestCode/payment', dateChangeController.createDateChangePayment);
+
+/**
+ * GET /api/date-changes/:requestCode/payment
+ * Lấy trạng thái payment của date change
+ */
+router.get('/:requestCode/payment', dateChangeController.getDateChangePaymentStatus);
+
+/**
+ * DELETE /api/date-changes/:requestCode/payment
+ * User hủy payment đang chờ
+ */
+router.delete('/:requestCode/payment', dateChangeController.cancelDateChangePayment);
+
 module.exports = router;

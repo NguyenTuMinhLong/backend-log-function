@@ -236,6 +236,96 @@ const SEARCH_FLIGHTS_BASE = `
     AND fs.available_seats >= $5
 `;
 
+const SEARCH_FLIGHTS_FOR_COMBO = `
+  SELECT
+    f.id AS flight_id,
+    f.flight_number,
+    f.departure_time,
+    f.arrival_time,
+    f.duration_minutes,
+    f.status,
+    al.id AS airline_id,
+    al.code AS airline_code,
+    al.name AS airline_name,
+    al.logo_url AS airline_logo,
+    al.logo_dark AS airline_logo_dark,
+    al.logo_light AS airline_logo_light,
+    dep.id AS departure_airport_id,
+    dep.code AS departure_code,
+    dep.city AS departure_city,
+    dep.name AS departure_airport_name,
+    arr.id AS arrival_airport_id,
+    arr.code AS arrival_code,
+    arr.city AS arrival_city,
+    arr.name AS arrival_airport_name,
+    fs.class AS seat_class,
+    fs.total_seats,
+    fs.available_seats,
+    fs.base_price,
+    fs.baggage_included_kg,
+    fs.carry_on_kg,
+    fs.extra_baggage_price
+  FROM flights f
+  JOIN airlines al ON al.id = f.airline_id
+  JOIN airports dep ON dep.id = f.departure_airport_id
+  JOIN airports arr ON arr.id = f.arrival_airport_id
+  JOIN flight_seats fs ON fs.flight_id = f.id
+  WHERE f.status = 'scheduled'
+    AND f.is_active = true
+    AND f.departure_time > NOW()
+    AND dep.code = $1
+    AND arr.code = $2
+    AND fs.class = $3
+    AND fs.available_seats >= $4
+    AND DATE(f.departure_time) = $5
+  ORDER BY f.departure_time ASC, fs.base_price ASC
+`;
+
+// Query cho connecting flights - không filter arrival để tìm tất cả điểm trung gian
+const SEARCH_FLIGHTS_FOR_CONNECTING = `
+  SELECT
+    f.id AS flight_id,
+    f.flight_number,
+    f.departure_time,
+    f.arrival_time,
+    f.duration_minutes,
+    f.status,
+    al.id AS airline_id,
+    al.code AS airline_code,
+    al.name AS airline_name,
+    al.logo_url AS airline_logo,
+    al.logo_dark AS airline_logo_dark,
+    al.logo_light AS airline_logo_light,
+    dep.id AS departure_airport_id,
+    dep.code AS departure_code,
+    dep.city AS departure_city,
+    dep.name AS departure_airport_name,
+    arr.id AS arrival_airport_id,
+    arr.code AS arrival_code,
+    arr.city AS arrival_city,
+    arr.name AS arrival_airport_name,
+    fs.class AS seat_class,
+    fs.total_seats,
+    fs.available_seats,
+    fs.base_price,
+    fs.baggage_included_kg,
+    fs.carry_on_kg,
+    fs.extra_baggage_price
+  FROM flights f
+  JOIN airlines al ON al.id = f.airline_id
+  JOIN airports dep ON dep.id = f.departure_airport_id
+  JOIN airports arr ON arr.id = f.arrival_airport_id
+  JOIN flight_seats fs ON fs.flight_id = f.id
+  WHERE f.status = 'scheduled'
+    AND f.is_active = true
+    AND f.departure_time > NOW()
+    AND dep.code = $1
+    AND fs.class = $2
+    AND fs.available_seats >= $3
+    AND DATE(f.departure_time) = $4
+  ORDER BY f.departure_time ASC, fs.base_price ASC
+`;
+
 // ── Alternative Flights ───────────────────────────────────────────────────────
 
 const SEARCH_ALTERNATIVE_FLIGHTS = `
@@ -378,9 +468,6 @@ const GET_POPULAR_FLIGHTS_GENERAL = `
   WHERE f.status = 'scheduled'
     AND f.is_active = true
     AND f.departure_time > NOW()
-  GROUP BY f.id, a.name, dep.code, arr.code
-  ORDER BY COUNT(b.id) DESC, f.departure_time ASC
-  LIMIT $1
 `;
 
 const GET_POPULAR_FLIGHTS_ROUTE = `
@@ -400,41 +487,7 @@ const GET_POPULAR_FLIGHTS_ROUTE = `
     AND f.status = 'scheduled'
     AND f.is_active = true
     AND f.departure_time > NOW()
-  GROUP BY f.id, a.name, dep.code, arr.code
-  ORDER BY COUNT(b.id) DESC, f.departure_time ASC
-  LIMIT $3
 `;
-
-// ── Occupied Seats ────────────────────────────────────────────────────────────
-
-const SELECT_OCCUPIED_SEATS =
-  `SELECT seat_number, class, status
-   FROM flight_seat_assignments
-   WHERE flight_id = $1
-     AND ($2::VARCHAR IS NULL OR class = $2)
-   ORDER BY seat_number`;
-
-// ── Flight Position / Tracker ─────────────────────────────────────────────────
-
-const SELECT_FLIGHT_POSITION =
-  `SELECT
-     f.id,
-     f.flight_number,
-     f.departure_time,
-     f.duration_minutes,
-     f.status,
-     dep.code AS dep_code,
-     dep.city AS dep_city,
-     dep.lat  AS dep_lat,
-     dep.lng  AS dep_lng,
-     arr.code AS arr_code,
-     arr.city AS arr_city,
-     arr.lat  AS arr_lat,
-     arr.lng  AS arr_lng
-   FROM flights f
-   JOIN airports dep ON dep.id = f.departure_airport_id
-   JOIN airports arr ON arr.id = f.arrival_airport_id
-   WHERE f.id = $1`;
 
 // ── Booking: Seat info ────────────────────────────────────────────────────────
 
@@ -456,14 +509,27 @@ const INCREASE_AVAILABLE_SEATS =
    SET available_seats = available_seats + $1, updated_at = NOW()
    WHERE flight_id = $2 AND class = $3`;
 
+const SELECT_OCCUPIED_SEATS = `
+  SELECT seat_number
+  FROM flight_seat_assignments
+  WHERE flight_id = $1 AND class = $2`;
+
+const SELECT_FLIGHT_POSITION = `
+  SELECT
+    f.id, f.flight_number, f.departure_time, f.arrival_time,
+    f.duration_minutes, f.status,
+    dep.code AS dep_code, dep.city AS dep_city, dep.latitude AS dep_lat, dep.longitude AS dep_lng,
+    arr.code AS arr_code, arr.city AS arr_city, arr.latitude AS arr_lat, arr.longitude AS arr_lng
+  FROM flights f
+  JOIN airports dep ON dep.id = f.departure_airport_id
+  JOIN airports arr ON arr.id = f.arrival_airport_id
+  WHERE f.id = $1`;
+
 // ── Module Exports ────────────────────────────────────────────────────────────
 
 module.exports = {
-  // Admin - list
   COUNT_FLIGHTS,
   SELECT_FLIGHTS,
-
-  // Admin - flight CRUD
   INSERT_FLIGHT,
   UPDATE_FLIGHT_FIELDS,
   FIND_FLIGHT_BY_ID,
@@ -474,33 +540,23 @@ module.exports = {
   GET_AFFECTED_BOOKINGS_BY_FLIGHT,
   FIND_FLIGHT_VISIBILITY,
   SET_FLIGHT_VISIBILITY,
-
-  // Admin - seats
   INSERT_FLIGHT_SEAT,
   SELECT_FLIGHT_SEAT_CLASS_INFO,
-
-  // Flight lookup
   SELECT_FLIGHT_BY_ID,
   SELECT_FLIGHTS_BY_IDS,
-
-  // Search
   SEARCH_FLIGHTS,
   SEARCH_FLIGHTS_BASE,
+  SEARCH_FLIGHTS_FOR_COMBO,
+  SEARCH_FLIGHTS_FOR_CONNECTING,
   SEARCH_ALTERNATIVE_FLIGHTS,
   GET_MIN_PRICES_CALENDAR,
-
-  // Reference data
   SELECT_ALL_AIRPORTS,
   SELECT_ALL_AIRLINES,
-
-  // Recommendations
   GET_USER_BOOKED_FLIGHT_IDS,
   GET_HISTORY_RECOMMENDATIONS_GENERAL,
   GET_HISTORY_RECOMMENDATIONS_ROUTE,
   GET_POPULAR_FLIGHTS_GENERAL,
   GET_POPULAR_FLIGHTS_ROUTE,
-
-  // Booking
   SELECT_OCCUPIED_SEATS,
   SELECT_FLIGHT_POSITION,
   SELECT_SEAT_INFO,
