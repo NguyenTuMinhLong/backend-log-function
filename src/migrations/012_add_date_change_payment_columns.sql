@@ -3,7 +3,7 @@
 
 -- Add payment_id column
 ALTER TABLE date_change_requests 
-ADD COLUMN IF NOT EXISTS payment_id BIGINT REFERENCES payments(id);
+ADD COLUMN IF NOT EXISTS payment_id UUID REFERENCES payments(id);
 
 -- Add payment_code column for easier lookup
 ALTER TABLE date_change_requests 
@@ -31,3 +31,9 @@ CREATE INDEX IF NOT EXISTS idx_date_changes_payment_code
 COMMENT ON COLUMN date_change_requests.payment_id IS 'Link to payments table for collecting price difference';
 COMMENT ON COLUMN date_change_requests.payment_code IS 'Payment code (PAY-DC-xxx) for this date change';
 COMMENT ON COLUMN date_change_requests.paid_at IS 'Timestamp when payment was completed';
+
+-- Bug 3 Fix: Update unique index to include pending_payment status
+DROP INDEX IF EXISTS idx_date_changes_unique_pending;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_date_changes_unique_pending
+  ON date_change_requests (booking_id)
+  WHERE status IN ('pending', 'pending_otp', 'pending_payment');

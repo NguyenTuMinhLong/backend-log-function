@@ -37,15 +37,20 @@ const requestRefund = async (req, res) => {
       return res.status(401).json({ error: 'Vui long dang nhap de thuc hien yeu cau hoan tien' });
     }
 
+    // Bug 6 Fix: hỗ trợ cả URL param (/bookings/:bookingCode/...) lẫn body ({bookingCode: ...})
+    const bookingCode = req.params.bookingCode || req.body.bookingCode;
     const {
-      bookingCode,
       refund_type = 'full',
       requested_items,
       reason,
       user_notes,
     } = req.body;
 
-    const result = await refundService.requestRefund(userId, bookingCode?.toUpperCase(), {
+    if (!bookingCode) {
+      return res.status(400).json({ error: 'bookingCode là bắt buộc' });
+    }
+
+    const result = await refundService.requestRefund(userId, bookingCode.toUpperCase(), {
       refund_type,
       requested_items,
       reason,

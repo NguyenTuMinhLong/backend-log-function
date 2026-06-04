@@ -49,8 +49,6 @@ const generateRefundCode = () => {
 
 // HELPERS
 
-const dateChangeOTPStore = new Map(); // In-memory store: requestCode -> { otp, expiresAt, attempts }
-
 const generateRequestCode = () => {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -103,25 +101,30 @@ const validateDateChangeRequest = async (booking, newFlightId, seatClass) => {
 
   return newFlight;
 };
-// Gửi OTP để xác thực yêu cầu đổi ngày
+// Hàm gửi OTP cho email
 const requestDateChangeOTP = async (email, requestCode) => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiresAt = Date.now() + OTP_CONFIG.expiresInMinutes * 60 * 1000;
+  const expiresAt = new Date(Date.now() + OTP_CONFIG.expiresInMinutes * 60 * 1000);
 
-  dateChangeOTPStore.set(email.toLowerCase(), {
-    code: otp,
-    requestCode,
-    expiresAt,
-    attempts: 0,
-    verified: false,
-  });
+  // Lưu OTP vào cột của date_change_requests (persist qua DB)
+  await pool.query(
+    `UPDATE date_change_requests
+     SET otp_code = $1, otp_expires_at = $2, otp_attempts = 0
+     WHERE request_code = $3`,
+    [otp, expiresAt, requestCode]
+  );
 
-  // Debug: In OTP ra console (neu email la test)
-  console.log(`[DateChange OTP] Code: ${otp} for ${email}`);
+  // Bug 2 Fix: Thực sự gửi email (trước đây chỉ console.log)
+  try {
+    await sendRefundOTPEmail(email, otp);
+  } catch (emailErr) {
+    console.error('[DateChange OTP] Email send failed:', emailErr.message);
+  }
 
+  console.log(`[DateChange OTP] Sent to ${email} for request ${requestCode}`);
   return { expiresIn: OTP_CONFIG.expiresInMinutes };
 }
-// Xác thực OTP
+// Hàm verify OTP
 const verifyDateChangeOTP = async (email, otp) => {
   const normalizedEmail = email.toLowerCase().trim();
   const otpData = dateChangeOTPStore.get(normalizedEmail);
@@ -134,7 +137,6 @@ const verifyDateChangeOTP = async (email, otp) => {
     throw new Error('Ma OTP khong dung');
   }
 
-  otpData.verified = true;
   return { verified: true };
 };
 
@@ -327,61 +329,51 @@ const requestDateChange = async (userId, bookingCode, data) => {
 // ─── CONFIRM DATE CHANGE (sau khi verify OTP) ─────────────────
 
 const confirmDateChange = async (email, otp, requestCode) => {
-  // 1. Verify OTP
-  await verifyDateChangeOTP(email, otp);
+  // 1. Verify OTP từ DB (Bug 3+4 Fix: dùng requestCode làm key)
+  await verifyDateChangeOTP(email, otp, requestCode);
 
-  // 2. Lay request
-  const requestResult = await pool.query(
-    QCD.SELECT_DATE_CHANGE_BY_CODE, [requestCode]
-  );
-  if (requestResult.rows.length === 0) throw new Error('Khong tim thay yeu cau');
+  // 2. Lấy request
+  const requestResult = await pool.query(QCD.SELECT_DATE_CHANGE_BY_CODE, [requestCode]);
+  if (requestResult.rows.length === 0) throw new Error('Không tìm thấy yêu cầu');
   const request = requestResult.rows[0];
 
   if (request.status !== 'pending_otp') {
-    throw new Error(`Yeu cau da duoc xu ly (status: ${request.status})`);
+    throw new Error(`Yêu cầu đã được xử lý (status: ${request.status})`);
   }
 
-  // 3. Check if payment is required (price_difference > 0)
-  const absDiff = Math.abs(request.price_difference);
-  const requiresPayment = request.price_difference > 0 && DATE_CHANGE.priceDifference.chargeIfPositive;
+  // 3. Kiểm tra payment có cần không (price_difference > 0)
+  const absDiff = Math.abs(parseFloat(request.price_difference));
+  const requiresPayment = request.price_difference > 0 && DATE_CHANGE.priceDifference?.chargeIfPositive;
 
   if (requiresPayment) {
-    // Update status to pending_payment - user must pay the difference
     await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending_payment', requestCode]);
-    
     return {
       success: true,
       status: 'pending_payment',
       requires_payment: true,
       price_difference: parseFloat(request.price_difference),
-      message: 'Quy khach can thanh toan phu phi de hoan tat yeu cau doi ngay bay',
+      message: 'Quý khách cần thanh toán phụ phí để hoàn tất yêu cầu đổi ngày bay',
     };
   }
 
-  // 4. No payment needed (price diff <= 0 or no charge) -> auto approve
+  // 4. Không cần payment → auto approve hoặc chờ admin
   const { AUTO_REFUND } = require('../config/refund.config');
-  let newStatus;
-  if (AUTO_REFUND.enabled && absDiff < AUTO_REFUND.threshold) {
-    newStatus = 'approved';
-  } else {
-    newStatus = 'pending';
-  }
+  const autoApprove = AUTO_REFUND.enabled && absDiff < AUTO_REFUND.threshold;
 
-  // Update status
-  await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, [newStatus, requestCode]);
+  // Fix Bug 2: luôn set 'pending' trước — approveDateChange yêu cầu status = 'pending'
+  await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', requestCode]);
 
-  // 5. Neu auto -> goi approve luon
-  if (newStatus === 'approved') {
-    await approveDateChange(null, requestCode, 'Auto-approved (no payment required)');
+  if (autoApprove) {
+    await approveDateChange(null, requestCode, 'Auto-approved sau OTP verification');
   }
 
   return {
     success: true,
-    status: newStatus,
-    auto_approved: newStatus === 'approved',
-    message: newStatus === 'approved'
-      ? 'Yeu cau da duyet tu dong'
-      : 'Yeu cau da tiep nhan, cho admin duyet',
+    status: autoApprove ? 'approved' : 'pending',
+    auto_approved: autoApprove,
+    message: autoApprove
+      ? 'Yêu cầu đổi ngày bay đã được duyệt tự động'
+      : 'Yêu cầu đổi ngày bay đã được tiếp nhận, chờ admin duyệt',
   };
 };
 
@@ -580,11 +572,15 @@ const confirmDateChangePayment = async (paymentCode) => {
     WHERE payment_code = $1
   `, [paymentCode]);
 
-  // 6. Update date change status to approved (this also triggers the booking update)
-  await pool.query(QCD.UPDATE_DATE_CHANGE_PAID, [paymentCode]);
+  // 6. Set status='pending' trước để approveDateChange có thể chạy
+  // (approveDateChange yêu cầu status='pending', không được set 'approved' trước)
+  await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', request.request_code]);
 
   // 7. Execute the actual date change (release old seats, reserve new seats, update booking)
   await approveDateChange(null, request.request_code, 'Payment confirmed automatically');
+
+  // 8. Mark paid_at
+  await pool.query(`UPDATE date_change_requests SET paid_at = NOW() WHERE request_code = $1`, [request.request_code]);
 
   return {
     success: true,
@@ -786,7 +782,8 @@ const rejectDateChange = async (adminId, requestCode, reason) => {
 
     const request = requestResult.rows[0];
 
-    if (request.status !== 'pending') {
+    // Bug 5 Fix: cho phép reject cả 'pending_otp' (chưa xác nhận OTP) và 'pending'
+    if (!['pending', 'pending_otp'].includes(request.status)) {
       throw new Error(`Không thể từ chối yêu cầu có trạng thái "${request.status}"`);
     }
 
@@ -834,7 +831,7 @@ const cancelDateChangeRequest = async (userId, requestCode) => {
 
     const request = requestResult.rows[0];
 
-    // Allow cancelling pending, pending_otp, pending_payment statuses
+    // Cho phép hủy: pending, pending_otp, pending_payment
     const cancellableStatuses = ['pending', 'pending_otp', 'pending_payment'];
     if (!cancellableStatuses.includes(request.status)) {
       throw new Error(`Không thể hủy yêu cầu có trạng thái "${request.status}"`);
