@@ -1,8 +1,25 @@
-// src/services/flight.service.js
+/*
+============================================================
+FLIGHT SERVICE - Tìm kiếm và quản lý chuyến bay
+============================================================
+
+Các chức năng chính:
+- Browse: Xem các chuyến bay phổ biến (homepage)
+- Search: Tìm kiếm theo route, ngày, hạng ghế
+- Combo: Tìm combos multi-leg (direct, 1-stop, 2-stop)
+- Seat Map: Xem sơ đồ ghế
+- Flight Tracker: Theo dõi vị trí máy bay
+- Price Calendar: Lịch giá theo tháng
+============================================================
+*/
 const pool = require('../config/db');
 const QF = require('../queries/flight.queries');
 
-// Lấy chuyến bay đa dạng (không cần from/to cụ thể) — dùng cho Browse + homepage
+// Import price alert service
+const { generatePriceAlertsForFlights, getDetailedAnalysis } = require('./price-alert.service');
+
+// Lấy danh sách chuyến bay để browse (homepage)
+// Mỗi route chỉ lấy 1 chuyến bay sắp tới nhất, random order
 const browseFlights = async (limit = 40) => {
   const { rows } = await pool.query(`
     WITH ranked AS (
@@ -38,7 +55,7 @@ const browseFlights = async (limit = 40) => {
   return formatFlights(rows, 1, 0, 0);
 };
 
-const recommendFlights = async ({ userId, fromAirport, toAirport, limit = 15 }) => {
+// Gợi ý chuyến bay cho user dựa trên route cụ thể
   const query = `
     SELECT
       f.id              AS flight_id,
@@ -85,15 +102,13 @@ const recommendFlights = async ({ userId, fromAirport, toAirport, limit = 15 }) 
   return formatFlights(rows, 1, 0, 0);
 };
 
-const formatDuration = (minutes) => {
+// Format thời gian bay thành string (VD: "2h30m")
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return m > 0 ? `${h}h${m}m` : `${h}h`;
 };
 
-/**
- * Tính tổng tiền vé theo loại hành khách
- */
+// Tính tổng tiền vé theo loại hành khách
 const calcTotalPrice = (basePrice, adults, children, infants) => {
   const adultTotal  = basePrice * adults;
   const childTotal  = basePrice * 0.75 * children;
@@ -101,9 +116,7 @@ const calcTotalPrice = (basePrice, adults, children, infants) => {
   return Math.round(adultTotal + childTotal + infantTotal);
 };
 
-/**
- * Tạo danh sách lựa chọn hành lý thêm đã tính sẵn giá (per person)
- */
+// Tạo danh sách lựa chọn hành lý thêm đã tính sẵn giá
 const buildBaggageOptions = (extraBaggagePrice) => {
   const pricePerKg = parseFloat(extraBaggagePrice) || 0;
   return [
@@ -115,9 +128,8 @@ const buildBaggageOptions = (extraBaggagePrice) => {
   ];
 };
 
-// ── Dynamic pricing helpers (applied at search time) ──────────────────────────
-
-// Weekend premium: Fri/Sat/Sun cost more
+// Format danh sách chuyến bay thành response
+// Áp dụng dynamic pricing (theo ngày, weekend, demand)
 const { applyDynamicPricing } = require('../utils/pricing');
 
 const formatFlights = (rows, adults, children, infants) =>
@@ -163,7 +175,7 @@ const formatFlights = (rows, adults, children, infants) =>
     };
   });
 
-// ─── Validation ────────────────────────────────────────────────────────────────
+// Validate tham số tìm kiếm
 
 const validateSearchParams = ({ departure_code, arrival_code, departure_date, adults, children, infants, seat_class }) => {
   if (!departure_code) throw new Error("Mã sân bay đi là bắt buộc");
@@ -184,7 +196,7 @@ const validateSearchParams = ({ departure_code, arrival_code, departure_date, ad
   }
 };
 
-const queryFlights = async ({
+// Query database tìm chuyến bay với các filter
   departure_code, arrival_code, departure_date,
   adults, children, infants,
   seat_class, sort_by = "price_asc",
@@ -229,11 +241,9 @@ const queryFlights = async ({
   return result.rows;
 };
 
-// ─── Exported Functions ───────────────────────────────────────────────────────
+// ─── Các functions chính ─────────────────────────────────────────────
 
-/**
- * GET /api/flights/search
- */
+// Tìm kiếm chuyến bay - GET /api/flights/search
 const searchFlights = async (params) => {
   const {
     departure_code, arrival_code, departure_date,
@@ -257,7 +267,10 @@ const searchFlights = async (params) => {
   };
 
   const outboundRows    = await queryFlights(baseParams);
-  const outboundFlights = formatFlights(outboundRows, a, c, i);
+  let outboundFlights = formatFlights(outboundRows, a, c, i);
+  
+  // Generate price alerts for outbound flights
+  outboundFlights = await generatePriceAlertsForFlights(outboundFlights);
 
   let returnFlights = null;
   if (return_date) {
@@ -268,6 +281,9 @@ const searchFlights = async (params) => {
       departure_date: return_date,
     });
     returnFlights = formatFlights(returnRows, a, c, i);
+    
+    // Generate price alerts for return flights
+    returnFlights = await generatePriceAlertsForFlights(returnFlights);
   }
 
   return {
@@ -278,9 +294,7 @@ const searchFlights = async (params) => {
   };
 };
 
-/**
- * Lấy chuyến bay phổ biến nhất
- */
+// Lấy chuyến bay phổ biến nhất theo route
 const getPopularFlights = async (fromAirport, toAirport, limit) => {
   const isGeneralMode = !fromAirport || !toAirport;
 
@@ -298,12 +312,10 @@ const getPopularFlights = async (fromAirport, toAirport, limit) => {
   return rows;
 };
 
-/**
- * Tạo lưới ghế ảo dựa vào tổng số ghế của class
- * Layout chuẩn: hàng × cột. Mỗi hàng có đến 6 ghế (A-F) với lối đi ở giữa.
- *   first    → 4 ghế/hàng: A B _ C D  (2-2)
- *   business → 4 ghế/hàng: A B _ C D  (2-2)
- *   economy  → 6 ghế/hàng: A B C _ D E F  (3-3)
+// Tạo lưới ghế ảo để hiển thị seat map
+// Layout chuẩn:
+//   - first/business: 4 ghế/hàng (A B _ C D)
+//   - economy: 6 ghế/hàng (A B C _ D E F)
  *
  * @param {string}  seatClass   - "first" | "business" | "economy"
  * @param {number}  totalSeats  - Tổng số ghế của class này trên chuyến bay
@@ -336,10 +348,8 @@ const buildSeatLayout = (seatClass, totalSeats, startRow = 1) => {
   return { rows, columns, seatsPerRow, lastRow: startRow + numRows - 1 };
 };
 
-/**
- * GET /api/flights/:id/seat-map
- * SB-03: Xem sơ đồ ghế ngồi – trạng thái từng ghế (available / occupied)
- */
+// Lấy sơ đồ ghế ngồi - GET /api/flights/:id/seat-map
+// Trả về trạng thái từng ghế (available/occupied)
 const getSeatMap = async (flightId, params = {}) => {
   const { seat_class = null } = params;
 
@@ -405,10 +415,9 @@ const getSeatMap = async (flightId, params = {}) => {
 };
 
 
-/**
- * Tính vị trí máy bay hiện tại theo thời gian thực
- * Dùng cho Flight Tracker
- * Logic: lerp(dep_coords, arr_coords, progress)
+// Tính vị trí máy bay hiện tại (Flight Tracker)
+// Sử dụng linear interpolation giữa 2 sân bay
+// progress = 0 → vừa cất cánh, progress = 1 → vừa hạ cánh
  */
 const getFlightPosition = async (flightId) => {
   // 1. Lấy thông tin chuyến bay + tọa độ 2 sân bay
@@ -483,14 +492,14 @@ const getAirports = async () => {
   return rows;
 };
 
-// ─── getAirlines ──────────────────────────────────────────────────────────────
+// Lấy danh sách hãng bay
 
 const getAirlines = async () => {
   const { rows } = await pool.query(QF.SELECT_ALL_AIRLINES);
   return rows;
 };
 
-// ─── getFlightById ─────────────────────────────────────────────────────────────
+// Lấy chi tiết 1 chuyến bay
 
 const getFlightById = async (flightId, params = {}) => {
   const { adults = 1, children = 0, infants = 0 } = params;
@@ -515,7 +524,7 @@ const getFlightById = async (flightId, params = {}) => {
   };
 };
 
-// ─── getAlternativeFlights ────────────────────────────────────────────────────
+// Lấy các chuyến bay thay thế cho 1 chuyến bay đã full
 
 const getAlternativeFlights = async (flightId, params = {}) => {
   const { seat_class = 'economy', adults = 1, children = 0, infants = 0 } = params;
@@ -537,7 +546,8 @@ const getAlternativeFlights = async (flightId, params = {}) => {
   return formatFlights(result.rows, a, c, i);
 };
 
-// ─── getFlightCombos ───────────────────────────────────────────────────────────
+// Tìm combos chuyến bay (direct + 1-stop)
+// Ranking theo: giá + thời gian + độ tiện lợi
 
 const DEFAULT_COMBO_RULES = {
   minLayoverMinutes: 45,
@@ -695,7 +705,7 @@ const getFlightCombos = async (params = {}) => {
     .slice(0, parseInt(limit) || 10);
 };
 
-// ─── getPriceCalendar ──────────────────────────────────────────────────────────
+// Lấy lịch giá theo tháng - giá thấp nhất mỗi ngày
 
 const getPriceCalendar = async (params = {}) => {
   const { from, to, month, seat_class = 'economy', adults = 1 } = params;

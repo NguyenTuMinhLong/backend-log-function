@@ -28,9 +28,7 @@ const formatItem = (row) => ({
   },
 });
 
-/**
- * CU-02: Thêm chuyến bay vào wishlist (chỉ user đã login)
- */
+// Thêm chuyến bay vào wishlist (chỉ user đã login)
 const addToWishlist = async (userId, flightId, seatClass = "economy") => {
   const flightIdInt     = parseInt(flightId, 10);
   const normalizedClass = String(seatClass).toLowerCase();
@@ -54,9 +52,7 @@ const addToWishlist = async (userId, flightId, seatClass = "economy") => {
   return { message: "Đã thêm vào danh sách yêu thích", item: result.rows[0] };
 };
 
-/**
- * Xóa chuyến bay khỏi wishlist (chỉ user đã login)
- */
+// Xóa chuyến bay khỏi wishlist
 const removeFromWishlist = async (userId, flightId, seatClass = "economy") => {
   const flightIdInt     = parseInt(flightId, 10);
   const normalizedClass = String(seatClass).toLowerCase();
@@ -67,11 +63,8 @@ const removeFromWishlist = async (userId, flightId, seatClass = "economy") => {
   return { message: "Đã xóa khỏi danh sách yêu thích" };
 };
 
-/**
- * CU-04: Xem wishlist (chỉ user đã login)
- * - Kiểm tra chuyến bay còn vé / hết vé
- * - Hiển thị giá hiện tại so với giá lúc lưu
- */
+// Xem wishlist của user
+// Hiển thị giá hiện tại so với giá lúc lưu
 const getWishlist = async (userId) => {
   const result = await pool.query(Q.SELECT_WISHLIST_BY_USER, [userId]);
 
@@ -81,11 +74,8 @@ const getWishlist = async (userId) => {
   };
 };
 
-/**
- * CU-03: Sync wishlist từ localStorage (guest) → server sau khi đăng nhập
- * Frontend gửi lên mảng items từ localStorage
- * Backend merge vào database, loại bỏ trùng lặp
- */
+// Sync wishlist từ localStorage (guest) → server sau khi đăng nhập
+// Frontend gửi mảng items từ localStorage, backend merge vào DB
 const syncWishlist = async (userId, localItems = []) => {
   if (!Array.isArray(localItems) || localItems.length === 0) {
     return { synced: 0, skipped: 0, message: "Không có dữ liệu để sync" };

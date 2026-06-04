@@ -1,3 +1,33 @@
+/*
+============================================================
+BOOKING SERVICE - Tạo và quản lý booking vé máy bay
+============================================================
+
+Các chức năng chính:
+- Tạo booking mới (tạo giữ chỗ 30 phút)
+- Xem chi tiết booking
+- Xem danh sách booking của user
+- Hủy booking (có refund nếu đã thanh toán)
+- Tự động hủy booking quá hạn (cron job)
+
+Quy trình tạo booking:
+1. Validate thông tin đầu vào
+2. Kiểm tra ghế còn trống
+3. Tính giá (base + hành lý + seat fee + ancillary)
+4. Tạo booking record
+5. Tạo passenger records
+6. Assign seat tự động
+7. Giảm available_seats
+8. Tích điểm loyalty (nếu đã login)
+9. Commit transaction
+
+Giá vé tính theo:
+- Người lớn: 100%
+- Trẻ em (2-11 tuổi): 75%
+- Em bé (<2 tuổi): 10%
+============================================================
+*/
+
 const pool = require("../config/db");
 const { assignSeat } = require("../utils/seat");
 const { rollbackReservedVoucherUsageForBooking } = require("./payment.service");
@@ -7,9 +37,8 @@ const QP = require("../queries/payment.queries");
 const QAnc = require("../queries/ancillary.queries");
 const QB2 = { SELECT_MY_BOOKINGS: QB.SELECT_MY_BOOKINGS };
 
-// ====================== THÊM LOYALTY SERVICE ======================
+// Loyalty service - tích điểm khi booking thành công
 const loyaltyService = require('../services/loyalty.service');
-// =================================================================
 
 const generateBookingCode = () => {
   const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -20,6 +49,8 @@ const generateBookingCode = () => {
   return code;
 };
 
+// Tính tổng giá vé theo loại hành khách
+// Người lớn: 100%, Trẻ em: 75%, Em bé: 10%
 const calcTotalPrice = (basePrice, adults, children, infants) => {
   const adultTotal  = basePrice * adults;
   const childTotal  = basePrice * 0.75 * children;
@@ -29,8 +60,9 @@ const calcTotalPrice = (basePrice, adults, children, infants) => {
 
 const { applyDynamicPricing: applyDemand } = require('../utils/pricing');
 
+// Validate thông tin booking từ client
+// Kiểm tra các trường bắt buộc, số lượng hành khách, thông tin passenger
 const validateBookingInput = (data) => {
-  // ... (giữ nguyên code validate của bạn)
   const {
     outbound_flight_id, outbound_seat_class,
     return_flight_id, return_seat_class,
@@ -83,7 +115,6 @@ const validateBookingInput = (data) => {
 };
 
 const checkAndGetSeatInfo = async (client, flightId, seatClass, seatsNeeded) => {
-  // ... (giữ nguyên code của bạn)
   const result = await client.query(QF.SELECT_SEAT_INFO, [flightId, seatClass]);
 
   if (result.rows.length === 0) throw new Error(`Không tìm thấy hạng ghế ${seatClass} cho chuyến bay ID ${flightId}`);
@@ -98,8 +129,15 @@ const checkAndGetSeatInfo = async (client, flightId, seatClass, seatsNeeded) => 
   return seat;
 };
 
-// ─── createBooking ────────────────────────────────────────────────────────────
-
+// ─── Tạo booking mới ────────────────────────────────────────────
+// Quy trình:
+// 1. Validate input
+// 2. Kiểm tra user/guest không trùng email với account đã login
+// 3. Kiểm tra ghế còn trống
+// 4. Tính giá (base + hành lý + ancillary)
+// 5. Tạo booking, passengers, assign seat
+// 6. Tích điểm loyalty (nếu đã login)
+// 7. Giảm available_seats
 const createBooking = async (data, userId = null) => {
   validateBookingInput(data);
 
@@ -320,7 +358,7 @@ const createBooking = async (data, userId = null) => {
   }
 };
 
-// Các hàm còn lại giữ nguyên (getBookingDetail, getMyBookings, cancelBooking, expireHeldBookings)
+// ─── Xem chi tiết 1 booking ────────────────────────────────────
 const getBookingDetail = async (bookingCode, userId = null) => {
   const result = await pool.query(QB.SELECT_BOOKING_DETAIL, [bookingCode]);
   if (result.rows.length === 0) throw new Error("Không tìm thấy booking");
@@ -397,8 +435,7 @@ const getBookingDetail = async (bookingCode, userId = null) => {
   };
 };
 
-// ─── getMyBookings ────────────────────────────────────────────────────────────
-
+// ─── Xem danh sách booking của user ─────────────────────────────
 const getMyBookings = async (userId, filter = "all", from_date, to_date) => {
   const conditions = [];
   const values = [];
@@ -433,6 +470,9 @@ const getMyBookings = async (userId, filter = "all", from_date, to_date) => {
   return result.rows;
 };
 
+// ─── Hủy booking ───────────────────────────────────────────────
+// Chưa thanh toán → hủy trực tiếp, giải phóng ghế
+// Đã thanh toán → chuyển sang refund flow
 const cancelBooking = async (userId, bookingCode, reason = null) => {
   const client = await pool.connect();
   try {
@@ -505,8 +545,10 @@ const cancelBooking = async (userId, bookingCode, reason = null) => {
   }
 };
 
+// ─── Cron: Hủy booking quá hạn ─────────────────────────────────
+// Chạy định kỳ để hủy các booking ở trạng thái "pending"
+// đã quá thời gian giữ chỗ (30 phút) mà chưa thanh toán
 const expireHeldBookings = async () => {
-  // ... (giữ nguyên)
 };
 
 module.exports = { createBooking, getBookingDetail, getMyBookings, cancelBooking, expireHeldBookings };

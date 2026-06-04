@@ -1,3 +1,23 @@
+/*
+============================================================
+AUTH SERVICE - Đăng nhập, đăng ký, quản lý tài khoản
+============================================================
+
+Các chức năng chính:
+- Đăng ký tài khoản mới (có OTP xác thực email)
+- Đăng nhập (email/password)
+- Social login (Google/Facebook)
+- Quên mật khẩu / Reset mật khẩu
+- Refresh token / Logout
+- Cập nhật profile
+
+Token system:
+- Access token: JWT, dùng để xác thực API (ngắn hạn)
+- Refresh token: Lưu trong DB, dùng để lấy access token mới (dài hạn)
+- Mỗi lần refresh sẽ revoke token cũ và tạo token mới
+============================================================
+*/
+
 const { sendOTPEmail } = require("../utils/mailer");
 const { generateOTP }  = require("../utils/otp");
 const pool             = require("../config/db");
@@ -11,10 +31,13 @@ const {
 const QU = require("../queries/user.queries");
 const QA = require("../queries/auth.queries");
 
+// Hủy toàn bộ refresh tokens của user (dùng khi đổi mật khẩu hoặc logout toàn bộ)
 const revokeAllUserRefreshTokens = async (userId, db = pool) => {
   await db.query(QA.REVOKE_ALL_REFRESH_TOKENS, [userId]);
 };
 
+// Tạo access token + refresh token mới cho user
+// Refresh token cũ sẽ bị xóa khỏi DB
 const issueAuthTokens = async (user, db = pool) => {
   const accessToken      = generateAccessToken(user);
   const refreshTokenData = generateRefreshToken(user);
@@ -31,6 +54,8 @@ const issueAuthTokens = async (user, db = pool) => {
   };
 };
 
+// Dùng refresh token để lấy access token mới
+// Token cũ sẽ bị revoke sau khi lấy token mới
 const refreshUserSession = async (refreshToken) => {
   if (!refreshToken) throw new Error("refresh_token is required");
 
@@ -63,6 +88,8 @@ const refreshUserSession = async (refreshToken) => {
   }
 };
 
+// Đăng xuất - hủy refresh token
+// Nếu không truyền refreshToken thì hủy toàn bộ tokens của user
 const logoutUserSession = async (userId, refreshToken = null) => {
   if (!userId) throw new Error("userId is required");
 
@@ -75,6 +102,10 @@ const logoutUserSession = async (userId, refreshToken = null) => {
   return true;
 };
 
+// Đăng ký tài khoản mới
+// - Hash password
+// - Tạo user record
+// - Gửi OTP qua email để xác thực
 const registerUser = async (data) => {
   const { full_name, email, phone, password, confirm_password } = data;
 
@@ -84,9 +115,11 @@ const registerUser = async (data) => {
   if (password.length < 8) throw new Error("Password must be at least 8 characters");
   if (password !== confirm_password) throw new Error("Password and confirm password do not match");
 
+  // Kiểm tra email đã tồn tại chưa
   const existingEmail = await pool.query(QU.FIND_USER_EMAIL_AUTH, [email]);
   if (existingEmail.rows.length > 0) {
     const existing = existingEmail.rows[0];
+    // Nếu account dùng social login (không có password)
     if (!existing.password_hash) {
       throw new Error(
         "This email is already linked to a social account (Google/Facebook). Please sign in with social login, then set a password from your profile if needed."
@@ -95,18 +128,22 @@ const registerUser = async (data) => {
     throw new Error("Email already exists");
   }
 
+  // Kiểm tra phone đã tồn tại chưa
   if (phone) {
     const existingPhone = await pool.query(QU.FIND_USER_BY_PHONE, [phone]);
     if (existingPhone.rows.length > 0) throw new Error("Phone already exists");
   }
 
+  // Hash password và tạo user
   const passwordHash = await hashPassword(password);
   const userResult   = await pool.query(QU.INSERT_USER, [full_name, email, phone || null, passwordHash]);
   const user         = userResult.rows[0];
   const otp          = generateOTP();
 
+  // Lưu OTP để xác thực sau
   await pool.query(QA.INSERT_REGISTER_OTP, [user.id, otp]);
 
+  // Gửi email (không block nếu thất bại)
   try {
     sendOTPEmail(user.email, otp);
   } catch (err) {
@@ -116,6 +153,9 @@ const registerUser = async (data) => {
   return { user, otp };
 };
 
+// Đăng nhập bằng email + password
+// Kiểm tra: tài khoản active, email đã verify, chưa bị lock
+// Sau 5 lần sai sẽ bị lock 15 phút
 const loginUser = async (data) => {
   const { email, password } = data;
   if (!email || !password) throw new Error("Email and password are required");
@@ -125,22 +165,26 @@ const loginUser = async (data) => {
 
   const user = result.rows[0];
 
+  // Kiểm tra các điều kiện account
   if (user.status !== "active")              throw new Error("Account is inactive or blocked");
   if (!user.email_verified)                  throw new Error("Email not verified");
   if (user.locked_until && new Date(user.locked_until) > new Date()) {
     throw new Error("Account is temporarily locked. Please try again later");
   }
+  // Account social login không có password
   if (!user.password_hash) {
     throw new Error(
       "This account uses Google/Facebook login and has no password set. Please sign in with social login, or use 'Forgot Password' to set a password."
     );
   }
 
+  // So sánh password
   const match = await comparePassword(password, user.password_hash);
 
   if (!match) {
     const newFailedAttempts = user.failed_login_attempts + 1;
 
+    // Lock account sau 5 lần sai
     if (newFailedAttempts >= 5) {
       await pool.query(QU.UPDATE_LOGIN_LOCK, [newFailedAttempts, user.id]);
       throw new Error("Too many failed login attempts. Account locked for 15 minutes");
@@ -150,10 +194,12 @@ const loginUser = async (data) => {
     }
   }
 
+  // Reset trạng thái login khi thành công
   await pool.query(QU.RESET_LOGIN_STATE, [user.id]);
   return user;
 };
 
+// Xác thực OTP để verify email sau khi đăng ký
 const verifyRegisterOTP = async (email, otp) => {
   const userResult = await pool.query(QU.FIND_USER_BY_EMAIL, [email]);
   if (userResult.rows.length === 0) throw new Error("User not found");
@@ -168,6 +214,7 @@ const verifyRegisterOTP = async (email, otp) => {
   return true;
 };
 
+// Quên mật khẩu - gửi OTP reset qua email
 const forgotPassword = async (email) => {
   const userResult = await pool.query(QU.FIND_USER_BY_EMAIL, [email]);
   if (userResult.rows.length === 0) throw new Error("Email not found");
@@ -186,6 +233,7 @@ const forgotPassword = async (email) => {
   return { otp };
 };
 
+// Xác thực OTP reset mật khẩu
 const verifyResetOTP = async (email, otp) => {
   const userResult = await pool.query(QU.FIND_USER_BY_EMAIL, [email]);
   if (userResult.rows.length === 0) throw new Error("User not found");
@@ -198,6 +246,8 @@ const verifyResetOTP = async (email, otp) => {
   return true;
 };
 
+// Reset mật khẩu mới sau khi đã verify OTP
+// Đánh dấu OTP đã sử dụng, cập nhật password mới, revoke toàn bộ tokens cũ
 const resetPassword = async (email, otp, newPassword, confirmPassword) => {
   if (!email || !otp || !newPassword || !confirmPassword) throw new Error("All fields are required");
   if (newPassword.length < 8) throw new Error("Password must be at least 8 characters");
@@ -218,18 +268,22 @@ const resetPassword = async (email, otp, newPassword, confirmPassword) => {
   return true;
 };
 
+// Lấy thông tin profile của user hiện tại
 const getMe = async (userId) => {
   const result = await pool.query(QU.SELECT_ME, [userId]);
   if (result.rows.length === 0) throw new Error("User not found");
   return result.rows[0];
 };
 
+// Normalize profile text - loại bỏ whitespace thừa, convert empty string thành null
 const normalizeProfileText = (value) => {
   if (value === undefined) return undefined;
   const normalized = String(value || "").trim();
   return normalized || null;
 };
 
+// Cập nhật thông tin profile người dùng
+// Các trường: full_name, phone, date_of_birth, gender, address, avatar_url
 const updateProfile = async (userId, data = {}) => {
   const fullName    = normalizeProfileText(data.full_name);
   const phone       = normalizeProfileText(data.phone);
@@ -244,6 +298,7 @@ const updateProfile = async (userId, data = {}) => {
   if (gender && !["male", "female", "other"].includes(gender)) throw new Error("Gender must be male, female or other");
   if (avatarUrl && avatarUrl.length > 750000) throw new Error("Avatar image is too large");
 
+  // Kiểm tra phone không trùng với user khác
   if (phone) {
     const existingPhone = await pool.query(QU.CHECK_PHONE_EXISTS_EXCLUDE_SELF, [phone, userId]);
     if (existingPhone.rows.length > 0) throw new Error("Phone already exists");
@@ -257,6 +312,8 @@ const updateProfile = async (userId, data = {}) => {
   return result.rows[0];
 };
 
+// Đổi mật khẩu - yêu cầu nhập mật khẩu cũ để xác thực
+// Revoke toàn bộ refresh tokens cũ sau khi đổi thành công
 const changePassword = async (userId, oldPassword, newPassword, confirmPassword) => {
   if (!oldPassword || !newPassword || !confirmPassword) throw new Error("All fields are required");
   if (newPassword.length < 8) throw new Error("New password must be at least 8 characters");
@@ -278,6 +335,7 @@ const changePassword = async (userId, oldPassword, newPassword, confirmPassword)
   return true;
 };
 
+// Đặt mật khẩu mới cho account social login (chưa có password)
 const setPassword = async (userId, newPassword, confirmPassword) => {
   if (!newPassword || !confirmPassword) throw new Error("new_password and confirm_password are required");
   if (newPassword.length < 8) throw new Error("Password must be at least 8 characters");
@@ -295,6 +353,7 @@ const setPassword = async (userId, newPassword, confirmPassword) => {
   return true;
 };
 
+// Gửi lại OTP cho user chưa verify email
 const resendRegisterOTP = async (email) => {
   if (!email) throw new Error("Email is required");
 

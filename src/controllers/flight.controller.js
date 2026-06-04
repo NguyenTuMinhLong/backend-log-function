@@ -192,6 +192,88 @@ const getFlightPosition = async (req, res) => {
   }
 };
 
+/**
+ * ==========================================================
+ * PRICE ALERT CONTROLLERS
+ * ==========================================================
+ */
+
+/**
+ * GET /api/flights/price-analysis?departure_date=2026-06-15&base_price=1000000&available_seats=50&total_seats=180
+ * Phân tích giá dựa trên params (không cần flight ID)
+ */
+const getPriceAnalysis = async (req, res) => {
+  try {
+    const { departure_date, base_price, available_seats, total_seats } = req.query;
+
+    // Validation
+    if (!departure_date) {
+      return res.status(400).json({ error: "departure_date là bắt buộc" });
+    }
+    if (!base_price || parseFloat(base_price) <= 0) {
+      return res.status(400).json({ error: "base_price phải > 0" });
+    }
+
+    const { getDetailedAnalysis } = require('../services/price-alert.service');
+    
+    // Tạo flight object giả lập để phân tích
+    const mockFlight = {
+      id: null,
+      departure_time: departure_date,
+      base_price: parseFloat(base_price),
+      available_seats: parseInt(available_seats) || 0,
+      total_seats: parseInt(total_seats) || 1,
+    };
+
+    const analysis = await getDetailedAnalysis(mockFlight);
+    
+    res.json({
+      message: "Phân tích giá thành công",
+      data: analysis
+    });
+  } catch (err) {
+    console.error("[getPriceAnalysis]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * GET /api/flights/:id/price-analysis
+ * Phân tích chi tiết giá cho một flight cụ thể
+ */
+const getFlightPriceAnalysis = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { adults, children, infants } = req.query;
+
+    if (!id || isNaN(Number(id))) {
+      return res.status(400).json({ error: "Flight ID không hợp lệ" });
+    }
+
+    // Lấy flight từ DB
+    const flight = await flightService.getFlightById(Number(id), {
+      adults: adults || 1,
+      children: children || 0,
+      infants: infants || 0,
+    });
+
+    // Get detailed analysis
+    const { getDetailedAnalysis } = require('../services/price-alert.service');
+    const analysis = await getDetailedAnalysis(flight);
+
+    res.json({
+      message: "Phân tích giá thành công",
+      data: analysis
+    });
+  } catch (err) {
+    console.error("[getFlightPriceAnalysis]", err.message);
+    if (err.message === "Không tìm thấy chuyến bay") {
+      return res.status(404).json({ error: err.message });
+    }
+    res.status(500).json({ error: err.message });
+  }
+};
+
 module.exports = {
   searchFlights,
   getAirports,
@@ -203,6 +285,9 @@ module.exports = {
   getSeatMap,
   getFlightRecommendations,
   getFlightPosition,
+  // Price analysis exports
+  getPriceAnalysis,
+  getFlightPriceAnalysis,
   browseFlights: async (req, res) => {
     try {
       const limit = parseInt(req.query.limit) || 40;

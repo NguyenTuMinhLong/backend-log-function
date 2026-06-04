@@ -1,7 +1,22 @@
-/**
- * Payment Service - Tích hợp đa cổng thanh toán
- * Hỗ trợ: BANK_QR (VietQR), PayOS, MoMo, PayPal
- */
+/*
+============================================================
+PAYMENT SERVICE - Thanh toán đa cổng
+============================================================
+
+Hỗ trợ thanh toán qua:
+- BANK_QR (VietQR / PayOS)
+- MoMo
+- PayPal
+
+Các chức năng chính:
+- Preview: Xem trước số tiền cần thanh toán
+- Create: Tạo payment record
+- Init: Tạo + khởi tạo thanh toán với gateway
+- Confirm: Xác nhận thanh toán thành công
+- Cancel: Hủy payment
+- Webhooks: Xử lý callback từ các cổng thanh toán
+============================================================
+*/
 
 const pool = require("../config/db");
 const QP = require("../queries/payment.queries");
@@ -46,7 +61,7 @@ const generatePaymentCode = () => {
 
 const toNumber = (value) => Number(value || 0);
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// Helpers để format, validate payment
 
 const isTerminalPaidStatus = (status) =>
   ['PAID', 'SUCCESS', 'COMPLETED', 'CONFIRMED'].includes(String(status || '').toUpperCase());
@@ -237,7 +252,7 @@ const rollbackReservedVoucherUsageForBooking = async (client, bookingId) => {
   await client.query(QC.ROLLBACK_RESERVED_COUPON_USAGE, [bookingId]);
 };
 
-// ── Preview Payment ───────────────────────────────────────────────────────────
+// Preview thanh toán - xem trước số tiền, áp dụng voucher nếu có
 
 const previewPayment = async (data, userId = null) => {
   const bookingCode = String(data.booking_code || "").trim().toUpperCase();
@@ -270,7 +285,7 @@ const previewPayment = async (data, userId = null) => {
   }
 };
 
-// ── Create Payment ────────────────────────────────────────────────────────────
+// Tạo payment record mới trong DB
 
 const createPayment = async (data, userId = null) => {
   const bookingCode = String(data.booking_code || "").trim().toUpperCase();
@@ -329,7 +344,8 @@ const createPayment = async (data, userId = null) => {
   }
 };
 
-// ── Init Payment (với gateway integration) ─────────────────────────────────────
+// Khởi tạo thanh toán với gateway (PayOS, MoMo, PayPal)
+// Tạo payment record + lấy payment URL/QR từ gateway
 
 const initPayment = async ({ booking_code, payment_method, voucher_code, userId }) => {
   // Tạo payment record
@@ -459,7 +475,9 @@ const initPayment = async ({ booking_code, payment_method, voucher_code, userId 
   return mapPayment(paymentForEmail, providerPayload);
 };
 
-// ── Confirm Payment ────────────────────────────────────────────────────────────
+// Xác nhận thanh toán thành công
+// Update booking status = 'confirmed', payment status = 'SUCCESS'
+// Gửi email xác nhận (async)
 
 const confirmPayment = async (paymentCode, userId = null, bypassAuth = false) => {
   const normalizedPaymentCode = String(paymentCode || "").trim().toUpperCase();
@@ -572,7 +590,7 @@ const confirmPayment = async (paymentCode, userId = null, bypassAuth = false) =>
   }
 };
 
-// ── Cancel Payment ─────────────────────────────────────────────────────────────
+// Hủy payment (chưa thanh toán hoặc hết hạn)
 
 const cancelPayment = async ({ payment_code }) => {
   const payment = await getPaymentByCodeRow(payment_code);
@@ -593,7 +611,7 @@ const cancelPayment = async ({ payment_code }) => {
   return mapPayment(rows[0]);
 };
 
-// ── Get Payment by Code ────────────────────────────────────────────────────────
+// Lấy thông tin payment theo code
 
 const getPaymentByCode = async (paymentCode) => {
   const payment = await getPaymentByCodeRow(paymentCode);
@@ -601,7 +619,7 @@ const getPaymentByCode = async (paymentCode) => {
   return mapPayment(payment);
 };
 
-// ── Webhook Handlers ──────────────────────────────────────────────────────────
+// Xử lý webhooks từ các cổng thanh toán
 
 const handlePayosWebhook = async (payload = {}) => {
   const webhookData = await verifyPayosWebhookData(payload);
@@ -793,7 +811,7 @@ const handlePaypalCancel = async (query = {}) => {
   };
 };
 
-// ── Checkout URL Getters ────────────────────────────────────────────────────────
+// Lấy checkout URL để redirect user đến trang thanh toán
 
 const getPayosCheckoutUrl = async (paymentCode) => {
   const payment = await getPaymentByCodeRow(paymentCode);
@@ -871,7 +889,7 @@ const getPaypalCheckoutUrl = async (paymentCode) => {
   return checkout.approve_url;
 };
 
-// ── PayOS Return Handler ───────────────────────────────────────────────────────
+// Xử lý khi user return từ PayOS
 
 const handlePayosReturn = async (returnStatus = 'success', query = {}) => {
   const paymentCode = String(query.payment_code || query.paymentCode || '').trim();

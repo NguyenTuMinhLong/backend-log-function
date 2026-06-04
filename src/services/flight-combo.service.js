@@ -1,30 +1,39 @@
-/**
- * Flight Combo Service - Tìm kiếm vé multi-leg cross-airline
- * 
- * Tim combos: one-way (direct/1-stop/2-stop) + roundtrip (cross-product)
- * Ranking theo: gia + thoi gian + do tien loi
- */
+/*
+============================================================
+FLIGHT COMBO SERVICE - Tìm combos multi-leg cross-airline
+============================================================
+
+Tìm combos: one-way (direct/1-stop/2-stop) + roundtrip
+
+Features:
+- Direct: Bay thẳng (0 stop)
+- 1-stop: 1 điểm dừng (A → X → B)
+- 2-stop: 2 điểm dừng (A → X → Y → B)
+
+Ranking theo: giá + thời gian + độ tiện lợi
+============================================================
+*/
 
 const pool = require('../config/db');
 const QC = require('../queries/flight-combo.queries');
 const { applyDynamicPricing } = require('../utils/pricing');
 
-// ============== HELPER FUNCTIONS ==============
+// Helpers
 
-// Tinh thoi gian dung (layover) giua 2 chuyen bay (phut)
+// Tính thời gian dừng (layover) giữa 2 chuyến bay (phút)
 const calcLayoverMinutes = (arrivalTime, departureTime) => {
   const arrival = new Date(arrivalTime).getTime();
   const departure = new Date(departureTime).getTime();
   return Math.round((departure - arrival) / 60000);
 };
 
-// Kiem tra layover hop le
+// Kiểm tra layover có hợp lệ không
 const isValidLayover = (minutes) => {
   return minutes >= QC.MIN_LAYOVER_MINUTES && 
          minutes <= QC.MAX_LAYOVER_HOURS * 60;
 };
 
-// Format 1 flight row -> 1 leg object
+// Format 1 flight row → 1 leg object
 const formatLeg = (row, adults, children, infants) => {
   const basePrice = parseFloat(row.base_price) || 0;
   const dynamicPrice = applyDynamicPricing(
@@ -67,7 +76,7 @@ const formatLeg = (row, adults, children, infants) => {
   };
 };
 
-// Tinh tong gia theo loai hanh khach
+// Tính tổng giá theo loại hành khách
 const calcTotalPrice = (basePrice, adults, children, infants) => {
   const adultTotal = basePrice * adults;
   const childTotal = basePrice * 0.75 * children;
@@ -75,7 +84,7 @@ const calcTotalPrice = (basePrice, adults, children, infants) => {
   return Math.round(adultTotal + childTotal + infantTotal);
 };
 
-// Format 1 combo (goc la 1 flight hoac nhieu flights)
+// Format 1 combo (gốc là 1 flight hoặc nhiều flights)
 const formatCombo = (legs, direction, adults, children, infants) => {
   // Tinh tong gia tat ca legs
   const totalPrice = legs.reduce((sum, leg) => {
@@ -113,9 +122,9 @@ const formatCombo = (legs, direction, adults, children, infants) => {
   };
 };
 
-// ============== TIM CHUYEN BAY ==============
+// ─── Tìm chuyến bay ───────────────────────────────
 
-// Tim chuyen bay truc tiep (0 stop)
+// Tìm chuyến bay trực tiếp (0 stop)
 const findDirectFlights = async (from, to, date, seatClass, passengers) => {
   const seatsNeeded = passengers.adults + passengers.children;
   
@@ -136,7 +145,7 @@ const findDirectFlights = async (from, to, date, seatClass, passengers) => {
   ));
 };
 
-// Tim chuyen bay 1 stop (A -> X -> B)
+// Tìm chuyến bay 1 stop (A → X → B)
 const findOneStopFlights = async (from, to, date, seatClass, passengers) => {
   const seatsNeeded = passengers.adults + passengers.children;
 
@@ -200,7 +209,7 @@ const findOneStopFlights = async (from, to, date, seatClass, passengers) => {
   return combos;
 };
 
-// Tim chuyen bay 2 stop (A -> X -> Y -> B)
+// Tìm chuyến bay 2 stop (A → X → Y → B)
 const findTwoStopFlights = async (from, to, date, seatClass, passengers) => {
   const seatsNeeded = passengers.adults + passengers.children;
   const combos = [];
@@ -265,9 +274,9 @@ const findTwoStopFlights = async (from, to, date, seatClass, passengers) => {
   return combos;
 };
 
-// ============== TIM COMBOS THEO CHIEU ==============
+// ─── Tìm combos theo chiều ──────────────────────
 
-// Tim tat ca combos cho 1 chieu (direct + 1-stop + 2-stop)
+// Tìm tất cả combos cho 1 chiều (direct + 1-stop + 2-stop)
 const findAllCombosForDirection = async (from, to, date, seatClass, passengers, maxStops = 2) => {
   const combos = [];
 
@@ -293,9 +302,9 @@ const findAllCombosForDirection = async (from, to, date, seatClass, passengers, 
   return combos.sort((a, b) => a.total_price - b.total_price);
 };
 
-// ============== RANKING ==============
+// ─── Ranking ──────────────────────────────────
 
-// Cham diem combo
+// Chấm điểm combo
 const scoreCombo = (combo) => {
   let score = 0;
 
@@ -324,17 +333,16 @@ const scoreCombo = (combo) => {
   return score;
 };
 
-// Rank danh sach combos
+// Sắp xếp danh sách combos theo điểm
 const rankCombos = (combos) => {
   return combos
     .map(c => ({ ...c, score: scoreCombo(c) }))
     .sort((a, b) => a.score - b.score);
 };
 
-// ============== MAIN API ==============
+// ─── Main API ──────────────────────────────────
 
-/**
- * Tim kiem ve may bay - ket hop multi-leg + cross-airline
+// Tìm kiếm vé máy bay - kết hợp multi-leg + cross-airline
  * 
  * @param {Object} params
  * @param {string} params.from - Ma san bay di (VD: HAN)

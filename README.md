@@ -78,3 +78,16 @@ Xem `src/config/` - mỗi feature có config riêng: `auth.config.js`, `payment.
 ## API Docs
 
 Postman collection trong `postman/` folder.
+
+---
+
+## Sequence Diagrams
+
+Document chi tiết các flows trong hệ thống: [docs/diagrams/sequence/](docs/diagrams/sequence/)
+
+| Diagram | Mô tả |
+|---------|--------|
+| [01-auto-refund.md](docs/diagrams/sequence/01-auto-refund.md) | User request → Admin approve → Payment gateway → Complete |
+| [02-date-change.md](docs/diagrams/sequence/02-date-change.md) | Request → OTP → Payment → Approve → Release/Reserve seats |
+| [03-flight-combo.md](docs/diagrams/sequence/03-flight-combo.md) | Mixed search: direct, 1-stop, 2-stop + roundtrip |
+| [04-flight-season.md](docs/diagrams/sequence/04-flight-season.md) | Season/Holiday/Override detection với caching |

@@ -15,6 +15,7 @@ const adminUserController = require("../controllers/admin/user.controller");
 const adminChatController = require("../controllers/admin/chat.controller");
 const adminCronController      = require("../controllers/admin/cron.controller");
 const adminAutoFlightController = require("../controllers/admin/auto-flight.controller");
+const adminPriceOverrideController = require("../controllers/admin/price-override.controller");
 
 // Tất cả routes admin: phải đăng nhập + role = 'admin'
 router.use(authenticate, authorize("admin"));
@@ -111,6 +112,14 @@ router.get("/chat/conversations", adminChatController.listSupportConversations);
 router.get("/chat/conversations/:id", adminChatController.getSupportConversation);
 router.post("/chat/conversations/:id/message", adminChatController.replySupportConversation);
 router.patch("/chat/conversations/:id/status", adminChatController.updateSupportConversationStatus);
+
+// A-13: Price Overrides
+router.get("/price-overrides", adminPriceOverrideController.getOverrides);
+router.get("/price-overrides/:id", adminPriceOverrideController.getOverrideById);
+router.post("/price-overrides", adminPriceOverrideController.createOverride);
+router.put("/price-overrides/:id", adminPriceOverrideController.updateOverride);
+router.delete("/price-overrides/:id", adminPriceOverrideController.deleteOverride);
+router.post("/price-overrides/bulk", adminPriceOverrideController.bulkCreate);
 
 // ── Newsletter ────────────────────────────────────────────────────────────────
 const { sendNewsletterBroadcast } = require('../utils/mailer');

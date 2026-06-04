@@ -1,5 +1,13 @@
-const pool = require("../config/db");
-const Q    = require("../queries/coupon.queries");
+/*
+============================================================
+COUPON SERVICE - Mã giảm giá
+============================================================
+
+Các chức năng:
+- Lấy danh sách coupons công khai
+- Filter theo: search, airline, welcome_only, availability
+============================================================
+*/
 
 const sanitizeCoupon = (row) => ({
   id:                   row.id,

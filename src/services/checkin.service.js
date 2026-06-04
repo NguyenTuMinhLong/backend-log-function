@@ -1,25 +1,25 @@
 'use strict';
 
 /*
-=========================================================
-CHECKIN SERVICE - Xu ly check-in online
-=========================================================
-Input: Booking code hoac QR code
-Output: Boarding pass info
+============================================================
+CHECKIN SERVICE - Check-in online
+============================================================
 
-Quy trinh:
-1. Validate booking (ton tai, chua check-in, trong thoi gian)
-2. Generate boarding pass cho moi passenger
-3. Tra ve boarding pass info
-=========================================================
+Quy trình:
+1. Validate booking (tồn tại, chưa check-in, trong thời gian)
+2. Generate boarding pass cho mỗi passenger
+3. Trả về boarding pass info
+
+Config:
+- Cho phép check-in trước 24h
+- Không cho check-in sau 30 phút trước giờ bay
+============================================================
 */
 
 const db = require('../config/db');
 const SQ = require('../queries/seat.queries');
 
-// =========================================================
-// CONFIGURATION
-// =========================================================
+// Config
 
 const CHECKIN_CONFIG = {
   // Cho phep check-in truoc bao nhieu gio
@@ -30,49 +30,35 @@ const CHECKIN_CONFIG = {
   defaultGate: 'TBA',
 };
 
-// =========================================================
-// HELPER FUNCTIONS
-// =========================================================
+// Helpers
 
-/**
- * Generate boarding pass code
- * Format: {BOOKING_CODE}-{PASSENGER_INDEX}
- * VD: VJ8PKSL-P1
- */
+// Tạo mã boarding pass: {BOOKING_CODE}-{PASSENGER_INDEX}
 const generateBoardingPassCode = (bookingCode, passengerIndex) => {
   return `${bookingCode}-P${passengerIndex}`;
 };
 
-/**
- * Get next sequence number
- */
+// Lấy số sequence tiếp theo
 const getNextSequenceNumber = async (bookingId, flightType) => {
   const pool = db;
   const result = await pool.query(SQ.GET_NEXT_SEQUENCE_NUMBER, [bookingId, flightType]);
   return result.rows[0]?.next_seq || 1;
 };
 
-/**
- * Format date for boarding pass
- */
+// Format ngày cho boarding pass
 const formatDate = (dateString) => {
   const date = new Date(dateString);
   const options = { day: '2-digit', month: 'short', year: 'numeric' };
   return date.toLocaleDateString('en-GB', options).toUpperCase();
 };
 
-/**
- * Format time for boarding pass
- */
+// Format giờ cho boarding pass
 const formatTime = (dateString) => {
   const date = new Date(dateString);
   return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 };
 
-/**
- * Tính số phút boarding trước giờ bay theo độ dài chuyến
- * ≤ 2h → 45 phút | 2–5h → 60 phút | > 5h → 90 phút
- */
+// Tính số phút boarding trước giờ bay
+// ≤ 2h → 45 phút | 2-5h → 60 phút | > 5h → 90 phút
 const getBoardingMinutes = (depTime, arrTime) => {
   if (!depTime || !arrTime) return 45;
   const durationMins = (new Date(arrTime) - new Date(depTime)) / 60000;
@@ -81,8 +67,9 @@ const getBoardingMinutes = (depTime, arrTime) => {
   return 90;
 };
 
-/**
- * Sinh gate tự động dựa theo country từ DB:
+// Tạo gate tự động theo sân bay
+// Vietnam → số thường
+// Quốc tế → chữ + số (theo hub)
  * - Vietnam → chỉ số (tự động đúng với mọi sân bay VN mới thêm vào)
  * - Quốc tế → chữ + số (theo chuẩn phổ biến của hub đó)
  * Hash từ flight_number → cùng chuyến luôn ra cùng gate
@@ -120,13 +107,9 @@ const generateGate = (flightNumber, departureAirport, departureCountry) => {
   return 'ABCDE'[h % 5] + pick(15);
 };
 
-// =========================================================
-// CHECKIN FUNCTIONS
-// =========================================================
+// ─── Checkin Functions ─────────────────────────
 
-/**
- * Check booking status for checkin
- */
+// Kiểm tra booking có thể check-in không
 const checkBookingCheckinStatus = async (bookingCode) => {
   const pool = db;
   
@@ -163,9 +146,7 @@ const checkBookingCheckinStatus = async (bookingCode) => {
   return booking;
 };
 
-/**
- * Get all passengers for a booking
- */
+// Lấy danh sách passengers cho checkin
 const getPassengersForCheckin = async (bookingId, flightType) => {
   const pool = db;
   
@@ -174,9 +155,7 @@ const getPassengersForCheckin = async (bookingId, flightType) => {
   return result.rows;
 };
 
-/**
- * Get booking details for boarding pass
- */
+// Lấy chi tiết booking cho boarding pass
 const getBookingDetailsForCheckin = async (bookingCode) => {
   const pool = db;
   
@@ -189,9 +168,7 @@ const getBookingDetailsForCheckin = async (bookingCode) => {
   return result.rows[0];
 };
 
-/**
- * Check-in cho 1 passenger cu the
- */
+// Check-in 1 passenger cụ thể
 const checkinPassenger = async (bookingCode, passengerId, flightType) => {
   const pool = db;
   const client = await pool.connect();
@@ -307,9 +284,7 @@ const checkinPassenger = async (bookingCode, passengerId, flightType) => {
   }
 };
 
-/**
- * Check-in tat ca passengers cua 1 booking cho 1 flight
- */
+// Check-in tất cả passengers của 1 booking
 const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
   const pool = db;
   const client = await pool.connect();
@@ -459,9 +434,7 @@ const checkinAllPassengers = async (bookingCode, flightType = 'outbound') => {
   }
 };
 
-/**
- * Get boarding pass info
- */
+// Lấy thông tin boarding pass
 const getBoardingPass = async (boardingPassCode) => {
   const pool = db;
   
@@ -518,9 +491,7 @@ const getBoardingPass = async (boardingPassCode) => {
   };
 };
 
-/**
- * Get checkin status cho 1 booking
- */
+// Lấy trạng thái checkin của 1 booking
 const getCheckinStatus = async (bookingCode) => {
   const pool = db;
   

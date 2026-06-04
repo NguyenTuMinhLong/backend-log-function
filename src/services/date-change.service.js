@@ -1,7 +1,23 @@
 'use strict';
 
 /*
-DATE CHANGE SERVICE - Business Logic
+============================================================
+DATE CHANGE SERVICE - Đổi ngày bay
+============================================================
+
+Quy trình:
+1. User gửi yêu cầu đổi ngày (requestDateChange)
+2. Hệ thống gửi OTP qua email
+3. User xác thực OTP (confirmDateChange)
+4. Nếu chênh lệch giá > 0 → tạo payment để thanh toán
+5. Sau khi thanh toán → auto approve (approveDateChange)
+6. Admin có thể reject/reapprove
+
+Business Rules:
+- Phải đổi trước >= 24h giờ bay
+- Chênh lệch < 1M → auto approve
+- Chênh lệch >= 1M → cần admin duyệt
+============================================================
 */
 
 const pool = require('../config/db');
@@ -87,7 +103,7 @@ const validateDateChangeRequest = async (booking, newFlightId, seatClass) => {
 
   return newFlight;
 };
-// Hàm gửi OTP cho email
+// Gửi OTP để xác thực yêu cầu đổi ngày
 const requestDateChangeOTP = async (email, requestCode) => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const expiresAt = Date.now() + OTP_CONFIG.expiresInMinutes * 60 * 1000;
@@ -105,7 +121,7 @@ const requestDateChangeOTP = async (email, requestCode) => {
 
   return { expiresIn: OTP_CONFIG.expiresInMinutes };
 }
-// Hàm verify OTP
+// Xác thực OTP
 const verifyDateChangeOTP = async (email, otp) => {
   const normalizedEmail = email.toLowerCase().trim();
   const otpData = dateChangeOTPStore.get(normalizedEmail);
@@ -179,7 +195,7 @@ const updateDateChangePaymentProviderFields = async (paymentCode, fields = {}) =
   return rows[0] || null;
 };
 
-// REQUEST DATE CHANGE (USER)
+// ─── USER REQUEST DATE CHANGE ───────────────────────────────
 
 const requestDateChange = async (userId, bookingCode, data) => {
   const {
@@ -308,7 +324,7 @@ const requestDateChange = async (userId, bookingCode, data) => {
   }
 };
 
-// CONFIRM DATE CHANGE (After OTP Verification)
+// ─── CONFIRM DATE CHANGE (sau khi verify OTP) ─────────────────
 
 const confirmDateChange = async (email, otp, requestCode) => {
   // 1. Verify OTP
@@ -369,7 +385,7 @@ const confirmDateChange = async (email, otp, requestCode) => {
   };
 };
 
-// CREATE PAYMENT FOR DATE CHANGE (When price_difference > 0)
+// ─── CREATE PAYMENT CHO CHÊNH LỆCH GIÁ ───────────────────
 
 const createDateChangePayment = async (requestCode, paymentMethod, userId = null) => {
   // 1. Validate payment method early
@@ -516,7 +532,7 @@ const createDateChangePayment = async (requestCode, paymentMethod, userId = null
   }
 };
 
-// CONFIRM DATE CHANGE PAYMENT (After payment success)
+// ─── CONFIRM PAYMENT ĐÃ THANH TOÁN ──────────────────────────
 
 const confirmDateChangePayment = async (paymentCode) => {
   // 1. Find payment
@@ -754,7 +770,7 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
 };
 
 
-// REJECT + CANCEL + GET (giữ nguyên)
+// ─── ADMIN REJECT ──────────────────────────────────────────
 
 const rejectDateChange = async (adminId, requestCode, reason) => {
   if (!reason || reason.trim().length < 10) {

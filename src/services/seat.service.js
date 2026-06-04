@@ -1,19 +1,20 @@
 'use strict';
 
 /*
-=========================================================
-SEAT SERVICE - Xu ly chon ghe va seat selection
-=========================================================
-Hai luong:
-1. Random Seat (free) - He thong tu dong assign
-2. Choose Seat (tra phi) - Khach chon ghe cu the
+============================================================
+SEAT SERVICE - Chọn ghế và seat selection
+============================================================
 
-Chi tiet:
-- First class: Luon duoc chon ghe (khong can tra phi)
-- Business/Economy: 
-  - Khong chon: Random (free)
-  - Chon ghe: Tra phi them
-=========================================================
+Hai luồng:
+1. Random Seat (free) - Hệ thống tự động assign
+2. Choose Seat (trả phí) - Khách chọn ghế cụ thể
+
+Chi tiết:
+- First class: Luôn được chọn ghế (không cần trả phí)
+- Business/Economy:
+  - Không chọn: Random (free)
+  - Chọn ghế: Trả phí thêm
+============================================================
 */
 
 // db = pool directly
@@ -21,13 +22,9 @@ const db = require('../config/db');
 const SQ = require('../queries/seat.queries');
 const QB = require('../queries/booking.queries');
 
-// =========================================================
-// HELPER FUNCTIONS
-// =========================================================
+// Helpers
 
-/**
- * Lay vi tri ghe: window (A, F) hoac standard
- */
+// Lấy vị trí ghế: window (A, F) hoặc standard
 const getSeatPosition = (seatNumber) => {
   if (seatNumber.endsWith('A') || seatNumber.endsWith('F')) {
     return 'window';
@@ -35,9 +32,7 @@ const getSeatPosition = (seatNumber) => {
   return 'standard';
 };
 
-/**
- * Tinh phi them cho ghe da chon
- */
+// Tính phí thêm cho ghế đã chọn
 const calculateExtraFee = async (flightId, seatClass, position) => {
   const pool = db;
   const result = await pool.query(SQ.SELECT_SEAT_PRICING_BY_CLASS, [flightId, seatClass]);
@@ -46,9 +41,8 @@ const calculateExtraFee = async (flightId, seatClass, position) => {
   return pricing ? parseFloat(pricing.extra_price) : 0;
 };
 
-/**
- * Get random available seat
- */
+// Lấy ghế ngẫu nhiên còn trống
+// Ưu tiên ghế standard, không phải window
 const getRandomAvailableSeat = async (flightId, seatClass) => {
   const pool = db;
   
@@ -71,15 +65,9 @@ const getRandomAvailableSeat = async (flightId, seatClass) => {
   return seatPool[randomIndex];
 };
 
-// =========================================================
-// SEAT MAP FUNCTIONS
-// =========================================================
+// ─── Seat Map Functions ──────────────────────────
 
-/**
- * Lay seat map cua 1 chuyen bay
- * @param {number} flightId - ID cua chuyen bay
- * @param {string} seatClass - Loai ghe (economy, business, first)
- */
+// Lấy seat map của 1 chuyến bay
 const getSeatMap = async (flightId, seatClass) => {
   const pool = db;
   
@@ -117,9 +105,7 @@ const getSeatMap = async (flightId, seatClass) => {
   };
 };
 
-/**
- * Lay tat ca seat classes cua 1 chuyen bay
- */
+// Lấy seat maps cho tất cả classes
 const getAllSeatMaps = async (flightId) => {
   const classes = ['economy', 'business', 'first'];
   const results = {};
@@ -131,13 +117,9 @@ const getAllSeatMaps = async (flightId) => {
   return results;
 };
 
-// =========================================================
-// SEAT SELECTION FUNCTIONS
-// =========================================================
+// ─── Seat Selection Functions ─────────────────────
 
-/**
- * Validate seat selection
- */
+// Validate ghế trước khi assign
 const validateSeatSelection = async (flightId, seatClass, seatNumber) => {
   const pool = db;
   
@@ -167,9 +149,7 @@ const validateSeatSelection = async (flightId, seatClass, seatNumber) => {
   return true;
 };
 
-/**
- * Assign seat cho 1 passenger
- */
+// Assign ghế cho 1 passenger
 const assignSeat = async (flightId, seatClass, seatNumber, passengerId, bookingId) => {
   const pool = db;
   const client = await pool.connect();
@@ -204,11 +184,7 @@ const assignSeat = async (flightId, seatClass, seatNumber, passengerId, bookingI
   }
 };
 
-/**
- * Select multiple seats cho 1 booking
- * @param {string} bookingCode - Ma booking
- * @param {Array} selections - [{ passenger_id, flight_type, seat_number }]
- */
+// Chọn nhiều ghế cho 1 booking
 const selectSeats = async (bookingCode, selections) => {
   const pool = db;
   const client = await pool.connect();
@@ -289,9 +265,7 @@ const selectSeats = async (bookingCode, selections) => {
   }
 };
 
-/**
- * Auto-assign random seats cho tat ca passengers cua 1 booking
- */
+// Tự động assign ghế ngẫu nhiên cho tất cả passengers
 const autoAssignSeats = async (bookingCode) => {
   const pool = db;
   const client = await pool.connect();
@@ -393,9 +367,7 @@ const autoAssignSeats = async (bookingCode) => {
   }
 };
 
-/**
- * Release a seat (when cancelling booking)
- */
+// Giải phóng ghế (khi hủy booking)
 const releaseSeat = async (flightId, seatNumber) => {
   const pool = db;
   

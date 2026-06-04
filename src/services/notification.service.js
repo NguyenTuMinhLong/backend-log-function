@@ -1,15 +1,15 @@
 'use strict';
 
 /*
-=========================================================
+============================================================
 NOTIFICATION SERVICE - Email Notifications
-=========================================================
+============================================================
 
-Gửi email khi có sự kiện liên quan đến:
-- Refunds
-- Date Changes
+Gửi email khi có sự kiện:
+- Refunds (yêu cầu, duyệt, từ chối, hoàn thành)
+- Date Changes (yêu cầu, duyệt, từ chối)
 - Airline Cancellations
-=========================================================
+============================================================
 */
 
 const { NOTIFICATIONS } = require('../config/refund.config');
@@ -18,9 +18,7 @@ const { NOTIFICATIONS } = require('../config/refund.config');
 const FROM_EMAIL = NOTIFICATIONS.email.from || 'no-reply@n4minhlong.io.vn';
 const FROM_NAME = NOTIFICATIONS.email.fromName || 'Airline Booking System';
 
-// =========================================================
-// EMAIL TEMPLATES
-// =========================================================
+// Email templates
 
 const EMAIL_TEMPLATES = {
   // Refund Templates
@@ -70,9 +68,7 @@ const EMAIL_TEMPLATES = {
   },
 };
 
-// =========================================================
-// EMAIL CONTENT GENERATORS
-// =========================================================
+// Tạo nội dung email cho refund
 
 const generateRefundEmailContent = (event, data) => {
   const { refund, booking, adminId } = data;
@@ -282,9 +278,7 @@ const generateFlightCancellationEmailContent = (data) => {
   };
 };
 
-// =========================================================
-// SEND EMAIL (MOCK - Cần implement với provider thực tế)
-// =========================================================
+// Gửi email (mock - cần implement với provider thực tế)
 
 const sendEmail = async (to, subject, body, options = {}) => {
   // TODO: Implement với email provider thực tế
@@ -308,9 +302,7 @@ const sendEmail = async (to, subject, body, options = {}) => {
   return true;
 };
 
-// =========================================================
-// NOTIFICATION FUNCTIONS
-// =========================================================
+// Các function gửi notification
 
 const createRefundNotification = async (data) => {
   const { event, refund, booking, userId, guestEmail } = data;
@@ -398,9 +390,7 @@ const createFlightCancellationNotification = async (data) => {
   }
 };
 
-// =========================================================
-// ADMIN NOTIFICATIONS
-// =========================================================
+// Admin notifications
 
 const notifyAdminNewRefund = async (refund) => {
   if (!NOTIFICATIONS.admin.alertOnNewRefund) return;
@@ -418,9 +408,7 @@ const checkAndAlertSLABreach = async () => {
   console.log('[Admin Notification] Checking SLA breaches...');
 };
 
-// =========================================================
-// UTILITIES
-// =========================================================
+// Utilities
 
 const formatCurrency = (amount) => {
   return new Intl.NumberFormat('vi-VN', {
