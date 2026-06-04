@@ -1,6 +1,7 @@
 // src/services/flight.service.js
 const pool = require('../config/db');
 const QF = require('../queries/flight.queries');
+const priceRuleService = require("./price-rule.service");
 
 /**
  * Lưu lịch sử tìm kiếm (fire-and-forget, không block search)
@@ -429,6 +430,37 @@ const searchFlights = async (params) => {
       returnFlightsRaw.map(f => priceRuleService.applyPriceRules(f, return_date))
     );
   }
+
+  // Fire-and-forget lưu lịch sử tìm kiếm
+saveSearchHistory({
+  userId: params.userId || null,
+  sessionId: params.sessionId || null,
+
+  departureCode: departure_code,
+  arrivalCode: arrival_code,
+
+  departureDate: departure_date,
+  returnDate: return_date || null,
+
+  seatClass: seat_class,
+
+  adults: a,
+  children: c,
+  infants: i,
+
+  resultsCount: outboundFlights.length,
+
+  minPriceFound:
+    outboundFlights.length > 0
+      ? Math.min(
+          ...outboundFlights.map(
+            f => Number(f.seat?.base_price || 0)
+          )
+        )
+      : null,
+}).catch(err => {
+  console.error("[SearchHistory]", err.message);
+});
 
   return {
     outbound_flights: outboundFlights,
