@@ -1,4 +1,5 @@
-const pool = require("../../config/db");
+const pool               = require("../../config/db");
+const flightNotifService = require("../flight-notification.service");
 const QA = require("../../queries/airline.queries");
 const QAP = require("../../queries/airport.queries");
 const QF = require("../../queries/flight.queries");
@@ -413,8 +414,52 @@ const updateFlight = async (flightId, data) => {
     }
 
     await client.query("COMMIT");
+
+    // Email notifications nếu có thay đổi quan trọng (fire-and-forget)
+    try {
+      const flightAfter = (await pool.query(
+        "SELECT flight_number, departure_time, arrival_time FROM flights WHERE id=$1",
+        [flightId]
+      )).rows[0];
+
+      if (data.gate !== undefined || data.terminal !== undefined) {
+        flightNotifService.notifyGateChange(
+          flightId, flightAfter.flight_number,
+          data.gate, data._old_gate || null,
+          data.terminal, data.reason || null
+        ).catch(e => console.error("[UpdateFlight] gate:", e.message));
+      }
+
+      if (data.departure_time !== undefined || data.arrival_time !== undefined) {
+        flightNotifService.notifyTimeChange(
+          flightId, flightAfter.flight_number,
+          data._old_departure_time || null,
+          flightAfter.departure_time,
+          flightAfter.arrival_time,
+          data.reason || null
+        ).catch(e => console.error("[UpdateFlight] time:", e.message));
+      }
+
+      if (data.seats && data.seats.some(s =>
+        s.baggage_included_kg !== undefined || s.carry_on_kg !== undefined
+      )) {
+        flightNotifService.notifyBaggageChange(
+          flightId, flightAfter.flight_number,
+          data.seats.map(s => ({
+            class:           s.class,
+            old_baggage_kg:  s._old_baggage_kg || null,
+            new_baggage_kg:  s.baggage_included_kg,
+            new_carry_on_kg: s.carry_on_kg,
+          })),
+          data.reason || null
+        ).catch(e => console.error("[UpdateFlight] baggage:", e.message));
+      }
+    } catch (notifErr) {
+      console.error("[UpdateFlight] Notify error:", notifErr.message);
+    }
+
     return {
-      message: "Cập nhật chuyến bay thành công",
+      message:   "Cập nhật chuyến bay thành công",
       flight_id: parseInt(flightId),
     };
   } catch (err) {
@@ -428,7 +473,7 @@ const updateFlight = async (flightId, data) => {
 /**
  * Chuyển trạng thái chuyến bay
  */
-const updateFlightStatus = async (flightId, status, reason = "") => {
+const updateFlightStatus = async (flightId, status, reason = "", extraData = {}) => {
   if (!VALID_STATUSES.includes(status)) {
     throw new Error(`status phải là: ${VALID_STATUSES.join(", ")}`);
   }
@@ -540,13 +585,27 @@ const updateFlightStatus = async (flightId, status, reason = "") => {
     }
   }
 
+    // Email notification (delayed/cancelled/boarding)
+  const emailResult = await flightNotifService.notifyStatusChange(
+    flightId, flight.flight_number, status,
+    {
+      delay_minutes:      extraData.delay_minutes      || null,
+      new_departure_time: extraData.new_departure_time || null,
+      gate:               extraData.gate               || null,
+      terminal:           extraData.terminal           || null,
+      boarding_time:      extraData.boarding_time      || null,
+      reason,
+    }
+  );
+
   return {
-    message: `Đã chuyển trạng thái chuyến bay thành "${status}"`,
-    flight_id: flight.id,
-    flight_number: flight.flight_number,
-    status: flight.status,
+    message:           `Đã chuyển trạng thái chuyến bay thành "${status}"`,
+    flight_id:         flight.id,
+    flight_number:     flight.flight_number,
+    status:            flight.status,
     affected_bookings: affectedBookings.rows.length,
-    notified_users: affectedBookings.rows.filter((b) => b.user_id).length,
+    notified_users:    affectedBookings.rows.filter((b) => b.user_id).length,
+    emails_sent:       emailResult.sent,
   };
 };
 
