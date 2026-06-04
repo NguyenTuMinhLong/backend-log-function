@@ -56,6 +56,7 @@ const browseFlights = async (limit = 40) => {
 };
 
 // Gợi ý chuyến bay cho user dựa trên route cụ thể
+const suggestFlightsForRoute = async (limit, fromAirport, toAirport) => {
   const query = `
     SELECT
       f.id              AS flight_id,
@@ -103,6 +104,7 @@ const browseFlights = async (limit = 40) => {
 };
 
 // Format thời gian bay thành string (VD: "2h30m")
+const formatDuration = (minutes) => {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return m > 0 ? `${h}h${m}m` : `${h}h`;
