@@ -23,8 +23,65 @@ let seasonCache = null;
 let seasonCacheTime = 0;
 let holidayCache = null;
 let holidayCacheTime = 0;
-let overrideCache = new Map();
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1 giờ
+const overrideCache = new Map();
+const OVERRIDE_CACHE_TTL_MS = 60 * 60 * 1000;
+
+const getDateParts = (date) => {
+  const d = new Date(date);
+  return {
+    year: d.getFullYear(),
+    month: d.getMonth() + 1,
+    day: d.getDate(),
+  };
+};
+
+const compareMonthDay = (leftMonth, leftDay, rightMonth, rightDay) => {
+  if (leftMonth !== rightMonth) {
+    return leftMonth - rightMonth;
+  }
+  return leftDay - rightDay;
+};
+
+const createSeasonBoundaryDate = (year, month, day) => {
+  return new Date(year, month - 1, day || 1);
+};
+
+const getSeasonWindowForReferenceYear = (season, referenceYear) => {
+  const start = createSeasonBoundaryDate(referenceYear, season.start_month, season.start_day);
+  const crossesYear = season.start_month > season.end_month || (
+    season.start_month === season.end_month && season.start_day > season.end_day
+  );
+  const endYear = crossesYear ? referenceYear + 1 : referenceYear;
+  const end = createSeasonBoundaryDate(endYear, season.end_month, season.end_day || 28);
+
+  return {
+    start,
+    end,
+    crossesYear,
+  };
+};
+
+const getSeasonWindowsForDate = (season, date) => {
+  const { year } = getDateParts(date);
+  return [
+    getSeasonWindowForReferenceYear(season, year - 1),
+    getSeasonWindowForReferenceYear(season, year),
+  ];
+};
+
+const getUpcomingSeasonStart = (season, fromDate) => {
+  const now = new Date(fromDate);
+  now.setHours(0, 0, 0, 0);
+
+  return [
+    getSeasonWindowForReferenceYear(season, now.getFullYear() - 1),
+    getSeasonWindowForReferenceYear(season, now.getFullYear()),
+    getSeasonWindowForReferenceYear(season, now.getFullYear() + 1),
+  ]
+    .map(window => window.start)
+    .filter(start => start >= now)
+    .sort((a, b) => a - b)[0] || null;
+};
 
 // Lấy tất cả season periods đang active (có cache)
 async function getActiveSeasons() {
@@ -66,46 +123,27 @@ async function getActiveHolidays() {
   return holidayCache;
 }
 
-// Refresh cache khi cần
-async function refreshCache() {
-  seasonCache = null;
-  seasonCacheTime = 0;
-  return getSeasonInfo(new Date().toISOString());
-}
-
 // Kiểm tra xem một date có nằm trong season period không
- * @param {Date|string} date - Date cần check
- * @param {object} season - Season period từ DB
- * @returns {boolean}
- */
+// @param {Date|string} date - Date cần check
+// @param {object} season - Season period từ DB
+// @returns {boolean}
 function isDateInSeason(date, season) {
-  const d = new Date(date);
-  const month = d.getMonth() + 1; // 1-12
-  const day = d.getDate(); // 1-31
-  
-  // Logic cho season trong cùng năm
-  if (season.start_month <= season.end_month) {
-    // Case: season không qua năm (VD: 6/1 - 8/31)
-    if (month < season.start_month || month > season.end_month) return false;
-    if (month === season.start_month && day < season.start_day) return false;
-    if (month === season.end_month && day > season.end_day) return false;
-    return true;
-  } else {
-    // Case: season qua năm (VD: 12/20 - 1/5 cho Tết)
-    if (month >= season.start_month || month <= season.end_month) {
-      if (month === season.start_month && day < season.start_day) return false;
-      if (month === season.end_month && day > season.end_day) return false;
-      return true;
-    }
-    return false;
-  }
+  const target = new Date(date);
+  target.setHours(0, 0, 0, 0);
+
+  return getSeasonWindowsForDate(season, target).some(({ start, end }) => {
+    const normalizedStart = new Date(start);
+    const normalizedEnd = new Date(end);
+    normalizedStart.setHours(0, 0, 0, 0);
+    normalizedEnd.setHours(0, 0, 0, 0);
+    return target >= normalizedStart && target <= normalizedEnd;
+  });
 }
 
 // Kiểm tra xem một date có phải là ngày lễ không
- * @param {Date|string} date - Date cần check
- * @param {Array} holidays - Danh sách holidays từ DB
- * @returns {object|null} - Holiday info hoặc null
- */
+// @param {Date|string} date - Date cần check
+// @param {Array} holidays - Danh sách holidays từ DB
+// @returns {object|null} - Holiday info hoặc null
 function isHoliday(date, holidays) {
   const d = new Date(date);
   const month = d.getMonth() + 1;
@@ -135,9 +173,8 @@ function isHoliday(date, holidays) {
 }
 
 // Tính số ngày từ date hiện tại đến target date
- * @param {Date|string} targetDate - Ngày target
- * @returns {number} - Số ngày (âm nếu đã qua)
- */
+// @param {Date|string} targetDate - Ngày target
+// @returns {number} - Số ngày (âm nếu đã qua)
 function daysUntil(targetDate) {
   const now = new Date();
   now.setHours(0, 0, 0, 0);
@@ -147,69 +184,39 @@ function daysUntil(targetDate) {
 }
 
 // Kiểm tra date có đang TIẾN VÀO mùa cao điểm không
- * @param {Date|string} departureDate - Ngày khởi hành
- * @param {number} thresholdDays - Số ngày threshold (mặc định 30)
- * @returns {object} - { isApproaching: boolean, season: object|null, daysUntilSeasonStart: number }
- */
+// @param {Date|string} departureDate - Ngày khởi hành
+// @param {number} thresholdDays - Số ngày threshold (mặc định 30)
+// @returns {object} - { isApproaching: boolean, season: object|null, daysUntilSeasonStart: number }
 async function isApproachingPeakSeason(departureDate, thresholdDays = 30) {
   const seasons = await getActiveSeasons();
-  const daysToDeparture = daysUntil(departureDate);
-  
+  const departure = new Date(departureDate);
+  departure.setHours(0, 0, 0, 0);
+
   for (const season of seasons) {
-    // Kiểm tra xem departure date có nằm trong season không
-    if (isDateInSeason(departureDate, season)) {
-      // Đã ở trong mùa cao điểm
+    if (isDateInSeason(departure, season)) {
       return {
         isApproaching: true,
         isInside: true,
         season,
         daysUntilSeasonStart: 0,
-        reason: `đang trong ${season.name}`
+        reason: `đang trong ${season.name}`,
       };
     }
-    
-    // Kiểm tra xem departure date có sắp vào mùa cao điểm không
-    // Bằng cách tạo target date của season start trong năm departure
-    const departure = new Date(departureDate);
-    const year = departure.getFullYear();
-    
-    // Tính season start date
-    const seasonStartDate = new Date(year, season.start_month - 1, season.start_day || 1);
-    const seasonEndDate = new Date(year, season.end_month - 1, season.end_day || 28);
-    
-    // Nếu season qua năm (start_month > end_month), season thuộc năm trước
-    if (season.start_month > season.end_month && season.start_month >= 6) {
-      // VD: Tết (1/20 - 2/10), check cho năm trước
-      const prevYear = year - 1;
-      const adjustedSeasonStart = new Date(prevYear, season.start_month - 1, season.start_day || 1);
-      
-      // Nếu departure date gần đủ điều kiện để vào season
-      const daysUntilSeason = daysUntil(adjustedSeasonStart);
-      
-      if (daysUntilSeason >= 0 && daysUntilSeason <= thresholdDays) {
-        return {
-          isApproaching: true,
-          isInside: false,
-          season,
-          daysUntilSeasonStart: daysUntilSeason,
-          reason: `sắp vào ${season.name}`
-        };
-      }
-    } else {
-      // Season cùng năm
-      const daysUntilSeason = daysUntil(seasonStartDate);
-      
-      // Nếu departure date sẽ nằm trong season VÀ đang tiến vào
-      if (isDateInSeason(departureDate, season) || 
-          (daysUntilSeason >= 0 && daysUntilSeason <= thresholdDays && daysToDeparture > daysUntilSeason)) {
-        return {
-          isApproaching: true,
-          isInside: false,
-          season,
-          daysUntilSeasonStart: Math.max(0, daysUntilSeason),
-          reason: `sắp vào ${season.name}`
-        };
-      }
+
+    const upcomingStart = getUpcomingSeasonStart(season, new Date());
+    if (!upcomingStart) continue;
+
+    const daysUntilSeason = daysUntil(upcomingStart);
+    const departureDiff = Math.round((departure - upcomingStart) / (1000 * 60 * 60 * 24));
+
+    if (daysUntilSeason >= 0 && daysUntilSeason <= thresholdDays && departureDiff >= 0) {
+      return {
+        isApproaching: true,
+        isInside: false,
+        season,
+        daysUntilSeasonStart: daysUntilSeason,
+        reason: `sắp vào ${season.name}`,
+      };
     }
   }
   
@@ -226,9 +233,11 @@ async function isApproachingPeakSeason(departureDate, thresholdDays = 30) {
 async function getOverrideForDate(date) {
   const d = new Date(date);
   const dateStr = d.toISOString().split('T')[0];
+  const cached = overrideCache.get(dateStr);
+  const now = Date.now();
   
-  if (overrideCache.has(dateStr)) {
-    return overrideCache.get(dateStr);
+  if (cached && (now - cached.cachedAt) < OVERRIDE_CACHE_TTL_MS) {
+    return cached.value;
   }
   
   const result = await pool.query(
@@ -237,7 +246,10 @@ async function getOverrideForDate(date) {
   );
   
   const override = result.rows[0] || null;
-  overrideCache.set(dateStr, override);
+  overrideCache.set(dateStr, {
+    value: override,
+    cachedAt: now,
+  });
   
   return override;
 }
@@ -257,28 +269,17 @@ async function refreshCache() {
   return getSeasonInfo(new Date().toISOString());
 }
 
-/*
-============================================================
+/*============================================================
 MAIN FUNCTION: getSeasonInfo
-============================================================
 Trả về thông tin mùa cao điểm cho một departure date
-
 Priority: Override > Holiday > Season > null
 
 Ví dụ:
   const info = await getSeasonInfo('2026-06-15');
   // Returns: { isPeak: true, name: 'Mùa hè', multiplier: 1.30, reason: 'học sinh nghỉ hè' }
-*/
- * 
- * Priority: Override > Holiday > Season > null
- * 
- * @param {Date|string} departureDate - Ngày khởi hành
- * @returns {Promise<object|null>} - Season info hoặc null nếu off-peak
- * 
- * @example
- * const info = await getSeasonInfo('2026-06-15');
- * // Returns: { isPeak: true, name: 'Mùa hè', multiplier: 1.30, reason: 'học sinh nghỉ hè' }
- */
+============================================================*/
+// @param {Date|string} departureDate - Ngày khởi hành
+// @returns {Promise<object|null>} - Season info hoặc null nếu off-peak
 async function getSeasonInfo(departureDate) {
   try {
     const [override, seasons, holidays] = await Promise.all([
@@ -315,30 +316,38 @@ async function getSeasonInfo(departureDate) {
       };
     }
     
-    // 2. Check mùa cao điểm (ưu tiên season có multiplier cao nhất)
-    let highestSeason = null;
-    let highestMultiplier = 0;
+    // 2. Check mùa cao điểm (ưu tiên theo priority DESC, fallback multiplier cao hơn)
+    let matchedSeason = null;
+    let matchedMultiplier = 0;
     
     for (const season of seasons) {
-      if (isDateInSeason(departureDate, season)) {
-        const multiplier = parseFloat(season.multiplier);
-        if (multiplier > highestMultiplier) {
-          highestMultiplier = multiplier;
-          highestSeason = season;
-        }
+      if (!isDateInSeason(departureDate, season)) continue;
+
+      const multiplier = parseFloat(season.multiplier);
+      if (!matchedSeason) {
+        matchedSeason = season;
+        matchedMultiplier = multiplier;
+        continue;
+      }
+
+      const currentPriority = Number(season.priority || 0);
+      const matchedPriority = Number(matchedSeason.priority || 0);
+      if (currentPriority > matchedPriority || (currentPriority === matchedPriority && multiplier > matchedMultiplier)) {
+        matchedSeason = season;
+        matchedMultiplier = multiplier;
       }
     }
     
-    if (highestSeason) {
+    if (matchedSeason) {
       const approaching = await isApproachingPeakSeason(departureDate);
       
       return {
-        isPeak: highestMultiplier >= 1.20,
+        isPeak: matchedMultiplier >= 1.20,
         isApproaching: approaching.isApproaching && !approaching.isInside,
         isInside: approaching.isInside,
-        name: highestSeason.name,
-        multiplier: highestMultiplier,
-        reason: highestSeason.reason,
+        name: matchedSeason.name,
+        multiplier: matchedMultiplier,
+        reason: matchedSeason.reason,
         type: 'season',
         daysUntil: daysUntil(departureDate),
         approachingInfo: approaching
@@ -354,30 +363,22 @@ async function getSeasonInfo(departureDate) {
   }
 }
 
-/*
-============================================================
+/*============================================================
 HELPER: Tính season multiplier cho pricing
-============================================================
-*/
- * 
- * @param {Date|string} departureDate - Ngày khởi hành
- * @returns {Promise<number>} - Multiplier (1.0 = off-peak)
- */
+@param {Date|string} departureDate - Ngày khởi hành
+@returns {Promise<number>} - Multiplier (1.0 = off-peak)
+============================================================*/
 async function getSeasonMultiplier(departureDate) {
   const info = await getSeasonInfo(departureDate);
   return info ? info.multiplier : 1.0;
 }
 
-/*
-============================================================
+/*============================================================
 HELPER: Kiểm tra nhanh - có nên alert không
-============================================================
 Chỉ return true khi CÓ mùa cao điểm/ngày lễ VÀ đang tiến vào peak
-*/
- * 
- * @param {Date|string} departureDate - Ngày khởi hành
- * @returns {Promise<boolean>}
- */
+@param {Date|string} departureDate - Ngày khởi hành
+@returns {Promise<boolean>}
+============================================================*/
 async function shouldAlert(departureDate) {
   const info = await getSeasonInfo(departureDate);
   

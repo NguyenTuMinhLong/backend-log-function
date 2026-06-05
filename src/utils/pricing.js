@@ -1,5 +1,7 @@
 'use strict';
 
+const seasonService = require('../services/season.service');
+
 // Day-of-week multiplier
 const getDayOfWeekMult = (depTime) => {
   const day = new Date(depTime).getDay();
@@ -36,9 +38,22 @@ const getDemandMult = (availableSeats, totalSeats) => {
   return 0.97;
 };
 
-const applyDynamicPricing = (basePrice, availableSeats, totalSeats, depTime) => {
-  const mult = getDayOfWeekMult(depTime) * getAdvanceMult(depTime) * getDemandMult(availableSeats, totalSeats);
+const applyDynamicPricing = (basePrice, availableSeats, totalSeats, depTime, seasonMultiplier = 1.0) => {
+  const mult = getDayOfWeekMult(depTime) * getAdvanceMult(depTime) * getDemandMult(availableSeats, totalSeats) * seasonMultiplier;
   return Math.round(basePrice * mult / 1000) * 1000;
 };
 
-module.exports = { getDayOfWeekMult, getAdvanceMult, getDemandMult, applyDynamicPricing };
+// Async version that fetches season multiplier automatically
+const applyDynamicPricingWithSeason = async (basePrice, availableSeats, totalSeats, depTime) => {
+  const seasonMultiplier = await seasonService.getSeasonMultiplier(depTime);
+  return applyDynamicPricing(basePrice, availableSeats, totalSeats, depTime, seasonMultiplier);
+};
+
+module.exports = {
+  getDayOfWeekMult,
+  getAdvanceMult,
+  getDemandMult,
+  applyDynamicPricing,
+  applyDynamicPricingWithSeason,
+  seasonService,
+};

@@ -1,11 +1,11 @@
 'use strict';
 
 const seasonService = require('./season.service');
-const { 
-  getDayOfWeekMult, 
-  getAdvanceMult, 
-  getDemandMult, 
-  applyDynamicPricing 
+const {
+  getDayOfWeekMult,
+  getAdvanceMult,
+  getDemandMult,
+  applyDynamicPricing,
 } = require('../utils/pricing');
 
 /*
@@ -26,21 +26,29 @@ Alert Levels:
 // Threshold để trigger alert (% change)
 const ALERT_THRESHOLD_PERCENT = 5;
 
+const buildDynamicPrice = async (basePrice, availableSeats, totalSeats, departureTime) => {
+  const seasonMultiplier = await seasonService.getSeasonMultiplier(departureTime);
+  return applyDynamicPricing(basePrice, availableSeats, totalSeats, departureTime, seasonMultiplier);
+};
+
 /**
  * Tính price breakdown chi tiết
  */
-function calculatePriceBreakdown(basePrice, availableSeats, totalSeats, departureTime) {
+async function calculatePriceBreakdown(basePrice, availableSeats, totalSeats, departureTime) {
   const dayOfWeekMult = getDayOfWeekMult(departureTime);
   const advanceMult = getAdvanceMult(departureTime);
   const demandMult = getDemandMult(availableSeats, totalSeats);
+  const seasonMult = await seasonService.getSeasonMultiplier(departureTime);
+  const calculatedPrice = applyDynamicPricing(basePrice, availableSeats, totalSeats, departureTime, seasonMult);
   
   return {
     basePrice,
     dayOfWeekMult,
     advanceMult,
     demandMult,
-    totalMultiplier: dayOfWeekMult * advanceMult * demandMult,
-    calculatedPrice: Math.round(basePrice * dayOfWeekMult * advanceMult * demandMult / 1000) * 1000
+    seasonMult,
+    totalMultiplier: dayOfWeekMult * advanceMult * demandMult * seasonMult,
+    calculatedPrice,
   };
 }
 
@@ -87,26 +95,14 @@ function generateRecommendation(level, seasonInfo) {
   return recommendations[level] || null;
 }
 
-/*
-============================================================
+/*============================================================
 MAIN FUNCTION: Generate price alert cho 1 flight
 ============================================================
 
 Ví dụ:
   const alert = await generatePriceAlert(flight, '2026-06-15');
   // Returns: { type: 'PRICE_INCREASE', level: 'high', percentage: 30, message: '...' }
-*/
- * 
- * @param {object} flight - Flight object từ DB
- * @param {Date|string} departureDate - Ngày khởi hành (optional, override flight.departure_time)
- * @param {Date|string} currentDate - Ngày hiện tại (optional, default: now)
- * 
- * @returns {Promise<object|null>} - Alert object hoặc null nếu không alert
- * 
- * @example
- * const alert = await generatePriceAlert(flight, '2026-06-15');
- * // Returns: { type: 'PRICE_INCREASE', level: 'high', percentage: 30, message: '...' }
- */
+============================================================*/
 async function generatePriceAlert(flight, departureDate = null, currentDate = null) {
   try {
     // 1. Xác định departure date
@@ -127,7 +123,7 @@ async function generatePriceAlert(flight, departureDate = null, currentDate = nu
     }
     
     // 3. Tính price breakdown chi tiết
-    const breakdown = calculatePriceBreakdown(basePrice, availableSeats, totalSeats, depDate);
+    const breakdown = await calculatePriceBreakdown(basePrice, availableSeats, totalSeats, depDate);
     
     // 4. Tính % change so với base price
     const currentPrice = breakdown.calculatedPrice;
@@ -166,6 +162,7 @@ async function generatePriceAlert(flight, departureDate = null, currentDate = nu
         dayOfWeek: breakdown.dayOfWeekMult,
         advanceBooking: breakdown.advanceMult,
         demand: breakdown.demandMult,
+        season: breakdown.seasonMult,
         totalMultiplier: parseFloat(breakdown.totalMultiplier.toFixed(2))
       },
       generatedAt: new Date().toISOString()
@@ -179,18 +176,11 @@ async function generatePriceAlert(flight, departureDate = null, currentDate = nu
   }
 }
 
-/*
-============================================================
+/*============================================================
 BATCH FUNCTION: Generate alerts cho nhiều flights
 ============================================================
 Dùng trong search results
-*/
- * 
- * @param {Array} flights - Array of flight objects
- * @param {Date|string} currentDate - Ngày hiện tại (optional)
- * 
- * @returns {Promise<Array>} - Array of flights với price_alert field
- */
+============================================================*/
 async function generatePriceAlertsForFlights(flights, currentDate = null) {
   if (!flights || flights.length === 0) {
     return [];
@@ -208,16 +198,12 @@ async function generatePriceAlertsForFlights(flights, currentDate = null) {
   }));
 }
 
-/*
-============================================================
+/*============================================================
 ANALYSIS FUNCTION: Chi tiết phân tích giá
-============================================================
 Dùng cho detail page
-*/
- * 
- * @param {object} flight - Flight object
- * @returns {Promise<object>}
- */
+@param {object} flight - Flight object
+@returns {Promise<object>}
+============================================================*/
 async function getDetailedAnalysis(flight) {
   const departureDate = flight.departure_time || flight.departure_date;
   
@@ -232,7 +218,7 @@ async function getDetailedAnalysis(flight) {
   const totalSeats = flight.total_seats ?? flight.seats_total ?? 1;
   const basePrice = flight.base_price || flight.price || 0;
   
-  const breakdown = calculatePriceBreakdown(basePrice, availableSeats, totalSeats, departureDate);
+  const breakdown = await calculatePriceBreakdown(basePrice, availableSeats, totalSeats, departureDate);
   
   return {
     flightId: flight.id,

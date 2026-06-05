@@ -70,10 +70,9 @@ const getBoardingMinutes = (depTime, arrTime) => {
 // Tạo gate tự động theo sân bay
 // Vietnam → số thường
 // Quốc tế → chữ + số (theo hub)
- * - Vietnam → chỉ số (tự động đúng với mọi sân bay VN mới thêm vào)
- * - Quốc tế → chữ + số (theo chuẩn phổ biến của hub đó)
- * Hash từ flight_number → cùng chuyến luôn ra cùng gate
- */
+// Vietnam → chỉ số (tự động đúng với mọi sân bay VN mới thêm vào)
+// Quốc tế → chữ + số (theo chuẩn phổ biến của hub đó)
+// Hash từ flight_number → cùng chuyến luôn ra cùng gate
 const generateGate = (flightNumber, departureAirport, departureCountry) => {
   const fn      = (flightNumber     || '').toUpperCase();
   const dep     = (departureAirport || '').toUpperCase();

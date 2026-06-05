@@ -52,7 +52,7 @@ const browseFlights = async (limit = 40) => {
     ORDER BY RANDOM()
     LIMIT $1
   `, [limit]);
-  return formatFlights(rows, 1, 0, 0);
+  return await formatFlights(rows, 1, 0, 0);
 };
 
 const getFlightsByAirline = async (airlineCode, seatClass = 'economy') => {
@@ -80,7 +80,7 @@ const getFlightsByAirline = async (airlineCode, seatClass = 'economy') => {
     ORDER BY f.departure_time ASC
     LIMIT 200
   `, [airlineCode.toUpperCase(), cls]);
-  return formatFlights(rows, 1, 0, 0);
+  return await formatFlights(rows, 1, 0, 0);
 };
 
 // Gợi ý chuyến bay cho user dựa trên route cụ thể
@@ -128,7 +128,7 @@ const suggestFlightsForRoute = async (limit, fromAirport, toAirport) => {
     LIMIT $1`;
 
   const { rows } = await pool.query(query, [limit, fromAirport, toAirport]);
-  return formatFlights(rows, 1, 0, 0);
+  return await formatFlights(rows, 1, 0, 0);
 };
 
 // Format thời gian bay thành string (VD: "2h30m")
@@ -159,14 +159,22 @@ const buildBaggageOptions = (extraBaggagePrice) => {
 };
 
 // Format danh sách chuyến bay thành response
-// Áp dụng dynamic pricing (theo ngày, weekend, demand)
+// Áp dụng dynamic pricing (theo ngày, weekend, demand, season)
 const { applyDynamicPricing } = require('../utils/pricing');
+const seasonService = require('./season.service');
 
-const formatFlights = (rows, adults, children, infants) =>
-  rows.map((r) => {
+const getSeasonAwarePrice = async (basePrice, availableSeats, totalSeats, departureTime) => {
+  const seasonMultiplier = await seasonService.getSeasonMultiplier(departureTime);
+  return applyDynamicPricing(basePrice, availableSeats, totalSeats, departureTime, seasonMultiplier);
+};
+
+const formatFlights = async (rows, adults, children, infants) => {
+  const results = await Promise.all(rows.map(async (r) => {
     const base        = parseFloat(r.base_price) || 0;
     const extraPrice  = parseFloat(r.extra_baggage_price) || 0;
-    const price       = applyDynamicPricing(base, r.available_seats, r.total_seats, r.departure_time);
+    const seasonInfo  = await seasonService.getSeasonInfo(r.departure_time);
+    const seasonMult  = seasonInfo ? seasonInfo.multiplier : 1.0;
+    const price       = applyDynamicPricing(base, r.available_seats, r.total_seats, r.departure_time, seasonMult);
 
     return {
       flight_id:     r.flight_id,
@@ -186,6 +194,7 @@ const formatFlights = (rows, adults, children, infants) =>
       },
       duration_minutes: r.duration_minutes,
       duration_label:   formatDuration(r.duration_minutes),
+      season_info: seasonInfo,
       seat: {
         class:                 r.seat_class,
         available_seats:       r.available_seats,
@@ -203,7 +212,9 @@ const formatFlights = (rows, adults, children, infants) =>
         total_price: calcTotalPrice(price, adults, children, infants),
       },
     };
-  });
+  }));
+  return results;
+};
 
 // Validate tham số tìm kiếm
 
@@ -224,51 +235,6 @@ const validateSearchParams = ({ departure_code, arrival_code, departure_date, ad
   if (seat_class && !['economy', 'business', 'first'].includes(seat_class.toLowerCase())) {
     throw new Error("seat_class phải là economy, business hoặc first");
   }
-};
-
-// Query database tìm chuyến bay với các filter
-  departure_code, arrival_code, departure_date,
-  adults, children, infants,
-  seat_class, sort_by = "price_asc",
-  min_price, max_price, airline_code,
-  departure_city, arrival_city,
-}) => {
-  const a   = parseInt(adults) || 1;
-  const c   = parseInt(children) || 0;
-  const cls = seat_class.toLowerCase();
-  const seatsNeeded = a + c;
-
-  const sortMap = {
-    price_asc:     "fs.base_price ASC",
-    price_desc:    "fs.base_price DESC",
-    duration_asc:  "f.duration_minutes ASC",
-    departure_asc: "f.departure_time ASC",
-  };
-  const orderBy = sortMap[sort_by] || sortMap["price_asc"];
-
-  const conditions = [];
-  const values     = [];
-  let   idx        = 1;
-
-  conditions.push(`dep.code = $${idx++}`);            values.push(departure_code.toUpperCase());
-  conditions.push(`arr.code = $${idx++}`);            values.push(arrival_code.toUpperCase());
-  conditions.push(`DATE(f.departure_time) = $${idx++}`); values.push(departure_date);
-  conditions.push(`fs.class = $${idx++}`);               values.push(cls);
-  conditions.push(`fs.available_seats >= $${idx++}`);    values.push(seatsNeeded);
-  conditions.push(`f.status = 'scheduled'`);
-  conditions.push(`f.is_active = TRUE`);
-
-  if (min_price !== undefined && min_price !== "") { conditions.push(`fs.base_price >= $${idx++}`); values.push(parseFloat(min_price)); }
-  if (max_price !== undefined && max_price !== "") { conditions.push(`fs.base_price <= $${idx++}`); values.push(parseFloat(max_price)); }
-  if (airline_code)   { conditions.push(`al.code = $${idx++}`);                         values.push(airline_code.toUpperCase()); }
-  if (departure_city) { conditions.push(`LOWER(dep.city) LIKE LOWER($${idx++})`);    values.push(`%${departure_city}%`); }
-  if (arrival_city)   { conditions.push(`LOWER(arr.city) LIKE LOWER($${idx++})`);    values.push(`%${arrival_city}%`); }
-
-  const result = await pool.query(
-    QF.SEARCH_FLIGHTS(conditions.join(" AND "), orderBy),
-    values
-  );
-  return result.rows;
 };
 
 // ─── Các functions chính ─────────────────────────────────────────────
@@ -297,7 +263,7 @@ const searchFlights = async (params) => {
   };
 
   const outboundRows    = await queryFlights(baseParams);
-  let outboundFlights = formatFlights(outboundRows, a, c, i);
+  let outboundFlights = await formatFlights(outboundRows, a, c, i);
   
   // Generate price alerts for outbound flights
   outboundFlights = await generatePriceAlertsForFlights(outboundFlights);
@@ -310,7 +276,7 @@ const searchFlights = async (params) => {
       arrival_code:   departure_code,
       departure_date: return_date,
     });
-    returnFlights = formatFlights(returnRows, a, c, i);
+    returnFlights = await formatFlights(returnRows, a, c, i);
     
     // Generate price alerts for return flights
     returnFlights = await generatePriceAlertsForFlights(returnFlights);
@@ -346,12 +312,10 @@ const getPopularFlights = async (fromAirport, toAirport, limit) => {
 // Layout chuẩn:
 //   - first/business: 4 ghế/hàng (A B _ C D)
 //   - economy: 6 ghế/hàng (A B C _ D E F)
- *
- * @param {string}  seatClass   - "first" | "business" | "economy"
- * @param {number}  totalSeats  - Tổng số ghế của class này trên chuyến bay
- * @param {number}  startRow    - Số hàng bắt đầu (để ghép nhiều class)
- * @returns {{ rows: object[], columns: string[], seatsPerRow: number, lastRow: number }}
- */
+// @param {string}  seatClass   - "first" | "business" | "economy"
+// @param {number}  totalSeats  - Tổng số ghế của class này trên chuyến bay
+// @param {number}  startRow    - Số hàng bắt đầu (để ghép nhiều class)
+// @returns {{ rows: object[], columns: string[], seatsPerRow: number, lastRow: number }}
 const buildSeatLayout = (seatClass, totalSeats, startRow = 1) => {
   const layoutMap = {
     first:    { columns: ["A", "B", "C", "D"], seatsPerRow: 4 },
@@ -448,7 +412,6 @@ const getSeatMap = async (flightId, params = {}) => {
 // Tính vị trí máy bay hiện tại (Flight Tracker)
 // Sử dụng linear interpolation giữa 2 sân bay
 // progress = 0 → vừa cất cánh, progress = 1 → vừa hạ cánh
- */
 const getFlightPosition = async (flightId) => {
   // 1. Lấy thông tin chuyến bay + tọa độ 2 sân bay
   const result = await pool.query(QF.SELECT_FLIGHT_POSITION, [flightId]);
@@ -545,12 +508,34 @@ const getFlightById = async (flightId, params = {}) => {
     SELECT * FROM flight_seats WHERE flight_id = $1 ORDER BY base_price
   `, [flightId]);
 
+  const seats = await Promise.all(seatsResult.rows.map(async (s) => {
+    const dynamicPrice = await getSeasonAwarePrice(
+      parseFloat(s.base_price) || 0,
+      s.available_seats,
+      s.total_seats,
+      flight.departure_time
+    );
+
+    return {
+      ...s,
+      base_price: dynamicPrice,
+      total_price: calcTotalPrice(dynamicPrice, a, c, i),
+    };
+  }));
+
+  const detailedAnalysis = await getDetailedAnalysis({
+    id: flight.flight_id || flight.id,
+    departure_time: flight.departure_time,
+    available_seats: seats[0]?.available_seats,
+    total_seats: seats[0]?.total_seats,
+    base_price: parseFloat(seats[0]?.base_price) || 0,
+  });
+
   return {
     ...flight,
-    seats: seatsResult.rows.map(s => ({
-      ...s,
-      total_price: calcTotalPrice(parseFloat(s.base_price), a, c, i),
-    })),
+    season_info: await seasonService.getSeasonInfo(flight.departure_time),
+    price_analysis: detailedAnalysis,
+    seats,
   };
 };
 
@@ -573,7 +558,7 @@ const getAlternativeFlights = async (flightId, params = {}) => {
     flightId, orig.departure_code, orig.arrival_code, seat_class, seatsNeeded, departureDate
   ]);
 
-  return formatFlights(result.rows, a, c, i);
+  return await formatFlights(result.rows, a, c, i);
 };
 
 // Tìm combos chuyến bay (direct + 1-stop)
@@ -609,9 +594,9 @@ const rankCombo = (combo) => {
   };
 };
 
-const buildComboLeg = (row, adults, children, infants) => {
+const buildComboLeg = async (row, adults, children, infants) => {
   const base = parseFloat(row.base_price) || 0;
-  const price = applyDynamicPricing(base, row.available_seats, row.total_seats, row.departure_time);
+  const price = await getSeasonAwarePrice(base, row.available_seats, row.total_seats, row.departure_time);
 
   return {
     flight_id: row.flight_id,
@@ -641,6 +626,7 @@ const buildComboLeg = (row, adults, children, infants) => {
     },
     duration_minutes: row.duration_minutes,
     duration_label: formatDuration(row.duration_minutes),
+    season_info: await seasonService.getSeasonInfo(row.departure_time),
     seat: {
       class: row.seat_class,
       available_seats: row.available_seats,
@@ -686,11 +672,11 @@ const getFlightCombos = async (params = {}) => {
     departure_date,
   ]);
 
-  const directCombos = directRows.rows.map((row) => ({
+  const directCombos = await Promise.all(directRows.rows.map(async (row) => ({
     stops: 0,
     total_layover_minutes: 0,
-    legs: [buildComboLeg(row, a, c, i)],
-  }));
+    legs: [await buildComboLeg(row, a, c, i)],
+  })));
 
   const combos = [...directCombos];
 
@@ -720,10 +706,13 @@ const getFlightCombos = async (params = {}) => {
         const layoverMinutes = minutesBetween(leg1.arrival_time, leg2.departure_time);
         if (layoverMinutes < parseInt(min_layover_minutes) || layoverMinutes > parseInt(max_layover_minutes)) continue;
 
+        const firstLeg = await buildComboLeg(leg1, a, c, i);
+        const secondLeg = await buildComboLeg(leg2, a, c, i);
+
         combos.push({
           stops: 1,
           total_layover_minutes: layoverMinutes,
-          legs: [buildComboLeg(leg1, a, c, i), buildComboLeg(leg2, a, c, i)],
+          legs: [firstLeg, secondLeg],
         });
       }
     }
@@ -756,7 +745,7 @@ const getPriceCalendar = async (params = {}) => {
   const dateMap = {};
   for (const row of result.rows) {
     const date = new Date(row.flight_date).toISOString().slice(0, 10);
-    const dynamicPrice = applyDynamicPricing(
+    const dynamicPrice = await getSeasonAwarePrice(
       Number(row.base_price),
       row.available_seats,
       row.total_seats,
@@ -772,13 +761,10 @@ const getPriceCalendar = async (params = {}) => {
 module.exports = {
   browseFlights,
   getFlightsByAirline,
-  recommendFlights,
   searchFlights,
   getAirports,
   getAirlines,
   getFlightById,
-  getAlternativeFlights,
-  getPriceCalendar,
   getSeatMap,
   getFlightPosition,
 };
