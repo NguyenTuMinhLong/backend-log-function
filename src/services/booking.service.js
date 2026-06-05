@@ -344,9 +344,24 @@ const getBookingDetail = async (bookingCode, userId = null) => {
   const totalPrice  = parseFloat(b.total_price);
   const basePrice   = parseFloat(b.base_price);
   const baggageTotal = Math.max(totalPrice - basePrice, 0);
-  const finalAmount = paymentInfo ? parseFloat(paymentInfo.final_amount || totalPrice) : totalPrice;
   const discountAmt = paymentInfo ? parseFloat(paymentInfo.discount_amount || 0) : 0;
   const grandTotal  = totalPrice + ancillaryTotal;
+
+  // Tính tổng tất cả các payment thành công (gốc + phụ phí đổi ngày nếu có)
+  let finalAmount;
+  try {
+    const allPaidResult = await pool.query(
+      `SELECT COALESCE(SUM(final_amount), 0) AS total_paid
+       FROM payments
+       WHERE booking_id = $1
+         AND status IN ('SUCCESS', 'PAID', 'COMPLETED', 'CONFIRMED')`,
+      [b.id]
+    );
+    const totalPaid = parseFloat(allPaidResult.rows[0]?.total_paid || 0);
+    finalAmount = totalPaid > 0 ? totalPaid : (paymentInfo ? parseFloat(paymentInfo.final_amount || totalPrice) : totalPrice);
+  } catch (_) {
+    finalAmount = paymentInfo ? parseFloat(paymentInfo.final_amount || totalPrice) : totalPrice;
+  }
 
   return {
     booking_code: b.booking_code,
@@ -394,6 +409,14 @@ const getBookingDetail = async (bookingCode, userId = null) => {
       final_amount:    finalAmount,
       discount_amount: discountAmt,
     },
+    // Thông tin đổi ngày (nếu có)
+    date_change: b.dc_request_code ? {
+      request_code:    b.dc_request_code,
+      original_price:  parseFloat(b.dc_original_price || 0),
+      surcharge:       parseFloat(b.dc_surcharge || 0),
+      old_seat_class:  b.dc_old_seat_class,
+      new_seat_class:  b.dc_new_seat_class,
+    } : null,
   };
 };
 

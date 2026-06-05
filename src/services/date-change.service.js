@@ -370,7 +370,7 @@ const confirmDateChange = async (email, otp, requestCode) => {
   await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', requestCode]);
 
   if (autoApprove) {
-    await approveDateChange(null, requestCode, 'Auto-approved sau OTP verification');
+    await approveDateChange(null, requestCode, 'Auto-approved');
   }
 
 
@@ -582,7 +582,7 @@ const confirmDateChangePayment = async (paymentCode) => {
   await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', request.request_code]);
 
   // 7. Execute the actual date change (release old seats, reserve new seats, update booking)
-  await approveDateChange(null, request.request_code, 'Payment confirmed automatically');
+  await approveDateChange(null, request.request_code, 'Payment confirmed');
 
   // 8. Mark paid_at
   await pool.query(`UPDATE date_change_requests SET paid_at = NOW() WHERE request_code = $1`, [request.request_code]);
@@ -808,16 +808,35 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
 
     // === GHI NOTE PHỤ THU NẾU USER CẦN TRẢ THÊM ===
     const surchargeAmount = Math.max(0, ticketDiff - cancelledAncillaryTotal);
-    const finalAdminNotes = surchargeAmount > 0
-      ? `${adminNotes ? adminNotes + ' | ' : ''}PHỤ THU: ${surchargeAmount.toLocaleString('vi-VN')} VND chưa thu từ khách`
-      : adminNotes;
+    const surchargeNote = surchargeAmount > 0
+      ? `Phu thu: ${surchargeAmount.toLocaleString('vi-VN')} VND`
+      : null;
+    const finalAdminNotes = [adminNotes, surchargeNote].filter(Boolean).join(' | ') || null;
 
-    // Update booking flight & status
+    // Update booking: chuyến mới + đổi status → date_changed
     await client.query(QCD.UPDATE_BOOKING_FLIGHT, [
       request.new_flight_id,
       request.new_seat_class,
       request.booking_id,
     ]);
+    await client.query(
+      `UPDATE bookings SET status = 'date_changed', updated_at = NOW() WHERE id = $1`,
+      [request.booking_id]
+    );
+
+    // Cập nhật final_amount của payment gốc = tổng tiền mới (bao gồm surcharge)
+    await client.query(`
+      UPDATE payments
+      SET final_amount = $1, updated_at = NOW()
+      WHERE id = (
+        SELECT id FROM payments
+        WHERE booking_id = $2
+          AND payment_code NOT LIKE 'PAY-DC-%'
+          AND status IN ('SUCCESS', 'PAID', 'COMPLETED', 'CONFIRMED')
+        ORDER BY created_at ASC
+        LIMIT 1
+      )
+    `, [updatedBookingTotal, request.booking_id]);
 
     await client.query(QCD.UPDATE_DATE_CHANGE_STATUS, [
       'approved',
