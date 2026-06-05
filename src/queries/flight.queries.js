@@ -518,8 +518,8 @@ const SELECT_FLIGHT_POSITION = `
   SELECT
     f.id, f.flight_number, f.departure_time, f.arrival_time,
     f.duration_minutes, f.status,
-    dep.code AS dep_code, dep.city AS dep_city, dep.latitude AS dep_lat, dep.longitude AS dep_lng,
-    arr.code AS arr_code, arr.city AS arr_city, arr.latitude AS arr_lat, arr.longitude AS arr_lng
+    dep.code AS dep_code, dep.city AS dep_city, dep.lat AS dep_lat, dep.lng AS dep_lng,
+    arr.code AS arr_code, arr.city AS arr_city, arr.lat AS arr_lat, arr.lng AS arr_lng
   FROM flights f
   JOIN airports dep ON dep.id = f.departure_airport_id
   JOIN airports arr ON arr.id = f.arrival_airport_id
