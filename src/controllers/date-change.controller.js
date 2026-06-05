@@ -130,10 +130,8 @@ const rejectDateChange = async (req, res) => {
   }
 };
 
-// =========================================================
-// CONFIRM DATE CHANGE (After OTP Verification)
-// =========================================================
-
+// ==================================================// CONFIRM DATE CHANGE (After OTP Verification)
+// ==================================================
 const confirmDateChange = async (req, res) => {
   try {
     const { email, otp, requestCode } = req.body;
@@ -150,10 +148,20 @@ const confirmDateChange = async (req, res) => {
   }
 };
 
+const getAdminDateChanges = async (req, res) => {
+  try {
+    const { status = '', page = 1, limit = 15 } = req.query;
+    const result = await dateChangeService.getAdminDateChanges(status, page, limit);
+    res.json({ message: 'Lấy danh sách đổi ngày thành công', data: result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
 // =========================================================
 // DATE CHANGE PAYMENT ENDPOINTS
 // =========================================================
-
+// ==================================================
 const createDateChangePayment = async (req, res) => {
   try {
     const requestCode = req.params.requestCode?.toUpperCase();
@@ -216,6 +224,7 @@ module.exports = {
   approveDateChange,
   rejectDateChange,
   confirmDateChange,
+  getAdminDateChanges,
   createDateChangePayment,
   getDateChangePaymentStatus,
   cancelDateChangePayment,

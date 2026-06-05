@@ -541,19 +541,44 @@ const syncTierAfterChange = async (userId, direction = 'both') => {
     WHERE user_id = $2
   `, [tierResult.rows[0].id, userId]);
 
-  // Notify khi tụt tier
+  // Lấy tên tier cũ để so sánh
+  const oldTierResult = await db.query(`SELECT name FROM loyalty_tiers WHERE id = $1`, [currentTierId]);
+  const oldTierName = oldTierResult.rows[0]?.name || '';
+
   if (!isUpgrade) {
+    // ── Tụt tier: chỉ ghi notification ──
     await db.query(`
       INSERT INTO loyalty_notifications (user_id, type, message, created_at)
       VALUES ($1, 'tier_downgrade', $2, NOW())
-    `, [
-      userId,
-      `Hạng thành viên của bạn đã thay đổi xuống ${correctTier.name}.`,
-    ]);
+    `, [userId, `Hạng thành viên của bạn đã thay đổi xuống ${correctTier.name}.`]);
+    console.log(`[Loyalty] User ${userId} tụt tier ${oldTierName} → ${correctTier.name}`);
 
-    console.log(`[Loyalty] User ${userId} tụt tier → ${correctTier.name}`);
   } else {
-    console.log(`[Loyalty] User ${userId} lên tier → ${correctTier.name}`);
+    // ── Lên tier: ghi notification + gửi email chúc mừng ──
+    await db.query(`
+      INSERT INTO loyalty_notifications (user_id, type, message, created_at)
+      VALUES ($1, 'tier_upgrade', $2, NOW())
+    `, [userId, `Chúc mừng! Bạn đã thăng hạng lên ${correctTier.name}.`]);
+
+    // Gửi email — lấy thông tin user
+    try {
+      const userResult = await db.query(
+        `SELECT full_name, email FROM users WHERE id = $1`, [userId]
+      );
+      const user = userResult.rows[0];
+      if (user?.email) {
+        const { sendLoyaltyTierUpgradeEmail } = require('../utils/mailer');
+        sendLoyaltyTierUpgradeEmail(user.email, {
+          fullName: user.full_name || 'Hành khách',
+          oldTier:  oldTierName,
+          newTier:  correctTier.name,
+        }).catch(err => console.error('[Loyalty] Upgrade email failed:', err.message));
+      }
+    } catch (emailErr) {
+      console.error('[Loyalty] Could not send upgrade email:', emailErr.message);
+    }
+
+    console.log(`[Loyalty] User ${userId} thăng tier ${oldTierName} → ${correctTier.name}`);
   }
 };
 

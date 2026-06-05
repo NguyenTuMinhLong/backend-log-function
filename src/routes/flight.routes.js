@@ -12,7 +12,6 @@ router.get("/combo",           flightController.getFlightCombos);
 router.get("/price-calendar",  flightController.getPriceCalendar);
 router.get("/recommendations", flightController.getFlightRecommendations);
 router.get("/browse",          flightController.browseFlights);
-router.get("/price-analysis",  flightController.getPriceAnalysis); // Price analysis endpoint
 router.get("/:id/seat-map",    flightController.getSeatMap);
 router.get("/:id/position",    flightController.getFlightPosition);
 router.get("/:id/price-analysis", flightController.getFlightPriceAnalysis); // Flight-specific price analysis

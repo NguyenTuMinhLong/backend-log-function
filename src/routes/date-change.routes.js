@@ -33,6 +33,16 @@ router.get('/bookings/:bookingCode/date-changes', dateChangeController.getBookin
  */
 router.get('/my', authenticate, dateChangeController.getMyDateChanges);
 
+// =========================================================
+// ADMIN ROUTES — đăng ký TRƯỚC /:requestCode để tránh conflict
+// =========================================================
+
+/**
+ * GET /api/date-changes/admin
+ * Admin lấy toàn bộ danh sách (filter status, phân trang)
+ */
+router.get('/admin', authenticate, dateChangeController.getAdminDateChanges);
+
 /**
  * GET /api/date-changes/:requestCode
  * Xem chi tiết một yêu cầu đổi ngày bay
@@ -44,10 +54,6 @@ router.get('/:requestCode', dateChangeController.getDateChangeDetail);
  * User hủy yêu cầu đổi ngày bay
  */
 router.delete('/:requestCode', authenticate, dateChangeController.cancelDateChangeRequest);
-
-// =========================================================
-// ADMIN ROUTES
-// =========================================================
 
 /**
  * POST /api/date-changes/:requestCode/approve

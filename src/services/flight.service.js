@@ -55,6 +55,34 @@ const browseFlights = async (limit = 40) => {
   return formatFlights(rows, 1, 0, 0);
 };
 
+const getFlightsByAirline = async (airlineCode, seatClass = 'economy') => {
+  const cls = (seatClass || 'economy').toLowerCase();
+  const { rows } = await pool.query(`
+    SELECT
+      f.id AS flight_id, f.flight_number, f.departure_time, f.arrival_time,
+      f.duration_minutes, f.status,
+      al.id AS airline_id, al.code AS airline_code, al.name AS airline_name,
+      al.logo_url AS airline_logo, al.logo_dark AS airline_logo_dark, al.logo_light AS airline_logo_light,
+      dep.code AS departure_code, dep.city AS departure_city, dep.name AS departure_airport_name,
+      arr.code AS arrival_code, arr.city AS arrival_city, arr.name AS arrival_airport_name,
+      fs.class AS seat_class, fs.total_seats, fs.available_seats, fs.base_price,
+      fs.baggage_included_kg, fs.carry_on_kg, fs.extra_baggage_price
+    FROM flights f
+    JOIN airlines     al  ON al.id  = f.airline_id
+    JOIN airports     dep ON dep.id = f.departure_airport_id
+    JOIN airports     arr ON arr.id = f.arrival_airport_id
+    JOIN flight_seats fs  ON fs.flight_id = f.id AND fs.class = $2
+    WHERE f.status = 'scheduled'
+      AND f.is_active = true
+      AND f.departure_time > NOW()
+      AND fs.available_seats > 0
+      AND al.code = $1
+    ORDER BY f.departure_time ASC
+    LIMIT 200
+  `, [airlineCode.toUpperCase(), cls]);
+  return formatFlights(rows, 1, 0, 0);
+};
+
 // Gợi ý chuyến bay cho user dựa trên route cụ thể
 const suggestFlightsForRoute = async (limit, fromAirport, toAirport) => {
   const query = `
@@ -723,11 +751,27 @@ const getPriceCalendar = async (params = {}) => {
     from.toUpperCase(), to.toUpperCase(), seat_class, startDate, endDateStr, a
   ]);
 
-  return result.rows;
+  // Tính min dynamic price thật sự cho mỗi ngày
+  // (không dùng DISTINCT ON vì min base_price ≠ min dynamic price)
+  const dateMap = {};
+  for (const row of result.rows) {
+    const date = new Date(row.flight_date).toISOString().slice(0, 10);
+    const dynamicPrice = applyDynamicPricing(
+      Number(row.base_price),
+      row.available_seats,
+      row.total_seats,
+      row.departure_time
+    );
+    if (!dateMap[date] || dynamicPrice < dateMap[date]) {
+      dateMap[date] = dynamicPrice;
+    }
+  }
+  return Object.entries(dateMap).map(([flight_date, min_price]) => ({ flight_date, min_price }));
 };
 
-module.exports = { 
+module.exports = {
   browseFlights,
+  getFlightsByAirline,
   recommendFlights,
   searchFlights,
   getAirports,

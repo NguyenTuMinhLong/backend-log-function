@@ -298,4 +298,16 @@ module.exports = {
       res.status(500).json({ error: 'Lỗi server' });
     }
   },
+  getFlightsByAirline: async (req, res) => {
+    try {
+      const { code } = req.params;
+      const { seat_class = 'economy' } = req.query;
+      if (!code) return res.status(400).json({ error: 'Thiếu airline code' });
+      const data = await flightService.getFlightsByAirline(code, seat_class);
+      res.json({ data });
+    } catch (err) {
+      console.error('[Airline Flights]', err);
+      res.status(500).json({ error: 'Lỗi server' });
+    }
+  },
 };

@@ -971,4 +971,48 @@ const sendNewsletterBroadcast = async (subscribers, { subject, title, body, ctaT
   return { sent, failed };
 };
 
-module.exports = { sendOTPEmail, sendRefundOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail, sendFlightStatusEmail, sendBoardingPassEmail, sendContactEmail, sendNewsletterWelcomeEmail, sendNewsletterBroadcast };
+// ─── Loyalty tier upgrade email ───────────────────────────────────────────────
+const TIER_COLORS = { member: '#c06828', silver: '#9e9e9e', gold: '#f0c800', platinum: '#8888c0' };
+const TIER_LABELS_VI = { member: 'Đồng', silver: 'Bạc', gold: 'Vàng', platinum: 'Bạch kim' };
+
+const sendLoyaltyTierUpgradeEmail = async (to, { fullName, oldTier, newTier }) => {
+  const tierColor  = TIER_COLORS[newTier?.toLowerCase()] || '#0e81cd';
+  const newLabel   = TIER_LABELS_VI[newTier?.toLowerCase()] || newTier;
+  const oldLabel   = TIER_LABELS_VI[oldTier?.toLowerCase()] || oldTier;
+  const subject    = `🎉 Chúc mừng! Bạn đã thăng hạng lên ${newLabel}`;
+  const html = `<!DOCTYPE html><html><body style="font-family:sans-serif;background:#f5f5f5;margin:0;padding:20px">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.08)">
+    <div style="background:${tierColor};padding:32px 24px;text-align:center">
+      <div style="font-size:48px">🏆</div>
+      <h1 style="color:#fff;margin:12px 0 4px;font-size:24px">Thăng hạng thành công!</h1>
+      <p style="color:rgba(255,255,255,.85);margin:0;font-size:15px">Hạng thành viên của bạn đã được nâng lên</p>
+    </div>
+    <div style="padding:28px 24px;text-align:center">
+      <p style="color:#555;font-size:15px;margin:0 0 16px">Xin chào <strong>${fullName}</strong>,</p>
+      <p style="color:#555;font-size:15px;margin:0 0 24px">
+        Chúc mừng bạn đã tích lũy đủ điểm để thăng từ hạng
+        <strong>${oldLabel}</strong> lên hạng <strong style="color:${tierColor}">${newLabel}</strong>!
+      </p>
+      <div style="background:${tierColor};color:#fff;border-radius:12px;padding:16px 24px;display:inline-block;margin:0 0 24px">
+        <div style="font-size:13px;opacity:.85">Hạng mới của bạn</div>
+        <div style="font-size:28px;font-weight:800;letter-spacing:1px">${newLabel.toUpperCase()}</div>
+      </div>
+      <p style="color:#888;font-size:13px;margin:0">Đặc quyền mới đã được kích hoạt trong tài khoản của bạn. Tiếp tục bay cùng Vivudee để nhận thêm ưu đãi!</p>
+    </div>
+    <div style="background:#f9f9f9;padding:16px 24px;text-align:center;font-size:12px;color:#aaa">
+      Vivudee · Your Journey Starts Here
+    </div>
+  </div>
+</body></html>`;
+  try {
+    const { error, data } = await resend.emails.send({ from: process.env.EMAIL_FROM, to, subject, html });
+    if (error) { console.error('❌ sendLoyaltyTierUpgradeEmail error:', error); return false; }
+    console.log('✅ sendLoyaltyTierUpgradeEmail sent:', data?.id);
+    return true;
+  } catch (err) {
+    console.error('❌ sendLoyaltyTierUpgradeEmail exception:', err);
+    return false;
+  }
+};
+
+module.exports = { sendOTPEmail, sendRefundOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail, sendFlightStatusEmail, sendBoardingPassEmail, sendContactEmail, sendNewsletterWelcomeEmail, sendNewsletterBroadcast, sendLoyaltyTierUpgradeEmail };
