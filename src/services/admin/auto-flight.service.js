@@ -63,6 +63,17 @@ const getTimeSlots = () => {
   return slots;
 };
 
+// Chọn n slot trải đều từ mảng allSlots (ví dụ: n=3 từ 48 → slot 0, 16, 32)
+const selectEvenSlots = (allSlots, n) => {
+  const count = Math.min(Math.max(1, n), allSlots.length);
+  if (count >= allSlots.length) return [...allSlots];
+  const result = [];
+  for (let i = 0; i < count; i++) {
+    result.push(allSlots[Math.floor(i * allSlots.length / count)]);
+  }
+  return result;
+};
+
 // Format local date thành "YYYY-MM-DD" — tránh lệch ngày do UTC offset
 const toLocalDateStr = (d) => {
   const pad = n => String(n).padStart(2, '0');
@@ -170,7 +181,7 @@ const getAutoRoutes = async (offset = 0, limit = 100) => {
         LOWER(dep.country) = LOWER(al.country)
         OR LOWER(arr.country) = LOWER(al.country)
       )
-    ORDER BY al.code, dep.code, arr.code
+    ORDER BY md5(al.id::text || dep.id::text || arr.id::text)
     LIMIT $1 OFFSET $2
   `, [limit, offset]);
   return rows;
@@ -283,89 +294,82 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
       usedNums[key].add(r.flight_number);
     }
 
-    // Group routes by airline
-    const airlineRoutes = {};
-    for (const route of routes) {
-      if (!airlineRoutes[route.airline_id]) airlineRoutes[route.airline_id] = [];
-      airlineRoutes[route.airline_id].push(route);
+    // Shuffle routes (Fisher-Yates) → phân bổ hãng ngẫu nhiên, không theo alphabet
+    for (let i = routes.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [routes[i], routes[j]] = [routes[j], routes[i]];
     }
 
     let created = 0;
     let skipped = 0;
 
-    // Chia budget đều cho từng hãng → mỗi batch run tất cả hãng đều được tạo
-    const numAirlines      = Object.keys(airlineRoutes).length;
+    const numAirlines      = new Set(routes.map(r => r.airline_id)).size;
     const perAirlineBudget = unlimited ? Infinity : Math.max(3, Math.ceil(limit / numAirlines));
+    const airlineCreated   = {}; // { airlineId: count }
 
     outer:
-    for (const [airlineId, aRoutes] of Object.entries(airlineRoutes)) {
-      let airlineCreated = 0;
+    for (const route of routes) {
+      const { airline_id: airlineId, airline_code } = route;
+      if (!airlineCreated[airlineId]) airlineCreated[airlineId] = 0;
+      if (!unlimited && airlineCreated[airlineId] >= perAirlineBudget) continue;
 
-      airline:
-      for (let ri = 0; ri < aRoutes.length; ri++) {
-        const route        = aRoutes[ri];
-        const km           = haversineKm(Number(route.dep_lat), Number(route.dep_lng), Number(route.arr_lat), Number(route.arr_lng));
-        const durationMins = estimateMins(km);
-        const tierMult     = Number(route.price_tier) || 1.0;
+      const km           = haversineKm(Number(route.dep_lat), Number(route.dep_lng), Number(route.arr_lat), Number(route.arr_lng));
+      const durationMins = estimateMins(km);
+      const tierMult     = Number(route.price_tier) || 1.0;
 
-        for (let si = 0; si < timeSlots.length; si++) {
-          const depHour = parseInt(timeSlots[si].slice(0, 2), 10);
-          const prices  = calcPrices(durationMins, tierMult, depHour);
+      slots:
+      for (let si = 0; si < timeSlots.length; si++) {
+        const depHour = parseInt(timeSlots[si].slice(0, 2), 10);
+        const prices  = calcPrices(durationMins, tierMult, depHour);
 
-          for (const dateStr of dates) {
-            if (created >= limit)                      break outer;   // hết tổng quota → dừng hẳn
-            if (airlineCreated >= perAirlineBudget)    break airline; // hết budget hãng này → qua hãng tiếp
+        for (const dateStr of dates) {
+          if (created >= limit) break outer;
+          if (!unlimited && airlineCreated[airlineId] >= perAirlineBudget) break slots;
 
-            const depTime = `${dateStr}T${timeSlots[si]}:00`;
+          const depTime = `${dateStr}T${timeSlots[si]}:00`;
+          if (new Date(depTime) <= new Date(Date.now() + 2 * 60 * 60 * 1000)) { skipped++; continue; }
 
-            // Bỏ qua slot đã qua hoặc sắp qua trong 2 giờ
-            if (new Date(depTime) <= new Date(Date.now() + 2 * 60 * 60 * 1000)) { skipped++; continue; }
+          const slotKey = `${airlineId}_${route.dep_id}_${route.arr_id}_${dateStr}_${timeSlots[si]}`;
+          if (existingSet.has(slotKey)) { skipped++; continue; }
 
-            // Kiểm tra đã tồn tại chưa (O(1) lookup)
-            const slotKey = `${route.airline_id}_${route.dep_id}_${route.arr_id}_${dateStr}_${timeSlots[si]}`;
-            if (existingSet.has(slotKey)) { skipped++; continue; }
+          const numsKey = `${dateStr}_${airlineId}`;
+          if (!usedNums[numsKey]) usedNums[numsKey] = new Set();
+          const dateUsed = usedNums[numsKey];
+          let flightNum = null;
+          for (let n = 100; n <= 999; n++) {
+            const candidate = `${airline_code}${n}`;
+            if (!dateUsed.has(candidate)) { flightNum = candidate; dateUsed.add(candidate); break; }
+          }
+          if (!flightNum) { skipped++; continue; }
 
-            // Tìm flight number chưa dùng cho ngày + hãng này
-            const numsKey = `${dateStr}_${airlineId}`;
-            if (!usedNums[numsKey]) usedNums[numsKey] = new Set();
-            const dateUsed = usedNums[numsKey];
-            let flightNum = null;
-            const preferredOffset = 100 + ri * timeSlots.length + si;
-            for (let n = preferredOffset; n <= 999; n++) {
-              const candidate = `${route.airline_code}${n}`;
-              if (!dateUsed.has(candidate)) { flightNum = candidate; dateUsed.add(candidate); break; }
-            }
-            if (!flightNum) { skipped++; continue; }
+          const arrTime = addMins(dateStr, timeSlots[si], durationMins);
 
-            const arrTime = addMins(dateStr, timeSlots[si], durationMins);
+          try {
+            await client.query('BEGIN');
+            const flightRes = await client.query(QF.INSERT_FLIGHT, [
+              flightNum, airlineId, route.dep_id, route.arr_id,
+              depTime, arrTime, durationMins,
+            ]);
+            const flight = flightRes.rows[0];
 
-            try {
-              await client.query('BEGIN');
-              const flightRes = await client.query(QF.INSERT_FLIGHT, [
-                flightNum, route.airline_id, route.dep_id, route.arr_id,
-                depTime, arrTime, durationMins,
+            for (const seat of SEAT_CONFIG) {
+              const raw = prices[seat.class];
+              const bp  = Number.isFinite(raw) && raw > 0 ? raw : 0;
+              await client.query(QF.INSERT_FLIGHT_SEAT, [
+                flight.id, seat.class, seat.total_seats, seat.total_seats,
+                bp, seat.baggage_included_kg, seat.carry_on_kg,
+                autoExtraBagPrice(bp, seat.class),
               ]);
-              const flight = flightRes.rows[0];
-
-              for (const seat of SEAT_CONFIG) {
-                const raw = prices[seat.class];
-                const bp  = Number.isFinite(raw) && raw > 0 ? raw : 0;
-                await client.query(QF.INSERT_FLIGHT_SEAT, [
-                  flight.id, seat.class, seat.total_seats, seat.total_seats,
-                  bp, seat.baggage_included_kg, seat.carry_on_kg,
-                  autoExtraBagPrice(bp, seat.class),
-                ]);
-              }
-
-              await client.query('COMMIT');
-              existingSet.add(slotKey);
-              created++;
-              airlineCreated++;
-            } catch (err) {
-              await client.query('ROLLBACK');
-              console.error(`[AutoFlight] Insert error ${flightNum} ${dateStr}:`, err.message);
-              skipped++;
             }
+
+            await client.query('COMMIT');
+            existingSet.add(slotKey);
+            created++;
+            airlineCreated[airlineId]++;
+          } catch (err) {
+            await client.query('ROLLBACK');
+            console.error(`[AutoFlight] Insert error ${flightNum} ${dateStr}:`, err.message);
+            skipped++;
           }
         }
       }
@@ -415,6 +419,11 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
     `SELECT id, code, name, country, price_tier FROM airlines WHERE is_active = TRUE AND country IS NOT NULL ORDER BY id`
   );
   const allAirlines = airlineRes.rows;
+  // Shuffle để hãng được phân bổ ngẫu nhiên (không theo alphabet/id)
+  for (let i = allAirlines.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [allAirlines[i], allAirlines[j]] = [allAirlines[j], allAirlines[i]];
+  }
 
   // Build mảng ngày
   const pad = n => String(n).padStart(2, '0');
@@ -483,27 +492,36 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
 
       const slots = getTimeSlots(); // 48 slot cố định mỗi 30 phút
       if (mode === 'all_airlines') {
-        // Tất cả hãng phù hợp đều bay tuyến này, mỗi hãng 48 chuyến/ngày
+        // Mỗi hãng bay flightsPerRoute chuyến/ngày trên tuyến này
+        const daySlots = selectEvenSlots(slots, flightsPerRoute);
         for (const dateStr of dates) {
           for (let ai = 0; ai < compatAirlines.length; ai++) {
-            for (let si = 0; si < slots.length; si++) {
-              schedule.push({ dateStr, slotTime: slots[si], airlineIdx: ai });
+            for (const slotTime of daySlots) {
+              schedule.push({ dateStr, slotTime, airlineIdx: ai });
             }
           }
         }
       } else if (mode === 'per_day') {
+        // flightsPerRoute chuyến/tuyến/ngày, xoay vòng hãng qua các slot
+        const daySlots = selectEvenSlots(slots, flightsPerRoute);
         let ai = 0;
         for (const dateStr of dates) {
-          for (const slotTime of slots) {
+          for (const slotTime of daySlots) {
             schedule.push({ dateStr, slotTime, airlineIdx: ai++ });
           }
         }
       } else {
-        // total: phân bổ đều 48 slot/ngày qua các ngày
+        // total: flightsPerRoute chuyến tổng cộng trải đều qua các ngày
+        const perDay = Math.max(1, Math.round(flightsPerRoute / Math.max(1, numDays)));
+        const daySlots = selectEvenSlots(slots, perDay);
         let ai = 0;
+        let scheduled = 0;
         for (const dateStr of dates) {
-          for (const slotTime of slots) {
+          if (scheduled >= flightsPerRoute) break;
+          for (const slotTime of daySlots) {
+            if (scheduled >= flightsPerRoute) break;
             schedule.push({ dateStr, slotTime, airlineIdx: ai++ });
+            scheduled++;
           }
         }
       }
@@ -566,18 +584,33 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
 
       let scheduleReturn = [];
       if (mode === 'all_airlines') {
+        const daySlots = selectEvenSlots(slots, flightsPerRoute);
         for (const dateStr of dates) {
           for (let ai = 0; ai < compatReturn.length; ai++) {
-            for (let si = 0; si < slots.length; si++) {
-              scheduleReturn.push({ dateStr, slotTime: slots[si], airlineIdx: ai });
+            for (const slotTime of daySlots) {
+              scheduleReturn.push({ dateStr, slotTime, airlineIdx: ai });
             }
           }
         }
-      } else {
+      } else if (mode === 'per_day') {
+        const daySlots = selectEvenSlots(slots, flightsPerRoute);
         let ai = 0;
         for (const dateStr of dates) {
-          for (const slotTime of slots) {
+          for (const slotTime of daySlots) {
             scheduleReturn.push({ dateStr, slotTime, airlineIdx: ai++ });
+          }
+        }
+      } else {
+        const perDay = Math.max(1, Math.round(flightsPerRoute / Math.max(1, numDays)));
+        const daySlots = selectEvenSlots(slots, perDay);
+        let ai = 0;
+        let scheduled = 0;
+        for (const dateStr of dates) {
+          if (scheduled >= flightsPerRoute) break;
+          for (const slotTime of daySlots) {
+            if (scheduled >= flightsPerRoute) break;
+            scheduleReturn.push({ dateStr, slotTime, airlineIdx: ai++ });
+            scheduled++;
           }
         }
       }
