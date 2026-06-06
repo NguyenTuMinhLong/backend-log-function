@@ -428,28 +428,31 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
   const numDays    = dates.length;
   const srcCountry = (src.country || '').toLowerCase();
 
-  // Pre-fetch flight numbers đã dùng trong range
+  // Pre-fetch flight numbers đã dùng — cả chiều đi (dep=src) lẫn chiều về (dep=dest)
+  const destIds = destinations.map(d => d.id);
   const usedNumsRes = await pool.query(
-    `SELECT al.code AS airline_code, DATE(f.departure_time)::text AS dep_date, f.flight_number
+    `SELECT al.code AS airline_code, f.departure_airport_id,
+            DATE(f.departure_time)::text AS dep_date, f.flight_number
      FROM flights f JOIN airlines al ON al.id = f.airline_id
-     WHERE f.departure_airport_id = $1
+     WHERE (f.departure_airport_id = $1 OR f.departure_airport_id = ANY($4::int[]))
        AND DATE(f.departure_time) >= $2 AND DATE(f.departure_time) <= $3`,
-    [src.id, dates[0], dates[dates.length-1]]
+    [src.id, dates[0], dates[dates.length-1], destIds]
   );
+  // usedNums: "${depAirportId}_${dep_date}_${airline_code}" → Set<flight_number>
   const usedNums = {};
   for (const r of usedNumsRes.rows) {
-    const key = `${r.dep_date}_${r.airline_code}`;
+    const key = `${r.departure_airport_id}_${r.dep_date}_${r.airline_code}`;
     if (!usedNums[key]) usedNums[key] = new Set();
     usedNums[key].add(r.flight_number);
   }
 
-  // Pre-fetch slots đã tồn tại
+  // Pre-fetch slots đã tồn tại — cả 2 chiều liên quan đến src
   const existRes = await pool.query(
     `SELECT airline_id, departure_airport_id, arrival_airport_id,
             DATE(departure_time)::text AS dep_date,
             TO_CHAR(departure_time,'HH24:MI') AS dep_slot
      FROM flights
-     WHERE departure_airport_id = $1
+     WHERE (departure_airport_id = $1 OR arrival_airport_id = $1)
        AND DATE(departure_time) >= $2 AND DATE(departure_time) <= $3`,
     [src.id, dates[0], dates[dates.length-1]]
   );
@@ -505,19 +508,15 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
         }
       }
 
-      // Tạo từng flight trong schedule
-      for (const { dateStr, slotTime, airlineIdx } of schedule) {
-        const airline  = compatAirlines[airlineIdx % compatAirlines.length];
-        const depTime  = `${dateStr}T${slotTime}:00`;
+      // Helper tạo 1 chuyến bay (dep→arr)
+      const createOne = async (depAirport, arrAirport, airline, dateStr, slotTime, durMins) => {
+        const depTime = `${dateStr}T${slotTime}:00`;
+        if (new Date(depTime) <= new Date(Date.now() + 2 * 60 * 60 * 1000)) { skipped++; return; }
 
-        // Bỏ qua slot đã qua
-        if (new Date(depTime) <= new Date(Date.now() + 2 * 60 * 60 * 1000)) { skipped++; continue; }
+        const slotKey = `${airline.id}_${depAirport.id}_${arrAirport.id}_${dateStr}_${slotTime}`;
+        if (existSet.has(slotKey)) { skipped++; return; }
 
-        const slotKey = `${airline.id}_${src.id}_${dest.id}_${dateStr}_${slotTime}`;
-        if (existSet.has(slotKey)) { skipped++; continue; }
-
-        // Tìm số hiệu chuyến bay chưa dùng
-        const numsKey = `${dateStr}_${airline.code}`;
+        const numsKey = `${depAirport.id}_${dateStr}_${airline.code}`;
         if (!usedNums[numsKey]) usedNums[numsKey] = new Set();
         const dateUsed = usedNums[numsKey];
         let flightNum = null;
@@ -525,15 +524,15 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
           const cand = `${airline.code}${n}`;
           if (!dateUsed.has(cand)) { flightNum = cand; dateUsed.add(cand); break; }
         }
-        if (!flightNum) { skipped++; continue; }
+        if (!flightNum) { skipped++; return; }
 
         const depHour = parseInt(slotTime.slice(0, 2), 10);
-        const prices  = calcPrices(durationMins, Number(airline.price_tier) || 1.0, depHour);
-        const arrTime = addMins(dateStr, slotTime, durationMins);
+        const prices  = calcPrices(durMins, Number(airline.price_tier) || 1.0, depHour);
+        const arrTime = addMins(dateStr, slotTime, durMins);
 
         try {
           await client.query('BEGIN');
-          const fr = await client.query(QF.INSERT_FLIGHT, [flightNum, airline.id, src.id, dest.id, depTime, arrTime, durationMins]);
+          const fr = await client.query(QF.INSERT_FLIGHT, [flightNum, airline.id, depAirport.id, arrAirport.id, depTime, arrTime, durMins]);
           const flight = fr.rows[0];
           for (const seat of SEAT_CONFIG) {
             const bp = prices[seat.class] || 0;
@@ -550,6 +549,42 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
           console.error(`[AirportBatch] Insert error ${flightNum}:`, err.message);
           skipped++;
         }
+      };
+
+      // Pass 1: Chiều đi src → dest
+      for (const { dateStr, slotTime, airlineIdx } of schedule) {
+        const airline = compatAirlines[airlineIdx % compatAirlines.length];
+        await createOne(src, dest, airline, dateStr, slotTime, durationMins);
+      }
+
+      // Pass 2: Chiều về dest → src (hãng phù hợp theo quốc gia dest/src)
+      let compatReturn = allAirlines.filter(al => {
+        const alc = (al.country || '').toLowerCase();
+        return alc === destCountry || alc === srcCountry;
+      });
+      if (!compatReturn.length) compatReturn = allAirlines;
+
+      let scheduleReturn = [];
+      if (mode === 'all_airlines') {
+        for (const dateStr of dates) {
+          for (let ai = 0; ai < compatReturn.length; ai++) {
+            for (let si = 0; si < slots.length; si++) {
+              scheduleReturn.push({ dateStr, slotTime: slots[si], airlineIdx: ai });
+            }
+          }
+        }
+      } else {
+        let ai = 0;
+        for (const dateStr of dates) {
+          for (const slotTime of slots) {
+            scheduleReturn.push({ dateStr, slotTime, airlineIdx: ai++ });
+          }
+        }
+      }
+
+      for (const { dateStr, slotTime, airlineIdx } of scheduleReturn) {
+        const airline = compatReturn[airlineIdx % compatReturn.length];
+        await createOne(dest, src, airline, dateStr, slotTime, durationMins);
       }
     }
 
