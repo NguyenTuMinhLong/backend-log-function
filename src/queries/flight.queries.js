@@ -13,7 +13,7 @@ const COUNT_FLIGHTS = (dk) =>
    JOIN airports arr ON arr.id = f.arrival_airport_id
    ${dk}`;
 
-const SELECT_FLIGHTS = (dk, gioiHan, viTri) =>
+const SELECT_FLIGHTS = (dk, gioiHan, viTri, orderBy = 'f.departure_time ASC') =>
   `SELECT
      f.id, f.flight_number, f.departure_time, f.arrival_time,
      f.duration_minutes, f.status, f.is_active, f.created_at, f.updated_at,
@@ -37,7 +37,7 @@ const SELECT_FLIGHTS = (dk, gioiHan, viTri) =>
    GROUP BY f.id, al.id, al.code, al.name,
             dep.id, dep.code, dep.city,
             arr.id, arr.code, arr.city
-   ORDER BY f.departure_time ASC
+   ORDER BY ${orderBy}
    LIMIT $${gioiHan} OFFSET $${viTri}`;
 
 // ── Admin: Flight CRUD ─────────────────────────────────────────────────────────
