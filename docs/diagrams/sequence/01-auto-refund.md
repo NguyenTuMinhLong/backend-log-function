@@ -1,101 +1,99 @@
-# Auto-Refund Flow - Sequence Diagram
+```plantuml
+@startuml
+hide footbox
+skinparam ParticipantPadding 20
+skinparam BoxPadding 10
+skinparam sequenceMessageAlign center
 
-```mermaid
-sequenceDiagram
-    participant C as Controller<br/>refund.controller
-    participant S as Refund Service
-    participant DB as PostgreSQL
-    participant OTP as OTP Store<br/>(In-Memory)
-    participant MAIL as Mailer
-    participant PG as Payment Gateway<br/>(PayPal/PayOS/MoMo)
-    participant LOYALTY as Loyalty Service
-    participant NOTIF as Notification Service
-    participant ADMIN as Admin Panel
+title Auto-Refund Flow
 
-    %% ========== USER REQUEST ==========
-    User->>C: POST /refunds/user<br/>{bookingCode, reason}
-    C->>S: requestRefund(userId, bookingCode, data)
-    S->>DB: SELECT_BOOKING_DETAIL(bookingCode)
-    S->>DB: SELECT_PAYMENT_BY_BOOKING(bookingId)
-    S->>S: validateRefundRequest()
-    S->>DB: CHECK_PENDING_REFUND_FOR_BOOKING(bookingId)
-    S->>S: findPolicy(hoursLeft)<br/>calculateRefundAmount()
-    
-    alt Original bill >= OTP threshold
-        S->>S: isOTPVerified(email)
-        alt NOT verified
-            S-->>User: Error: OTP required
-        end
-    end
-    
-    alt netRefund < 1M VND
-        S->>S: status = 'approved'
-    else netRefund >= 1M VND
-        S->>S: status = 'pending'
-    end
-    
-    S->>DB: INSERT_REFUND
-    S->>DB: UPDATE_BOOKING_STATUS('refund_pending')
-    S-->>User: {refundCode, status}
+actor User
+actor Guest
+actor Admin as ADMIN
+participant "Refund Controller" as C
+participant "Refund Service" as S
+database "PostgreSQL" as DB
+participant "OTP Store" as OTP
+participant "Notification Service" as NOTIF
+participant "Payment Gateway" as PG
+participant "Loyalty Service" as LOYALTY
 
-    %% ========== ADMIN APPROVE ==========
-    alt Status = 'pending' (need manual approve)
-        ADMIN->>C: POST /admin/refunds/:code/approve
-        C->>S: approveRefund(adminId, refundCode)
-        S->>DB: SELECT_REFUND_BY_CODE(refundCode)
-        S->>S: validate status = 'pending'
-        S->>DB: UPDATE_REFUND_STATUS('approved')
-        S->>NOTIF: createRefundNotification('REFUND_APPROVED')
-    end
+== User section ==
+User -> C: POST /api/refunds/user
+C -> S: requestRefund(userId, bookingCode, data)
+S -> DB: SELECT_BOOKING_DETAIL
+S -> DB: SELECT_PAYMENT_BY_BOOKING
+S -> S: validateRefundRequest
+S -> DB: CHECK_PENDING_REFUND_FOR_BOOKING
+S -> S: calculateRefundAmount
+alt OTP required
+    S -> OTP: isOTPVerified(email)
+    OTP --> S: true/false
+end
+alt net_refund_amount < threshold
+    S -> S: status = approved
+else
+    S -> S: status = pending
+end
+S -> DB: INSERT_REFUND
+S -> DB: UPDATE_BOOKING_STATUS(refund_pending)
+S -> NOTIF: REFUND_REQUESTED
+S --> User: refund_code, status
 
-    %% ========== ADMIN PROCESS (call PG) ==========
-    ADMIN->>C: POST /admin/refunds/:code/complete
-    C->>S: processRefund(adminId, refundCode)
-    S->>DB: SELECT_REFUND_BY_CODE(refundCode)
-    S->>DB: UPDATE_REFUND_STATUS('processing')
-    
-    alt PayPal
-        S->>PG: refundPayPalCapture(captureId)
-        PG-->>S: refundId
-    else PayOS/MoMo
-        S-->>S: Mark MANUAL_RECONCILIATION
-    end
-    
-    S->>DB: UPDATE_REFUND_COMPLETED
-    S->>DB: UPDATE_BOOKING_STATUS('refunded')
-    S->>DB: UPDATE_PAYMENT_STATUS('REFUNDED')
-    S->>LOYALTY: revokePointsForRefund()
-    S->>NOTIF: createRefundNotification('REFUND_COMPLETED')
-    S-->>ADMIN: {success, refundCode}
+== Guest section ==
+Guest -> C: POST /api/refunds/guest
+C -> S: requestGuestRefund(bookingCode, guestEmail, data)
+S -> DB: SELECT_BOOKING_DETAIL
+S -> S: verify guestEmail matches booking
+S -> DB: SELECT_PAYMENT_BY_BOOKING
+S -> S: validateRefundRequest
+S -> DB: CHECK_PENDING_REFUND_FOR_BOOKING
+S -> S: calculateRefundAmount
+alt OTP required
+    S -> OTP: isOTPVerified(guestEmail)
+    OTP --> S: true/false
+end
+alt net_refund_amount < threshold
+    S -> S: status = approved
+else
+    S -> S: status = pending
+end
+S -> DB: INSERT_REFUND(is_guest = true)
+S -> DB: UPDATE_BOOKING_STATUS(refund_pending)
+S -> NOTIF: REFUND_REQUESTED
+S --> Guest: refund_code, status
 
-    %% ========== ADMIN REJECT ==========
-    ADMIN->>C: POST /admin/refunds/:code/reject<br/>{reason}
-    C->>S: rejectRefund(adminId, refundCode, reason)
-    S->>DB: SELECT_REFUND_BY_CODE(refundCode)
-    S->>DB: UPDATE_REFUND_STATUS('rejected')
-    S->>DB: UPDATE_BOOKING_STATUS('confirmed')
-    S->>NOTIF: createRefundNotification('REFUND_REJECTED')
+== Admin approve ==
+ADMIN -> C: POST /api/admin/refunds/:refundCode/approve
+C -> S: approveRefund(adminId, refundCode, admin_notes)
+S -> DB: SELECT_REFUND_BY_CODE
+S -> DB: UPDATE_REFUND_STATUS(approved)
+S -> NOTIF: REFUND_APPROVED
+
+== Admin process ==
+ADMIN -> C: POST /api/admin/refunds/:refundCode/complete
+C -> S: processRefund(adminId, refundCode)
+S -> DB: SELECT_REFUND_BY_CODE
+S -> DB: UPDATE_REFUND_STATUS(processing)
+S -> PG: reversePayment(payment_id, net_refund_amount)
+alt success
+    PG --> S: ok
+    S -> DB: UPDATE_REFUND_COMPLETED
+    S -> DB: UPDATE_BOOKING_STATUS(refunded)
+    S -> LOYALTY: revokePointsForRefund
+    S -> NOTIF: REFUND_COMPLETED
+else failure
+    PG --> S: error
+    S -> DB: UPDATE_REFUND_STATUS(failed)
+end
+
+== Admin reject ==
+ADMIN -> C: POST /api/admin/refunds/:refundCode/reject
+C -> S: rejectRefund(adminId, refundCode, reason)
+S -> DB: SELECT_REFUND_BY_CODE
+S -> DB: UPDATE_REFUND_STATUS(rejected)
+S -> DB: UPDATE_BOOKING_STATUS(confirmed)
+S -> NOTIF: REFUND_REJECTED
+
+@enduml
 ```
-
-## Status Flow
-
-```mermaid
-stateDiagram-v2
-    [*] --> pending : Auto (amount >= 1M)
-    [*] --> approved : Auto (amount < 1M)
-    pending --> approved : Admin approves
-    pending --> rejected : Admin rejects
-    approved --> processing : Admin processes
-    processing --> completed : Payment gateway success
-    processing --> failed : Payment gateway error
-    failed --> processing : Retry
-```
-
-## Refund Policies
-
-| Hours Before Departure | Refund % |
-|------------------------|----------|
-| > 72 hours | 100% |
-| 24-72 hours | 80% |
-| 12-24 hours | 50% |
-| < 12 hours | 0% |

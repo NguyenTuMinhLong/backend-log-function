@@ -141,7 +141,10 @@ const confirmDateChange = async (req, res) => {
     }
 
     const result = await dateChangeService.confirmDateChange(email, otp, requestCode);
-    res.json(result);
+    res.json({
+      message: result.message,
+      data: result,
+    });
   } catch (err) {
     console.error('[ConfirmDateChange]', err.message);
     res.status(400).json({ error: err.message });

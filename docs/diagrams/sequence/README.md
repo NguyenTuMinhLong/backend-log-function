@@ -6,36 +6,37 @@ Collection of sequence diagrams documenting the core business flows.
 
 | Diagram | Description | File |
 |---------|-------------|------|
-| Auto-Refund | User request → Admin approve → Payment gateway → Complete | [01-auto-refund.md](01-auto-refund.md) |
-| Date-Change | Request → OTP → Payment → Approve → Release/Reserve seats | [02-date-change.md](02-date-change.md) |
-| Flight Combo | Mixed search with direct, 1-stop, 2-stop + roundtrip | [03-flight-combo.md](03-flight-combo.md) |
-| Flight Season | Season/Holiday/Override detection with caching | [04-flight-season.md](04-flight-season.md) |
+| Auto-Refund | User request → auto/manual approval → refund execution → gateway outcome | [01-auto-refund.md](01-auto-refund.md) |
+| Date-Change User Flow | Request → OTP → payment creation → payment confirmation/cancel | [02-date-change-user-flow.md](02-date-change-user-flow.md) |
+| Date-Change Execution & Admin Flow | approve/reject/cancel → seat swap → booking update → embedded refund | [03-date-change-admin-flow.md](03-date-change-admin-flow.md) |
 
 ## Quick Reference
 
 ### Auto-Refund Status Flow
 ```
 pending → approved → processing → completed
-              ↓
-          rejected
+              ↓           ↓
+          rejected     failed
 ```
 
-### Date-Change Status Flow
+### Date-Change User Flow
 ```
-pending_otp → pending_payment → approved → completed
+pending_otp → pending_payment → approved
      ↓              ↓
-   pending       (pay & auto-approve)
+   pending       cancelled
      ↓
-  rejected/cancelled
+ approved / rejected / cancelled
 ```
 
-### Season Priority
+### Date-Change Execution & Admin Flow
 ```
-Override > Holiday > Season > 1.0 (off-peak)
+pending -> approved -> done
+   ↓
+rejected / cancelled
 ```
 
-### Flight Combo Types
-- Direct (0 stops)
-- 1-stop (A → X → B)
-- 2-stop (A → X → Y → B)
-- Roundtrip (cross-product of outbound × return)
+## Notes
+
+- All diagrams are written in PlantUML for easier maintenance and export.
+- Auto-refund remains separated from date-change, but date-change approval can still create an embedded refund record when the recalculated amount becomes refundable.
+- These docs now follow the current service-level implementation and route naming more closely than the previous generalized version.

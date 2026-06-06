@@ -4,33 +4,53 @@ File này là bản note nội bộ, viết theo kiểu dễ đọc để ai và
 
 ---
 
-## 1. Date change: luồng đổi ngày bay đã rõ hơn và tách thành 2 bước
+## 1. Date change: V1 đã chốt theo hướng gọn, rõ trạng thái và không làm quá tay
 
-Trước đây phần date change hơi dễ gây hiểu nhầm vì nhìn như chỉ cần gửi request là xong. Hiện tại flow đã rõ hơn: user gửi yêu cầu trước, sau đó phải xác thực OTP rồi hệ thống mới quyết định đi tiếp theo nhánh nào.
+Phần date change hiện tại nên hiểu là **V1 đã đủ dùng** và đã được dọn lại để tránh ôm thêm logic/admin payload không cần thiết. Mục tiêu của đợt này không phải mở rộng feature, mà là chốt một flow đổi ngày bay rõ ràng, kiểm soát được trạng thái, và đủ cho user + admin vận hành.
+
+### Phạm vi V1 hiện tại
+
+V1 hiện chỉ support **đổi ngày cho `outbound` leg**.
+
+Điểm quan trọng:
+- đã có `flight_leg` để định danh leg đang đổi
+- current allowed value cho V1 là `outbound`
+- uniqueness active request được tính **theo từng leg**, không còn theo cả booking kiểu quá rộng
+
+Nói ngắn gọn: V1 này đã chuẩn bị cấu trúc đúng để sau này mở rộng, nhưng **hiện tại chỉ chốt outbound-only** chứ chưa làm return-leg flow.
 
 ### Flow đang chạy
 
 **Bước 1: user tạo yêu cầu đổi ngày**
 - Endpoint: `POST /api/date-changes/bookings/:bookingCode/change-flight`
-- Input chính: `new_flight_id`, `new_seat_class`, `reason`
+- Input chính: `new_flight_id`, `new_seat_class`, `reason`, `flight_leg` (V1 hiện chỉ nhận `outbound`)
 - Hệ thống sẽ:
   - check booking có hợp lệ không
+  - check booking đang ở trạng thái `confirmed`
   - check user có quyền với booking đó không
-  - check đã có request đang pending cho booking này chưa
-  - check flight mới có đủ ghế không
-  - tính chênh lệch giá
+  - check leg có được phép đổi không
+  - check đã có request active cho đúng `flight_leg` này chưa
+  - check chuyến mới và hạng ghế mới có hợp lệ không
+  - tính chênh lệch giá theo phần vé đang đổi
   - tạo request với status `pending_otp`
   - gửi OTP về email booking
 
 **Bước 2: user xác thực OTP**
 - Endpoint: `POST /api/date-changes/confirm`
-- Sau khi OTP đúng thì hệ thống không approve ngay trong mọi trường hợp nữa, mà chia nhánh theo `price_difference`
+- Input: `email`, `otp`, `requestCode`
+- Sau khi OTP đúng, hệ thống chia flow như sau:
+  - nếu `price_difference > 0` và config yêu cầu thu thêm tiền thì chuyển sang `pending_payment`
+  - nếu không cần thu thêm thì chuyển sang `pending`
+
+Điểm quan trọng của V1 mới:
+- **không auto approve ngay sau OTP**
+- OTP chỉ là bước xác nhận request hợp lệ để đi tiếp vào flow xử lý chính thức
 
 ### Cách tính chênh lệch giá hiện tại
 
-Hiện tại service đang so sánh phần **giá vé outbound cơ bản theo số ghế**, chứ không lấy toàn bộ `booking.total_price` để trừ như cách hiểu dễ nhầm trước đó.
+Hiện tại service đang so sánh phần **giá vé của leg đang đổi theo số ghế cần xử lý**, thay vì lấy cả `booking.total_price` để trừ.
 
-Công thức đang dùng là:
+Công thức đang dùng về bản chất là:
 
 ```javascript
 newTotalPrice = newFlight.base_price * seatsNeeded;
@@ -40,8 +60,8 @@ priceDifference = newTotalPrice - oldPrice;
 
 Ý nghĩa của cách này:
 - chỉ so sánh phần vé đổi thực tế
-- không lẫn baggage / ancillary / chiều về
-- dễ kiểm soát hơn khi xử lý business rule cho date change
+- không trộn baggage / ancillary / chiều chưa đổi
+- phù hợp hơn với rule của V1 outbound-only
 
 ### Sau khi OTP đúng thì đi nhánh nào?
 
@@ -54,42 +74,68 @@ Hệ thống sẽ:
 - chờ user tạo payment riêng cho khoản chênh lệch
 
 Endpoint tiếp theo:
-- `POST /api/date-changes/:code/payment`
-- `GET /api/date-changes/:code/payment`
-- `POST /api/date-changes/:code/payment/cancel`
+- `POST /api/date-changes/:requestCode/payment`
+- `GET /api/date-changes/:requestCode/payment`
+- `DELETE /api/date-changes/:requestCode/payment`
 
 #### Trường hợp 2: `price_difference <= 0`
-Hiện tại không còn auto approve ngay sau OTP theo kiểu cũ nữa.
+Hệ thống sẽ:
+- update request sang `pending`
+- trả về `requires_payment: false`
+- chờ admin xử lý
 
-Flow bây giờ là:
-- request được set về `pending`
-- sau đó mới xét rule auto approve theo threshold config
-- nếu đủ điều kiện thì service gọi approve luôn
-- nếu không đủ điều kiện thì request ở trạng thái chờ admin duyệt
-
-Nói ngắn gọn: OTP xong không có nghĩa là luôn hoàn tất, mà OTP chỉ là bước xác nhận để hệ thống chuyển sang giai đoạn xử lý chính thức.
+Điểm cần nhớ ở đây là:
+- **V1 hiện tại không còn nhánh auto approve sau OTP**
+- kể cả không cần trả thêm thì request vẫn vào hàng chờ xử lý chính thức
 
 ### Payment cho date change đã tách riêng
 
-Phần thanh toán phụ phí đổi ngày giờ đã có flow riêng hẳn, không dính chung với payment booking gốc.
+Phần thanh toán phụ phí đổi ngày có flow riêng, không dùng chung với payment booking gốc.
 
 Hiện service đã xử lý:
-- lock request để tránh race condition
-- chỉ cho tạo payment khi status là `pending_payment`
+- chỉ cho tạo payment khi request đang ở `pending_payment`
 - không cho tạo payment nếu request không cần trả thêm
-- reuse payment cũ nếu payment đó vẫn còn hiệu lực và chưa terminal
+- lock request để tránh race condition
+- có thể reuse payment cũ nếu payment đó vẫn còn hiệu lực và chưa terminal
+- sau khi payment được xác nhận thành công thì request chuyển về `pending`, **không tự approve**
 
-Các method đang support theo config:
+Các method hiện support theo config:
 - `BANK_QR`
 - `MOMO`
 - `PAYPAL`
 
-### Ý chính cần nhớ về date change
+### Admin flow trong V1
 
+Admin hiện chỉ cần làm đúng phần cốt lõi:
+- xem danh sách request đang chờ xử lý
+- xem chi tiết request
+- approve / reject request
+
+Để giữ V1 gọn, phần response admin đã được trim lại:
+- vẫn giữ `payment_status` để admin biết request đã thanh toán hay chưa
+- bỏ `queue_summary`
+- bỏ `approved_change_count` khỏi các query trả dữ liệu admin/detail
+- pending list chỉ giữ các field đủ dùng cho vòng xử lý cơ bản
+
+### Ý chính cần nhớ về date change V1
+
+- V1 hiện tại **đã đủ** và nên freeze scope tại đây
+- Chỉ support `outbound` leg
 - Có OTP bắt buộc
-- Có tách nhánh `pending_payment` riêng cho trường hợp khách phải bù tiền
-- Phần so sánh giá hiện tại dùng **base outbound fare x số ghế**
-- Trường hợp không cần trả thêm thì đi qua nhánh `pending` rồi mới auto-approve hoặc chờ admin, thay vì chốt cứng ngay từ đầu
+- Có tách nhánh `pending_payment` riêng khi khách phải bù tiền
+- Payment success chỉ chuyển request về `pending`, chưa approve
+- Admin là bước duyệt cuối
+- Schema và unique index đã được chỉnh theo `flight_leg`
+- Phần payload/admin response đã được dọn bớt cho gọn V1
+
+### Những gì chưa làm trong V1 và nên để sau
+
+Các phần dưới đây không nên nhét thêm vào V1 nữa:
+- return-leg date change
+- auto-approve phức tạp
+- analytics/reporting cho admin
+- mở rộng thêm field response nếu frontend chưa thực sự cần
+- các phần polish không ảnh hưởng đến correctness của flow
 
 ---
 

@@ -32,7 +32,7 @@ const normalizePassengers = ({ adults = 1, children = 0, infants = 0 }) => {
   };
 
   if (normalized.infants > normalized.adults) {
-    throw new Error('Số em bé không được nhiều hơn số người lớn');
+    throw new Error('Số em bé không được nhiều hơn số người lớn'); // check lỗi lại
   }
 
   return normalized;

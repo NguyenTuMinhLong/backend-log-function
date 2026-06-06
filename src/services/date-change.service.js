@@ -1,24 +1,6 @@
 'use strict';
 
-/*
-============================================================
-DATE CHANGE SERVICE - Đổi ngày bay
-============================================================
-
-Quy trình:
-1. User gửi yêu cầu đổi ngày (requestDateChange)
-2. Hệ thống gửi OTP qua email
-3. User xác thực OTP (confirmDateChange)
-4. Nếu chênh lệch giá > 0 → tạo payment để thanh toán
-5. Sau khi thanh toán → auto approve (approveDateChange)
-6. Admin có thể reject/reapprove
-
-Business Rules:
-- Phải đổi trước >= 24h giờ bay
-- Chênh lệch < 1M → auto approve
-- Chênh lệch >= 1M → cần admin duyệt
-============================================================
-*/
+// DATE CHANGE SERVICE - Đổi ngày bay
 
 const pool = require('../config/db');
 const QCD = require('../queries/date-change.queries');
@@ -59,14 +41,80 @@ const generateRequestCode = () => {
   return `DCR-${date}-${suffix}`;
 };
 
-const validateDateChangeRequest = async (booking, newFlightId, seatClass) => {
+const DATE_CHANGE_LEGS = ['outbound'];
+
+const ACTIVE_DATE_CHANGE_STATUSES = ['pending_otp', 'pending_payment', 'pending'];
+
+const toPassengerCount = (booking, passengerIds = null) => {
+  if (Array.isArray(passengerIds) && passengerIds.length > 0) {
+    return passengerIds.length;
+  }
+
+  return [booking.total_adults, booking.total_children, booking.total_infants]
+    .map((value) => parseInt(value || 0, 10))
+    .reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0);
+};
+
+const normalizeFlightLeg = (flightLeg) => {
+  const normalized = String(flightLeg || 'outbound').trim().toLowerCase();
+  if (!DATE_CHANGE_LEGS.includes(normalized)) {
+    throw new Error(`flight_leg phai la mot trong: ${DATE_CHANGE_LEGS.join(', ')}`);
+  }
+  return normalized;
+};
+
+const validateLegEligibility = (booking, flightLeg) => {
+  if (flightLeg === 'outbound') {
+    return {
+      flightId: booking.outbound_flight_id,
+      seatClass: booking.outbound_seat_class,
+      departureTime: booking.outbound_departure_time,
+      basePrice: parseFloat(booking.base_price || 0),
+      currentFlightNumber: booking.outbound_flight_number,
+    };
+  }
+
+  throw new Error(`Date change V1 chua ho tro leg "${flightLeg}"`);
+};
+
+const getApprovedDateChangeCountForLeg = async (bookingId, flightLeg, db = pool) => {
+  const result = await db.query(QCD.COUNT_APPROVED_DATE_CHANGES_FOR_LEG, [bookingId, flightLeg]);
+  return parseInt(result.rows[0]?.count || 0, 10);
+};
+
+const validateApprovedDateChangeLimit = async (bookingId, flightLeg, db = pool) => {
+  const approvedCount = await getApprovedDateChangeCountForLeg(bookingId, flightLeg, db);
+  const limit = DATE_CHANGE.limits?.maxApprovedChangesPerLeg || 2;
+
+  if (approvedCount >= limit) {
+    throw new Error(`Leg ${flightLeg} da dat toi da ${limit} lan doi ngay duoc duyet`);
+  }
+
+  return approvedCount;
+};
+
+const ensureRequestStatus = (request, allowedStatuses, actionLabel) => {
+  if (!allowedStatuses.includes(request.status)) {
+    throw new Error(`${actionLabel} khong hop le cho yeu cau o trang thai "${request.status}"`);
+  }
+};
+
+const markDateChangeRequestAsPending = async (db, requestCode) => {
+  const result = await db.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', requestCode]);
+  return result.rows[0] || null;
+};
+
+// HELPERS
+const validateDateChangeRequest = async (booking, newFlightId, seatClass, flightLeg = 'outbound') => {
+  const legContext = validateLegEligibility(booking, flightLeg);
+
   // 1. Booking phải confirmed
   if (booking.status !== 'confirmed') {
     throw new Error(`Không thể đổi ngày bay cho booking có trạng thái "${booking.status}"`);
   }
 
   // 2. Check thời gian trước departure
-  const hoursUntilDeparture = (new Date(booking.outbound_departure_time) - new Date()) / (1000 * 60 * 60);
+  const hoursUntilDeparture = (new Date(legContext.departureTime) - new Date()) / (1000 * 60 * 60);
   if (DATE_CHANGE.minHoursBeforeFlight && hoursUntilDeparture < DATE_CHANGE.minHoursBeforeFlight) {
     throw new Error(`Không thể đổi ngày bay khi còn ít hơn ${DATE_CHANGE.minHoursBeforeFlight} tiếng trước giờ khởi hành`);
   }
@@ -91,7 +139,7 @@ const validateDateChangeRequest = async (booking, newFlightId, seatClass) => {
 
   // 6. Check date range
   if (DATE_CHANGE.maxDateRange) {
-    const currentDeparture = new Date(booking.outbound_departure_time);
+    const currentDeparture = new Date(legContext.departureTime);
     const newDeparture = new Date(newFlight.departure_time);
     const daysDiff = Math.abs((newDeparture - currentDeparture) / (1000 * 60 * 60 * 24));
     if (daysDiff > DATE_CHANGE.maxDateRange) {
@@ -99,7 +147,10 @@ const validateDateChangeRequest = async (booking, newFlightId, seatClass) => {
     }
   }
 
-  return newFlight;
+  return {
+    ...newFlight,
+    current_leg_context: legContext,
+  };
 };
 // Hàm gửi OTP cho email
 const requestDateChangeOTP = async (email, requestCode) => {
@@ -125,17 +176,50 @@ const requestDateChangeOTP = async (email, requestCode) => {
   return { expiresIn: OTP_CONFIG.expiresInMinutes };
 }
 // Hàm verify OTP
-const verifyDateChangeOTP = async (email, otp) => {
-  const normalizedEmail = email.toLowerCase().trim();
-  const otpData = dateChangeOTPStore.get(normalizedEmail);
+const verifyDateChangeOTP = async (email, otp, requestCode) => {
+  const normalizedEmail = String(email || '').toLowerCase().trim();
 
-  if (!otpData) throw new Error('Khong tim thay ma OTP');
-  if (Date.now() > otpData.expiresAt) throw new Error('Ma OTP da het han');
-  if (otpData.attempts >= OTP_CONFIG.maxAttempts) throw new Error('Qua so lan thu');
-  if (otpData.code !== otp) {
-    otpData.attempts++;
+  const { rows } = await pool.query(
+    `SELECT request_code, otp_code, otp_expires_at, otp_attempts, booking_id
+     FROM date_change_requests
+     WHERE request_code = $1
+     LIMIT 1`,
+    [requestCode]
+  );
+
+  if (rows.length === 0) throw new Error('Khong tim thay yeu cau doi ngay bay');
+
+  const otpData = rows[0];
+  if (!otpData.otp_code) throw new Error('Khong tim thay ma OTP');
+  if (new Date() > new Date(otpData.otp_expires_at)) throw new Error('Ma OTP da het han');
+  if ((otpData.otp_attempts || 0) >= OTP_CONFIG.maxAttempts) throw new Error('Qua so lan thu');
+
+  const bookingResult = await pool.query(
+    `SELECT contact_email FROM bookings WHERE id = $1 LIMIT 1`,
+    [otpData.booking_id]
+  );
+
+  const bookingEmail = String(bookingResult.rows[0]?.contact_email || '').toLowerCase().trim();
+  if (!bookingEmail || bookingEmail !== normalizedEmail) {
+    throw new Error('Email xac thuc khong hop le');
+  }
+
+  if (otpData.otp_code !== otp) {
+    await pool.query(
+      `UPDATE date_change_requests
+       SET otp_attempts = COALESCE(otp_attempts, 0) + 1
+       WHERE request_code = $1`,
+      [requestCode]
+    );
     throw new Error('Ma OTP khong dung');
   }
+
+  await pool.query(
+    `UPDATE date_change_requests
+     SET otp_attempts = 0
+     WHERE request_code = $1`,
+    [requestCode]
+  );
 
   return { verified: true };
 };
@@ -205,10 +289,12 @@ const requestDateChange = async (userId, bookingCode, data) => {
     new_seat_class,
     passenger_ids = null,
     reason,
+    flight_leg = 'outbound',
   } = data;
 
   if (!new_flight_id) throw new Error('new_flight_id là bắt buộc');
   if (!new_seat_class) throw new Error('new_seat_class là bắt buộc');
+  const normalizedFlightLeg = normalizeFlightLeg(flight_leg);
   if (!['economy', 'business', 'first'].includes(new_seat_class)) {
     throw new Error('new_seat_class phải là: economy, business, hoặc first');
   }
@@ -229,26 +315,28 @@ const requestDateChange = async (userId, bookingCode, data) => {
       throw new Error('Bạn không có quyền thực hiện yêu cầu này');
     }
 
-    const existingRequest = await client.query(QCD.CHECK_PENDING_DATE_CHANGE_FOR_BOOKING, [booking.id]);
+    const existingRequest = await client.query(QCD.CHECK_PENDING_DATE_CHANGE_FOR_BOOKING, [booking.id, normalizedFlightLeg]);
     if (existingRequest.rows.length > 0) {
-      throw new Error('Đã có yêu cầu đổi ngày đang chờ xử lý cho booking này');
+      throw new Error(`Đã có yêu cầu đổi ngày đang chờ xử lý cho leg ${normalizedFlightLeg}`);
     }
 
-    const newFlight = await validateDateChangeRequest(booking, new_flight_id, new_seat_class);
+    const legContext = validateLegEligibility(booking, normalizedFlightLeg);
+    await validateApprovedDateChangeLimit(booking.id, normalizedFlightLeg, client);
+
+    const newFlight = await validateDateChangeRequest(booking, new_flight_id, new_seat_class, normalizedFlightLeg);
 
     // Check seat availability
     if (DATE_CHANGE.checkSeatAvailability) {
-      const passengers = passenger_ids?.length || (parseInt(booking.total_adults) + parseInt(booking.total_children));
+      const passengers = toPassengerCount(booking, passenger_ids);
       if (newFlight.available_seats < passengers) {
         throw new Error(`Chuyến bay mới không đủ ghế. Còn ${newFlight.available_seats} ghế, cần ${passengers}`);
       }
     }
 
-    const seatsNeeded = passenger_ids?.length || (parseInt(booking.total_adults) + parseInt(booking.total_children));
+    const seatsNeeded = toPassengerCount(booking, passenger_ids);
     const newFlightPrice = parseFloat(newFlight.base_price);
     const newTotalPrice = newFlightPrice * seatsNeeded;
-    // So sánh đúng: giá vé outbound × số ghế (không bao gồm hành lý, ancillary, chuyến về)
-    const oldPrice = parseFloat(booking.base_price) * seatsNeeded;
+    const oldPrice = parseFloat(legContext.basePrice) * seatsNeeded;
     const priceDifference = newTotalPrice - oldPrice;
 
     let requestCode;
@@ -262,9 +350,9 @@ const requestDateChange = async (userId, bookingCode, data) => {
     const requestResult = await client.query(QCD.INSERT_DATE_CHANGE, [
       requestCode,
       booking.id,
-      booking.outbound_flight_id,
+      legContext.flightId,
       new_flight_id,
-      booking.outbound_seat_class,
+      legContext.seatClass,
       new_seat_class,
       passenger_ids ? JSON.stringify(passenger_ids) : null,
       oldPrice,
@@ -273,6 +361,7 @@ const requestDateChange = async (userId, bookingCode, data) => {
       'pending_otp', // Status: cho OTP verification
       reason,
       userId,
+      normalizedFlightLeg,
     ]);
 
     const request = requestResult.rows[0];
@@ -303,10 +392,11 @@ const requestDateChange = async (userId, bookingCode, data) => {
       request_code: request.request_code,
       status: request.status,
       old_flight: {
-        flight_id: booking.outbound_flight_id,
-        flight_number: booking.outbound_flight_number,
-        departure_time: booking.outbound_departure_time,
-        seat_class: booking.outbound_seat_class,
+        flight_leg: normalizedFlightLeg,
+        flight_id: legContext.flightId,
+        flight_number: legContext.currentFlightNumber,
+        departure_time: legContext.departureTime,
+        seat_class: legContext.seatClass,
       },
       new_flight: {
         flight_id: new_flight_id,
@@ -317,7 +407,8 @@ const requestDateChange = async (userId, bookingCode, data) => {
       price_difference: priceDifference,
       price_difference_label: priceDifference > 0 ? 'Ban phai tra them' : priceDifference < 0 ? 'Ban duoc hoan' : 'Khong phai tra them',
       message: `Ma OTP da gui den ${booking.contact_email || booking.guest_email}. Vui long xac thuc OTP de hoan tat yeu cau.`,
-      requires_otp: true
+      requires_otp: true,
+      next_action: 'verify_otp',
     };
   } catch (err) {
     await client.query('ROLLBACK');
@@ -338,13 +429,9 @@ const confirmDateChange = async (email, otp, requestCode) => {
   if (requestResult.rows.length === 0) throw new Error('Không tìm thấy yêu cầu');
   const request = requestResult.rows[0];
 
-  if (request.status !== 'pending_otp') {
-    throw new Error(`Yêu cầu đã được xử lý (status: ${request.status})`);
-  }
+  ensureRequestStatus(request, ['pending_otp'], 'Xac thuc OTP');
 
-  // 3. Kiểm tra payment có cần không (price_difference > 0)
-  const absDiff = Math.abs(parseFloat(request.price_difference));
-  const requiresPayment = request.price_difference > 0 && DATE_CHANGE.priceDifference?.chargeIfPositive;
+  const requiresPayment = parseFloat(request.price_difference) > 0 && DATE_CHANGE.priceDifference?.chargeIfPositive;
 
   if (requiresPayment) {
     await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending_payment', requestCode]);
@@ -353,27 +440,20 @@ const confirmDateChange = async (email, otp, requestCode) => {
       status: 'pending_payment',
       requires_payment: true,
       price_difference: parseFloat(request.price_difference),
-      message: 'Quý khách cần thanh toán phụ phí để hoàn tất yêu cầu đổi ngày bay',
+      message: 'Quý khách cần thanh toán phụ phí để hoàn tất bước xác nhận. Sau khi thanh toán thành công, yêu cầu sẽ chờ admin xử lý.',
+      next_action: 'create_payment',
     };
   }
 
-  // 4. Không cần payment → auto approve hoặc chờ admin
-  const { AUTO_REFUND } = require('../config/refund.config');
-  const autoApprove = AUTO_REFUND.enabled && absDiff < AUTO_REFUND.threshold;
-
-  // Fix Bug 2: luôn set 'pending' trước — approveDateChange yêu cầu status = 'pending'
-  await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', requestCode]);
-
-  if (autoApprove) {
-    await approveDateChange(null, requestCode, 'Auto-approved sau OTP verification');
-  }
-
+  await markDateChangeRequestAsPending(pool, requestCode);
 
   return {
     success: true,
     status: 'pending',
     auto_approved: false,
-    message: 'Yêu cầu đổi ngày bay đã được tiếp nhận, chờ admin duyệt',
+    requires_payment: false,
+    message: 'Yêu cầu đổi ngày bay đã được tiếp nhận và đang chờ admin xử lý.',
+    next_action: 'wait_for_admin',
   };
 };
 
@@ -403,9 +483,7 @@ const createDateChangePayment = async (requestCode, paymentMethod, userId = null
     if (lockedResult.rows.length === 0) throw new Error('Khong tim thay yeu cau doi ngay bay');
     const request = lockedResult.rows[0];
 
-    if (request.status !== 'pending_payment') {
-      throw new Error(`Khong the tao thanh toan cho yeu cau o trang thai "${request.status}"`);
-    }
+    ensureRequestStatus(request, ['pending_payment'], 'Tao thanh toan');
 
     if (request.price_difference <= 0) {
       throw new Error('Yeu cau nay khong can thanh toan them');
@@ -414,13 +492,37 @@ const createDateChangePayment = async (requestCode, paymentMethod, userId = null
     // 3. Check if payment already exists (with lock held)
     if (request.payment_id && request.payment_code) {
       const existingPayment = await getDateChangePaymentByCodeRow(request.payment_code);
-      if (existingPayment && !isTerminalPaidStatus(existingPayment.status)) {
+      const existingGatewayResponse = existingPayment?.gateway_response || {};
+      const isReusablePendingPayment =
+        existingPayment &&
+        !isTerminalPaidStatus(existingPayment.status) &&
+        (
+          normalizedMethod !== 'PAYPAL' ||
+          String(existingPayment.payment_method || '').toUpperCase() !== 'PAYPAL' ||
+          Boolean(existingGatewayResponse.approve_url || existingGatewayResponse.redirect_url || existingGatewayResponse.order_id)
+        );
+
+      if (isReusablePendingPayment) {
         await client.query('COMMIT');
         return {
           ...mapDateChangePayment(existingPayment),
           request_code: requestCode,
           price_difference: parseFloat(request.price_difference),
         };
+      }
+
+      if (existingPayment && !isTerminalPaidStatus(existingPayment.status)) {
+        await client.query(`
+          UPDATE payments
+          SET status = 'FAILED',
+              updated_at = NOW(),
+              gateway_response = COALESCE(gateway_response, '{}'::jsonb) || jsonb_build_object(
+                'provider_retry_required', true,
+                'provider_retry_reason', 'missing_checkout_url',
+                'invalidated_at', NOW()
+              )
+          WHERE id = $1
+        `, [existingPayment.id]);
       }
     }
 
@@ -526,67 +628,109 @@ const createDateChangePayment = async (requestCode, paymentMethod, userId = null
 
 // ─── CONFIRM PAYMENT ĐÃ THANH TOÁN ──────────────────────────
 
-const confirmDateChangePayment = async (paymentCode) => {
-  // 1. Find payment
-  const payment = await getDateChangePaymentByCodeRow(paymentCode);
-  if (!payment) throw new Error('Khong tim thay thanh toan');
+const confirmDateChangePayment = async (paymentCode, options = {}) => {
+  const { trustedPaid = false, gatewayPayload = null } = options;
+  const client = await pool.connect();
 
-  if (isTerminalPaidStatus(payment.status)) {
-    const requestResult = await pool.query(QCD.SELECT_DATE_CHANGE_BY_PAYMENT_CODE, [paymentCode]);
+  try {
+    await client.query('BEGIN');
+
+    const paymentResult = await client.query(
+      'SELECT * FROM payments WHERE payment_code = $1 LIMIT 1 FOR UPDATE',
+      [paymentCode]
+    );
+    const payment = paymentResult.rows[0];
+    if (!payment) throw new Error('Khong tim thay thanh toan');
+
+    const requestResult = await client.query(QCD.SELECT_DATE_CHANGE_BY_PAYMENT_CODE, [paymentCode]);
+    if (requestResult.rows.length === 0) throw new Error('Khong tim thay yeu cau doi ngay bay');
+    const request = requestResult.rows[0];
+
+    if (isTerminalPaidStatus(payment.status)) {
+      const normalizedRequestStatus = request.status === 'approved' ? 'approved' : 'pending';
+      await client.query('COMMIT');
+      return {
+        success: true,
+        already_processed: true,
+        request_code: request.request_code,
+        status: normalizedRequestStatus,
+        payment_status: 'SUCCESS',
+        message: normalizedRequestStatus === 'approved'
+          ? 'Thanh toan da duoc ghi nhan va yeu cau da duoc duyet truoc do.'
+          : 'Thanh toan da duoc ghi nhan. Yeu cau dang cho admin xu ly.',
+      };
+    }
+
+    ensureRequestStatus(request, ['pending_payment'], 'Xac nhan thanh toan');
+
+    if (payment.expires_at && new Date() > new Date(payment.expires_at)) {
+      await client.query(
+        `UPDATE payments SET status = 'EXPIRED', updated_at = NOW() WHERE payment_code = $1`,
+        [paymentCode]
+      );
+      throw new Error('Payment da het han. Vui long tao thanh toan moi.');
+    }
+
+    const expectedAmount = parseFloat(request.price_difference);
+    const receivedAmount = parseFloat(payment.amount);
+    if (receivedAmount !== expectedAmount) {
+      throw new Error(`So tien khong dung. Expected: ${expectedAmount}, Received: ${receivedAmount}`);
+    }
+
+    const gatewayResponse = payment.gateway_response || {};
+    const normalizedMethod = String(payment.payment_method || '').toUpperCase();
+
+    if (!trustedPaid) {
+      if (normalizedMethod === 'PAYPAL') {
+        const approveUrl = gatewayResponse.approve_url || null;
+        if (approveUrl) {
+          throw new Error('Thanh toan PayPal chua duoc xac nhan. Vui long hoan tat checkout PayPal truoc.');
+        }
+      }
+
+      if (normalizedMethod === 'MOMO') {
+        const momoResultCode = Number(gatewayResponse.resultCode);
+        if (Number.isFinite(momoResultCode) && momoResultCode !== 0) {
+          throw new Error('Thanh toan MoMo chua thanh cong.');
+        }
+      }
+    }
+
+    await client.query(
+      `UPDATE payments 
+       SET status = 'SUCCESS',
+           paid_at = NOW(),
+           updated_at = NOW(),
+           gateway_response = COALESCE($2::jsonb, gateway_response)
+       WHERE payment_code = $1`,
+      [paymentCode, gatewayPayload ? JSON.stringify(gatewayPayload) : null]
+    );
+
+    await client.query(
+      `UPDATE date_change_requests
+       SET status = 'pending',
+           paid_at = NOW(),
+           updated_at = NOW()
+       WHERE request_code = $1`,
+      [request.request_code]
+    );
+
+    await client.query('COMMIT');
+
     return {
       success: true,
-      already_processed: true,
-      status: requestResult.rows[0]?.status,
-      message: 'Payment already processed',
+      request_code: request.request_code,
+      status: 'pending',
+      payment_status: 'SUCCESS',
+      next_action: 'wait_for_admin',
+      message: 'Thanh toan thanh cong. Yeu cau doi ngay bay dang cho admin xu ly.',
     };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
   }
-
-  // 2. Find date change request
-  const requestResult = await pool.query(QCD.SELECT_DATE_CHANGE_BY_PAYMENT_CODE, [paymentCode]);
-  if (requestResult.rows.length === 0) throw new Error('Khong tim thay yeu cau doi ngay bay');
-  const request = requestResult.rows[0];
-
-  if (request.status !== 'pending_payment') {
-    throw new Error(`Yeu cau da duoc xu ly (status: ${request.status})`);
-  }
-
-  // 3. Check payment expiry
-  if (payment.expires_at && new Date() > new Date(payment.expires_at)) {
-    await pool.query(`
-      UPDATE payments SET status = 'EXPIRED', updated_at = NOW() WHERE payment_code = $1
-    `, [paymentCode]);
-    throw new Error('Payment da het han. Vui long tao thanh toan moi.');
-  }
-
-  // 4. Validate amount matches
-  const expectedAmount = parseFloat(request.price_difference);
-  const receivedAmount = parseFloat(payment.amount);
-  if (receivedAmount !== expectedAmount) {
-    throw new Error(`So tien khong dung. Expected: ${expectedAmount}, Received: ${receivedAmount}`);
-  }
-
-  // 5. Update payment to SUCCESS
-  await pool.query(`
-    UPDATE payments 
-    SET status = 'SUCCESS', paid_at = NOW(), updated_at = NOW()
-    WHERE payment_code = $1
-  `, [paymentCode]);
-
-  // 6. Set status='pending' trước để approveDateChange có thể chạy
-  // (approveDateChange yêu cầu status='pending', không được set 'approved' trước)
-  await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', request.request_code]);
-
-  // 7. Execute the actual date change (release old seats, reserve new seats, update booking)
-  await approveDateChange(null, request.request_code, 'Payment confirmed automatically');
-
-  // 8. Mark paid_at
-  await pool.query(`UPDATE date_change_requests SET paid_at = NOW() WHERE request_code = $1`, [request.request_code]);
-
-  return {
-    success: true,
-    status: 'approved',
-    message: 'Thanh toan thanh cong. Yeu cau doi ngay bay da duoc duyet.',
-  };
 };
 
 // GET DATE CHANGE PAYMENT STATUS
@@ -658,27 +802,43 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
   try {
     await client.query('BEGIN');
 
-    const requestResult = await client.query(QCD.SELECT_DATE_CHANGE_BY_CODE, [requestCode]);
+    const requestResult = await client.query(
+      `${QCD.SELECT_DATE_CHANGE_BY_CODE.trim()} FOR UPDATE OF dcr`,
+      [requestCode]
+    );
     if (requestResult.rows.length === 0) throw new Error('Không tìm thấy yêu cầu đổi ngày bay');
 
     const request = requestResult.rows[0];
     console.log(`[DateChange Approve] Request: ${requestCode}, Status: ${request.status}`);
 
-    // Block approval if request is waiting for payment
-    if (request.status === 'pending_payment') {
-      throw new Error('Yeu cau dang cho thanh toan. Vui long thanh toan truoc khi duyet.');
+    ensureRequestStatus(request, ['pending'], 'Duyet yeu cau');
+    await validateApprovedDateChangeLimit(request.booking_id, request.flight_leg || 'outbound', client);
+
+    let passengers = 0;
+    try {
+      const parsedPassengerIds = JSON.parse(request.passenger_ids || 'null');
+      passengers = Array.isArray(parsedPassengerIds) && parsedPassengerIds.length > 0 ? parsedPassengerIds.length : 0;
+    } catch (error) {
+      passengers = 0;
     }
 
-    if (request.status !== 'pending') {
-      throw new Error(`Không thể duyệt yêu cầu có trạng thái "${request.status}"`);
+    if (!passengers) {
+      const bookingPassengerResult = await client.query(
+        'SELECT total_adults, total_children, total_infants FROM bookings WHERE id = $1 LIMIT 1',
+        [request.booking_id]
+      );
+      const bookingPassengerRow = bookingPassengerResult.rows[0] || {};
+      passengers = [bookingPassengerRow.total_adults, bookingPassengerRow.total_children, bookingPassengerRow.total_infants]
+        .map((value) => parseInt(value || 0, 10))
+        .reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0);
     }
 
-    const passengers = request.passenger_ids?.length || 1;
-    console.log(`[DateChange Approve] Passengers: ${passengers}`);
+    if (!passengers) {
+      throw new Error('Khong xac dinh duoc so hanh khach cho yeu cau doi ngay bay');
+    }
 
-    // === CHECK NEW FLIGHT ===
     const newSeatCheck = await client.query(
-      'SELECT available_seats, total_seats FROM flight_seats WHERE flight_id = $1 AND class = $2',
+      'SELECT available_seats, total_seats FROM flight_seats WHERE flight_id = $1 AND class = $2 FOR UPDATE',
       [request.new_flight_id, request.new_seat_class]
     );
 
@@ -691,26 +851,6 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
       throw new Error(`Chuyến bay mới chỉ còn ${newSeat.available_seats} ghế`);
     }
 
-    // === CHECK OLD FLIGHT (nếu có) ===
-    if (request.old_flight_id && request.old_seat_class) {
-      const oldSeatCheck = await client.query(
-        'SELECT available_seats, total_seats FROM flight_seats WHERE flight_id = $1 AND class = $2',
-        [request.old_flight_id, request.old_seat_class]
-      );
-
-      if (oldSeatCheck.rows.length > 0) {
-        const oldSeat = oldSeatCheck.rows[0];
-        console.log(`[Old Flight] Current: ${oldSeat.available_seats}/${oldSeat.total_seats}`);
-
-        const newAvailableOld = oldSeat.available_seats + passengers;
-        if (newAvailableOld > oldSeat.total_seats) {
-          console.warn(`[WARNING] Old flight available will exceed total: ${newAvailableOld} > ${oldSeat.total_seats}`);
-          // Tự động điều chỉnh không cho vượt total_seats
-        }
-      }
-    }
-
-    // === RELEASE OLD SEATS (an toàn) ===
     if (request.old_flight_id && request.old_seat_class) {
       await client.query(
         `UPDATE flight_seats 
@@ -722,7 +862,6 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
       console.log(`[DateChange] Released ${passengers} seats from old flight`);
     }
 
-    // === RESERVE NEW SEATS ===
     await client.query(
       `UPDATE flight_seats 
        SET available_seats = available_seats - $1, 
@@ -732,82 +871,6 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
     );
     console.log(`[DateChange] Reserved ${passengers} seats on new flight`);
 
-    // === HUỶ ANCILLARY OUTBOUND (trừ bảo hiểm) ===
-    const cancelAncResult = await client.query(`
-      UPDATE booking_ancillaries ba
-      SET status = 'cancelled', updated_at = NOW()
-      FROM ancillary_options ao
-      WHERE ba.ancillary_option_id = ao.id
-        AND ba.booking_id = $1
-        AND ba.flight_type = 'outbound'
-        AND ao.type != 'insurance'
-        AND ba.status != 'cancelled'
-      RETURNING ba.total_price
-    `, [request.booking_id]);
-    const cancelledAncillaryTotal = cancelAncResult.rows
-      .reduce((sum, r) => sum + parseFloat(r.total_price), 0);
-    console.log(`[DateChange] Cancelled ancillary total: ${cancelledAncillaryTotal}`);
-
-    // === CẬP NHẬT TOTAL_PRICE BOOKING ===
-    const bookingRow = await client.query(
-      `SELECT total_price FROM bookings WHERE id = $1`, [request.booking_id]
-    );
-    const currentBookingTotal = parseFloat(bookingRow.rows[0]?.total_price || 0);
-    const oldTicketPrice = parseFloat(request.old_price);
-    const newTicketPrice = parseFloat(request.new_price);
-    const ticketDiff = newTicketPrice - oldTicketPrice;
-    const updatedBookingTotal = Math.max(0, currentBookingTotal + ticketDiff - cancelledAncillaryTotal);
-
-    await client.query(
-      `UPDATE bookings SET total_price = $1, updated_at = NOW() WHERE id = $2`,
-      [updatedBookingTotal, request.booking_id]
-    );
-    console.log(`[DateChange] Updated booking total: ${currentBookingTotal} → ${updatedBookingTotal}`);
-
-    // === AUTO-CREATE REFUND NẾU USER ĐƯỢC HOÀN TIỀN ===
-    // Hoàn = tiền vé giảm (nếu có) + tiền dịch vụ đã huỷ
-    const ticketRefund = Math.max(0, -ticketDiff);
-    const refundableAmount = ticketRefund + cancelledAncillaryTotal;
-    let relatedRefundCode = null;
-
-    if (refundableAmount > 0) {
-      const refundCode = generateRefundCode();
-      const parts = [];
-      if (ticketRefund > 0) parts.push(`chênh lệch vé ${ticketRefund.toLocaleString('vi-VN')} VND`);
-      if (cancelledAncillaryTotal > 0) parts.push(`dịch vụ huỷ ${cancelledAncillaryTotal.toLocaleString('vi-VN')} VND`);
-
-      const refundResult = await client.query(`
-        INSERT INTO refunds (
-          refund_code, booking_id, refund_type, requested_items,
-          refund_amount, admin_fee, net_refund_amount, refund_policy_applied,
-          status, reason, requested_by
-        ) VALUES ($1, $2, 'partial_leg', $3::jsonb, $4, 0, $4, $5::jsonb, 'pending', $6, $7)
-        RETURNING id
-      `, [
-        refundCode,
-        request.booking_id,
-        JSON.stringify({ type: 'date_change', request_code: requestCode }),
-        refundableAmount,
-        JSON.stringify({ name: 'date_change_refund' }),
-        `Hoàn tiền do đổi ngày bay (${requestCode}): ${parts.join(' + ')}`,
-        adminId || null,
-      ]);
-      relatedRefundCode = refundCode;
-
-      await client.query(
-        `UPDATE date_change_requests SET related_refund_id = $1 WHERE request_code = $2`,
-        [refundResult.rows[0].id, requestCode]
-      );
-      console.log(`[DateChange] Auto-created refund ${refundCode}: ${refundableAmount} VND`);
-    }
-
-    // === GHI NOTE PHỤ THU NẾU USER CẦN TRẢ THÊM ===
-    const surchargeAmount = Math.max(0, ticketDiff - cancelledAncillaryTotal);
-    const finalAdminNotes = surchargeAmount > 0
-      ? `${adminNotes ? adminNotes + ' | ' : ''}PHỤ THU: ${surchargeAmount.toLocaleString('vi-VN')} VND chưa thu từ khách`
-      : adminNotes;
-
-    // Update booking flight & status
     await client.query(QCD.UPDATE_BOOKING_FLIGHT, [
       request.new_flight_id,
       request.new_seat_class,
@@ -817,25 +880,29 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
     await client.query(QCD.UPDATE_DATE_CHANGE_STATUS, [
       'approved',
       adminId,
-      finalAdminNotes,
+      adminNotes,
       requestCode,
     ]);
 
     await client.query('COMMIT');
     console.log(`[DateChange Approve] SUCCESS: ${requestCode}`);
 
+    try {
+      await createDateChangeNotification({
+        event: 'DATE_CHANGE_APPROVED',
+        request: { ...request, status: 'approved', admin_notes: adminNotes },
+        booking: { booking_code: request.booking_code },
+        adminId,
+      });
+    } catch (notifErr) {
+      console.error('[DateChange] Notification error:', notifErr.message);
+    }
+
     return {
       success: true,
       request_code: requestCode,
       status: 'approved',
       message: 'Yêu cầu đổi ngày bay đã được duyệt thành công',
-      price_settled: {
-        ticket_difference:        ticketDiff,
-        cancelled_ancillary_total: cancelledAncillaryTotal,
-        refund_amount:            refundableAmount,
-        refund_code:              relatedRefundCode,
-        surcharge_amount:         surchargeAmount,
-      },
     };
 
   } catch (err) {
@@ -864,8 +931,8 @@ const rejectDateChange = async (adminId, requestCode, reason) => {
 
     const request = requestResult.rows[0];
 
-    // Bug 5 Fix: cho phép reject cả 'pending_otp' (chưa xác nhận OTP) và 'pending'
-    if (!['pending', 'pending_otp'].includes(request.status)) {
+    // Cho phép reject các yêu cầu chưa hoàn tất xử lý cuối cùng
+    if (!ACTIVE_DATE_CHANGE_STATUSES.includes(request.status)) {
       throw new Error(`Không thể từ chối yêu cầu có trạng thái "${request.status}"`);
     }
 

@@ -140,7 +140,11 @@ const DATE_CHANGE = {
     enabled: true,
     methods: ['BANK_QR', 'MOMO', 'PAYPAL'], // Các phương thức thanh toán hỗ trợ
     expiryMinutes: 30, // Thời hạn thanh toán (30 phút)
-    autoApproveOnPayment: true, // Tự động approve date change sau khi payment thành công
+    autoApproveOnPayment: false, // Payment success chỉ xác nhận đã nhận tiền, vẫn chờ admin duyệt
+  },
+
+  limits: {
+    maxApprovedChangesPerLeg: 2,
   },
 };
 

@@ -1,9 +1,11 @@
--- MIGRATION 012: Add payment_id to date_change_requests
+-- MIGRATION 012: Add payment linkage to date_change_requests
 -- For linking date change requests to their payment records
 
--- Add payment_id column
+-- Add payment_id column as text reference because payments.id schema is not defined by tracked migrations.
+-- Application code already compares payments.id via ::text, so storing the linkage as text keeps V1 safe
+-- until the payments table schema is formalized in versioned migrations.
 ALTER TABLE date_change_requests 
-ADD COLUMN IF NOT EXISTS payment_id UUID REFERENCES payments(id);
+ADD COLUMN IF NOT EXISTS payment_id VARCHAR(64);
 
 -- Add payment_code column for easier lookup
 ALTER TABLE date_change_requests 
