@@ -151,6 +151,24 @@ const COUNTRY_REGION = {
 };
 
 // offset/limit để phân trang — tránh load hàng trăm nghìn tuyến cùng lúc
+// Giới hạn km theo phân khúc hãng (price_tier):
+//   < 0.85  → LCC (AirAsia, Vietjet...)        max 6 000 km  (nội địa + khu vực)
+//   < 1.30  → Trung cấp (VN Airlines, MAS...)  max 10 000 km (intercontinental vừa)
+//   >= 1.30 → Cao cấp (Emirates, SQ, QR...)    max 20 000 km (không giới hạn thực tế)
+const ROUTE_MAX_KM_SQL = `
+  CASE
+    WHEN COALESCE(al.price_tier, 1.0) < 0.85 THEN 6000
+    WHEN COALESCE(al.price_tier, 1.0) < 1.30 THEN 10000
+    ELSE 20000
+  END`;
+
+const HAVERSINE_KM_SQL = `
+  6371.0 * 2.0 * ASIN(SQRT(
+    POWER(SIN(RADIANS((arr.lat - dep.lat) / 2.0)), 2) +
+    COS(RADIANS(dep.lat)) * COS(RADIANS(arr.lat)) *
+    POWER(SIN(RADIANS((arr.lng - dep.lng) / 2.0)), 2)
+  ))`;
+
 const getAutoRoutes = async (offset = 0, limit = 100) => {
   const { rows } = await pool.query(`
     SELECT
@@ -181,6 +199,7 @@ const getAutoRoutes = async (offset = 0, limit = 100) => {
         LOWER(dep.country) = LOWER(al.country)
         OR LOWER(arr.country) = LOWER(al.country)
       )
+      AND ${HAVERSINE_KM_SQL} <= ${ROUTE_MAX_KM_SQL}
     ORDER BY md5(al.id::text || dep.id::text || arr.id::text)
     LIMIT $1 OFFSET $2
   `, [limit, offset]);
@@ -205,6 +224,7 @@ const countAutoRoutes = async () => {
         LOWER(dep.country) = LOWER(al.country)
         OR LOWER(arr.country) = LOWER(al.country)
       )
+      AND ${HAVERSINE_KM_SQL} <= ${ROUTE_MAX_KM_SQL}
   `);
   return parseInt(rows[0].total, 10);
 };
@@ -476,11 +496,16 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
     for (const dest of destinations) {
       const destCountry = (dest.country || '').toLowerCase();
 
-      // Hãng phù hợp: hãng cùng nước với điểm đến HOẶC hãng cùng nước dep (VN)
+      // Hãng phù hợp: cùng quốc gia dep/arr VÀ khoảng cách trong tầm bay của hãng
+      const airlineMaxKm = (al) => {
+        const t = Number(al.price_tier) || 1.0;
+        return t < 0.85 ? 6000 : t < 1.30 ? 10000 : 20000;
+      };
       let compatAirlines = allAirlines.filter(al => {
         const alc = (al.country || '').toLowerCase();
-        return alc === srcCountry || alc === destCountry;
+        return (alc === srcCountry || alc === destCountry) && km <= airlineMaxKm(al);
       });
+      if (!compatAirlines.length) compatAirlines = allAirlines.filter(al => km <= airlineMaxKm(al));
       if (!compatAirlines.length) compatAirlines = allAirlines;
 
       const km           = haversineKm(Number(src.lat), Number(src.lng), Number(dest.lat), Number(dest.lng));
@@ -578,8 +603,9 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
       // Pass 2: Chiều về dest → src (hãng phù hợp theo quốc gia dest/src)
       let compatReturn = allAirlines.filter(al => {
         const alc = (al.country || '').toLowerCase();
-        return alc === destCountry || alc === srcCountry;
+        return (alc === destCountry || alc === srcCountry) && km <= airlineMaxKm(al);
       });
+      if (!compatReturn.length) compatReturn = allAirlines.filter(al => km <= airlineMaxKm(al));
       if (!compatReturn.length) compatReturn = allAirlines;
 
       let scheduleReturn = [];
