@@ -330,7 +330,7 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
             if (!usedNums[numsKey]) usedNums[numsKey] = new Set();
             const dateUsed = usedNums[numsKey];
             let flightNum = null;
-            const preferredOffset = 100 + ri * slotsPerRoute + si;
+            const preferredOffset = 100 + ri * timeSlots.length + si;
             for (let n = preferredOffset; n <= 999; n++) {
               const candidate = `${route.airline_code}${n}`;
               if (!dateUsed.has(candidate)) { flightNum = candidate; dateUsed.add(candidate); break; }
