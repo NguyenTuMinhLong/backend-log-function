@@ -502,6 +502,9 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
       const destCountry = (dest.country || '').toLowerCase();
 
       // Hãng phù hợp: cùng quốc gia dep/arr VÀ khoảng cách trong tầm bay của hãng
+      const km           = haversineKm(Number(src.lat), Number(src.lng), Number(dest.lat), Number(dest.lng));
+      const durationMins = estimateMins(km);
+
       const airlineMaxKm = (al) => {
         const t = Number(al.price_tier) || 1.0;
         return t < 0.85 ? 6000 : t < 1.30 ? 10000 : 20000;
@@ -512,9 +515,6 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
       });
       if (!compatAirlines.length) compatAirlines = allAirlines.filter(al => km <= airlineMaxKm(al));
       if (!compatAirlines.length) compatAirlines = allAirlines;
-
-      const km           = haversineKm(Number(src.lat), Number(src.lng), Number(dest.lat), Number(dest.lng));
-      const durationMins = estimateMins(km);
 
       // ── Chế độ single route: mỗi hãng bay N chuyến/ngày ─────────────────────
       // ── Chế độ all routes:  xoay vòng hãng qua các slot  ────────────────────
