@@ -522,38 +522,29 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
       // ── Chế độ all routes:  xoay vòng hãng qua các slot  ────────────────────
       let schedule = []; // [{ dateStr, slotTime, airlineIdx }]
 
-      const slots = getTimeSlots(); // 48 slot cố định mỗi 30 phút
+      // Luôn dùng toàn bộ 48 slot (00:00 → 23:30, mỗi 30 phút)
+      const slots = getTimeSlots();
       if (mode === 'all_airlines') {
-        // Mỗi hãng bay flightsPerRoute chuyến/ngày trên tuyến này
-        const daySlots = selectEvenSlots(slots, flightsPerRoute);
+        // Mỗi slot 1 hãng xoay vòng — 48 chuyến/tuyến/ngày
+        let ai = 0;
         for (const dateStr of dates) {
-          for (let ai = 0; ai < compatAirlines.length; ai++) {
-            for (const slotTime of daySlots) {
-              schedule.push({ dateStr, slotTime, airlineIdx: ai });
-            }
+          for (const slotTime of slots) {
+            schedule.push({ dateStr, slotTime, airlineIdx: ai++ });
           }
         }
       } else if (mode === 'per_day') {
-        // flightsPerRoute chuyến/tuyến/ngày, xoay vòng hãng qua các slot
-        const daySlots = selectEvenSlots(slots, flightsPerRoute);
         let ai = 0;
         for (const dateStr of dates) {
-          for (const slotTime of daySlots) {
+          for (const slotTime of slots) {
             schedule.push({ dateStr, slotTime, airlineIdx: ai++ });
           }
         }
       } else {
-        // total: flightsPerRoute chuyến tổng cộng trải đều qua các ngày
-        const perDay = Math.max(1, Math.round(flightsPerRoute / Math.max(1, numDays)));
-        const daySlots = selectEvenSlots(slots, perDay);
+        // total: 48 slot/ngày xoay vòng hãng
         let ai = 0;
-        let scheduled = 0;
         for (const dateStr of dates) {
-          if (scheduled >= flightsPerRoute) break;
-          for (const slotTime of daySlots) {
-            if (scheduled >= flightsPerRoute) break;
+          for (const slotTime of slots) {
             schedule.push({ dateStr, slotTime, airlineIdx: ai++ });
-            scheduled++;
           }
         }
       }
@@ -616,35 +607,12 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
       if (!compatReturn.length) compatReturn = allAirlines.filter(al => km <= airlineMaxKm(al));
       if (!compatReturn.length) compatReturn = allAirlines;
 
+      // Chiều về — cùng logic 48 slot xoay vòng hãng
       let scheduleReturn = [];
-      if (mode === 'all_airlines') {
-        const daySlots = selectEvenSlots(slots, flightsPerRoute);
+      { let ai = 0;
         for (const dateStr of dates) {
-          for (let ai = 0; ai < compatReturn.length; ai++) {
-            for (const slotTime of daySlots) {
-              scheduleReturn.push({ dateStr, slotTime, airlineIdx: ai });
-            }
-          }
-        }
-      } else if (mode === 'per_day') {
-        const daySlots = selectEvenSlots(slots, flightsPerRoute);
-        let ai = 0;
-        for (const dateStr of dates) {
-          for (const slotTime of daySlots) {
+          for (const slotTime of slots) {
             scheduleReturn.push({ dateStr, slotTime, airlineIdx: ai++ });
-          }
-        }
-      } else {
-        const perDay = Math.max(1, Math.round(flightsPerRoute / Math.max(1, numDays)));
-        const daySlots = selectEvenSlots(slots, perDay);
-        let ai = 0;
-        let scheduled = 0;
-        for (const dateStr of dates) {
-          if (scheduled >= flightsPerRoute) break;
-          for (const slotTime of daySlots) {
-            if (scheduled >= flightsPerRoute) break;
-            scheduleReturn.push({ dateStr, slotTime, airlineIdx: ai++ });
-            scheduled++;
           }
         }
       }
