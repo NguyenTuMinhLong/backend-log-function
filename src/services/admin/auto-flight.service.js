@@ -54,16 +54,13 @@ const estimateMins = (km) => {
 
 // ─── Time-slot helpers ────────────────────────────────────────────────────────
 
-// Spread N time-slots evenly from 06:00 to 22:00
-const getTimeSlots = (n) => {
-  if (n <= 0) return [];
-  const start = 6 * 60;  // 360 mins
-  const end   = 22 * 60; // 1320 mins
-  if (n === 1) return ['14:00'];
-  return Array.from({ length: n }, (_, i) => {
-    const mins = Math.round(start + ((end - start) * i) / (n - 1));
-    return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
-  });
+// Cố định 48 slot mỗi 30 phút trong 24 giờ: 00:00, 00:30, ..., 23:30
+const getTimeSlots = () => {
+  const slots = [];
+  for (let m = 0; m < 24 * 60; m += 30) {
+    slots.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+  }
+  return slots;
 };
 
 // Format local date thành "YYYY-MM-DD" — tránh lệch ngày do UTC offset
@@ -144,76 +141,79 @@ const COUNTRY_REGION = {
   'Chile': 'SAM', 'Brazil': 'SAM', 'Argentina': 'SAM',
 };
 
-const getAutoRoutes = async (maxRoutesPerAirline = 5) => {
+// offset/limit để phân trang — tránh load hàng trăm nghìn tuyến cùng lúc
+const getAutoRoutes = async (offset = 0, limit = 100) => {
   const { rows } = await pool.query(`
-    WITH airline_region AS (
-      -- Gán region cho mỗi hãng dựa theo country
-      SELECT
-        al.id          AS airline_id,
-        al.code        AS airline_code,
-        al.name        AS airline_name,
-        al.country     AS airline_country,
-        al.price_tier,
-        al.is_active
-      FROM airlines al
-      WHERE al.is_active = TRUE
-    ),
-    ranked AS (
-      SELECT
-        ar.airline_id,
-        ar.airline_code,
-        ar.airline_name,
-        ar.airline_country,
-        ar.price_tier,
-        dep.id   AS dep_id,
-        dep.code AS dep_code,
-        dep.lat  AS dep_lat,
-        dep.lng  AS dep_lng,
-        arr.id   AS arr_id,
-        arr.code AS arr_code,
-        arr.lat  AS arr_lat,
-        arr.lng  AS arr_lng,
-        ROW_NUMBER() OVER (
-          PARTITION BY ar.airline_id
-          ORDER BY RANDOM()
-        ) AS rn
-      FROM airline_region ar
-      CROSS JOIN airports dep
-      CROSS JOIN airports arr
-      WHERE dep.is_active = TRUE
-        AND arr.is_active = TRUE
-        AND dep.id != arr.id
-        AND dep.lat IS NOT NULL AND dep.lng IS NOT NULL
-        AND arr.lat IS NOT NULL AND arr.lng IS NOT NULL
-        -- Route hợp lệ: ít nhất 1 đầu cùng nước với hãng
-        -- Nếu hãng chưa có country → bỏ qua (không tạo route vô căn cứ)
-        AND ar.airline_country IS NOT NULL
-        AND (
-          LOWER(dep.country) = LOWER(ar.airline_country)
-          OR LOWER(arr.country) = LOWER(ar.airline_country)
-        )
-    )
-    SELECT airline_id, airline_code, airline_name, airline_country, price_tier,
-           dep_id, dep_code, dep_lat, dep_lng,
-           arr_id, arr_code, arr_lat, arr_lng
-    FROM ranked
-    WHERE rn <= $1
-    ORDER BY airline_code, dep_code, arr_code
-  `, [maxRoutesPerAirline]);
+    SELECT
+      al.id          AS airline_id,
+      al.code        AS airline_code,
+      al.name        AS airline_name,
+      al.country     AS airline_country,
+      al.price_tier,
+      dep.id   AS dep_id,
+      dep.code AS dep_code,
+      dep.lat  AS dep_lat,
+      dep.lng  AS dep_lng,
+      arr.id   AS arr_id,
+      arr.code AS arr_code,
+      arr.lat  AS arr_lat,
+      arr.lng  AS arr_lng
+    FROM airlines al
+    CROSS JOIN airports dep
+    CROSS JOIN airports arr
+    WHERE al.is_active = TRUE
+      AND dep.is_active = TRUE
+      AND arr.is_active = TRUE
+      AND dep.id != arr.id
+      AND dep.lat IS NOT NULL AND dep.lng IS NOT NULL
+      AND arr.lat IS NOT NULL AND arr.lng IS NOT NULL
+      AND al.country IS NOT NULL
+      AND (
+        LOWER(dep.country) = LOWER(al.country)
+        OR LOWER(arr.country) = LOWER(al.country)
+      )
+    ORDER BY al.code, dep.code, arr.code
+    LIMIT $1 OFFSET $2
+  `, [limit, offset]);
   return rows;
+};
+
+// Tổng số tuyến — dùng để biết khi nào reset offset về 0
+const countAutoRoutes = async () => {
+  const { rows } = await pool.query(`
+    SELECT COUNT(*) AS total
+    FROM airlines al
+    CROSS JOIN airports dep
+    CROSS JOIN airports arr
+    WHERE al.is_active = TRUE
+      AND dep.is_active = TRUE
+      AND arr.is_active = TRUE
+      AND dep.id != arr.id
+      AND dep.lat IS NOT NULL AND dep.lng IS NOT NULL
+      AND arr.lat IS NOT NULL AND arr.lng IS NOT NULL
+      AND al.country IS NOT NULL
+      AND (
+        LOWER(dep.country) = LOWER(al.country)
+        OR LOWER(arr.country) = LOWER(al.country)
+      )
+  `);
+  return parseInt(rows[0].total, 10);
 };
 
 // ─── Status ───────────────────────────────────────────────────────────────────
 
 const getStatus = async () => {
-  const config = await getConfig();
-  const maxRoutes = config?.max_routes_per_airline || 5;
-  const routes = await getAutoRoutes(maxRoutes);
-  const airlineCounts = {};
-  for (const r of routes) {
-    airlineCounts[r.airline_code] = (airlineCounts[r.airline_code] || 0) + 1;
-  }
-  return { config, total_routes: routes.length, airline_counts: airlineCounts };
+  const config      = await getConfig();
+  const total       = await countAutoRoutes();
+  const offset      = config?.route_offset || 0;
+  const routeLimit  = config?.route_limit  || 100;
+  return {
+    config,
+    total_routes:    total,
+    current_offset:  offset,
+    routes_per_batch: routeLimit,
+    batches_to_cover: total > 0 ? Math.ceil(total / routeLimit) : 0,
+  };
 };
 
 // ─── Batch runner ─────────────────────────────────────────────────────────────
@@ -237,12 +237,17 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
 
   if (today > targetEnd) return { created: 0, skipped: 0, reason: 'out_of_range' };
 
-  const maxRoutes = config.max_routes_per_airline || 5;
-  const routes = await getAutoRoutes(maxRoutes);
-  if (routes.length === 0) return { created: 0, skipped: 0, reason: 'no_routes' };
+  // Lấy chunk tuyến hiện tại theo offset đã lưu
+  const routeLimit  = config.route_limit  || 100;
+  const routeOffset = config.route_offset || 0;
+  const routes = await getAutoRoutes(routeOffset, routeLimit);
+  if (routes.length === 0) {
+    // Đã xử lý hết → reset offset về 0 cho chu kỳ tiếp
+    await pool.query(`UPDATE auto_flight_config SET route_offset = 0 WHERE id = 1`);
+    return { created: 0, skipped: 0, reason: 'cycle_complete_offset_reset' };
+  }
 
-  const slotsPerRoute = config.flights_per_route || 3;
-  const timeSlots     = getTimeSlots(slotsPerRoute);
+  const timeSlots = getTimeSlots(); // 48 slot cố định mỗi 30 phút
 
   // Build mảng ngày từ loopStart → targetEnd (dùng local date tránh UTC offset)
   const loopStart = new Date(Math.max(today.getTime(), configStart.getTime()));
@@ -368,14 +373,19 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
       }
     }
 
+    // Tăng offset cho lần chạy tiếp — nếu vượt tổng số tuyến thì reset về 0
+    const totalRoutes   = await countAutoRoutes();
+    const nextOffset    = (routeOffset + routeLimit) >= totalRoutes ? 0 : (routeOffset + routeLimit);
     await pool.query(
       `UPDATE auto_flight_config
-       SET last_run_at = NOW(), total_created = total_created + $1
+       SET last_run_at    = NOW(),
+           total_created  = total_created + $1,
+           route_offset   = $2
        WHERE id = 1`,
-      [created]
+      [created, nextOffset]
     );
 
-    return { created, skipped };
+    return { created, skipped, route_offset: routeOffset, next_offset: nextOffset, total_routes: totalRoutes };
   } finally {
     client.release();
   }
@@ -470,9 +480,9 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
       // ── Chế độ all routes:  xoay vòng hãng qua các slot  ────────────────────
       let schedule = []; // [{ dateStr, slotTime, airlineIdx }]
 
+      const slots = getTimeSlots(); // 48 slot cố định mỗi 30 phút
       if (mode === 'all_airlines') {
-        // Tất cả hãng phù hợp đều bay tuyến này, mỗi hãng N chuyến/ngày
-        const slots = getTimeSlots(flightsPerRoute);
+        // Tất cả hãng phù hợp đều bay tuyến này, mỗi hãng 48 chuyến/ngày
         for (const dateStr of dates) {
           for (let ai = 0; ai < compatAirlines.length; ai++) {
             for (let si = 0; si < slots.length; si++) {
@@ -481,7 +491,6 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
           }
         }
       } else if (mode === 'per_day') {
-        const slots = getTimeSlots(flightsPerRoute);
         let ai = 0;
         for (const dateStr of dates) {
           for (const slotTime of slots) {
@@ -489,16 +498,11 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
           }
         }
       } else {
-        // total: chọn N (date, slot) phân bổ đều qua các ngày
-        const totalSlots  = flightsPerRoute;
-        const slotsPerDay = Math.max(1, Math.ceil(totalSlots / numDays));
-        const baseSlots   = getTimeSlots(slotsPerDay);
-        let count = 0, ai = 0;
-        outer: for (const dateStr of dates) {
-          for (const slotTime of baseSlots) {
-            if (count >= totalSlots) break outer;
+        // total: phân bổ đều 48 slot/ngày qua các ngày
+        let ai = 0;
+        for (const dateStr of dates) {
+          for (const slotTime of slots) {
             schedule.push({ dateStr, slotTime, airlineIdx: ai++ });
-            count++;
           }
         }
       }
