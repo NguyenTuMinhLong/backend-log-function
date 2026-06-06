@@ -95,24 +95,22 @@ const getConfig = async () => {
   return rows[0] || null;
 };
 
-const saveConfig = async ({ is_enabled, start_date, end_date, flights_per_route, advance_days, max_routes_per_airline }) => {
+const saveConfig = async ({ is_enabled, start_date, end_date, advance_days, route_limit }) => {
   const { rows } = await pool.query(`
     UPDATE auto_flight_config SET
-      is_enabled              = COALESCE($1, is_enabled),
-      start_date              = COALESCE($2::date, start_date),
-      end_date                = COALESCE($3::date, end_date),
-      flights_per_route       = COALESCE($4, flights_per_route),
-      advance_days            = COALESCE($5, advance_days),
-      max_routes_per_airline  = COALESCE($6, max_routes_per_airline)
+      is_enabled   = COALESCE($1, is_enabled),
+      start_date   = COALESCE($2::date, start_date),
+      end_date     = COALESCE($3::date, end_date),
+      advance_days = COALESCE($4, advance_days),
+      route_limit  = COALESCE($5, route_limit)
     WHERE id = 1
     RETURNING *
   `, [
-    is_enabled               !== undefined ? is_enabled               : null,
-    start_date               || null,
-    end_date                 || null,
-    flights_per_route        != null       ? flights_per_route        : null,
-    advance_days             != null       ? advance_days             : null,
-    max_routes_per_airline   != null       ? max_routes_per_airline   : null,
+    is_enabled  !== undefined ? is_enabled  : null,
+    start_date  || null,
+    end_date    || null,
+    advance_days != null      ? advance_days : null,
+    route_limit  != null      ? route_limit  : null,
   ]);
   return rows[0];
 };
