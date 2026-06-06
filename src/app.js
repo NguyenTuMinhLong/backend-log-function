@@ -26,7 +26,16 @@ require("./scripts/Loyalty.cron");
 // Migration: thêm cột country vào airlines nếu chưa có
 pool.query(`ALTER TABLE airlines ADD COLUMN IF NOT EXISTS country VARCHAR(100)`)
   .then(() => console.log('[Migration] airlines.country OK'))
-  .catch(err => console.error('[Migration] airlines.country:', err.message)); // Loyalty annual reset cron job
+  .catch(err => console.error('[Migration] airlines.country:', err.message));
+
+// Migration: thêm route_offset và route_limit vào auto_flight_config
+pool.query(`
+  ALTER TABLE auto_flight_config
+    ADD COLUMN IF NOT EXISTS route_offset INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS route_limit  INTEGER NOT NULL DEFAULT 100
+`)
+  .then(() => console.log('[Migration] auto_flight_config route_offset/route_limit OK'))
+  .catch(err => console.error('[Migration] auto_flight_config:', err.message));
 
 const app = express();
 

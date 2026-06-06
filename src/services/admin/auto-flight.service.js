@@ -414,6 +414,8 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
 };
 
 // ─── Tạo chuyến bay từ 1 sân bay cụ thể ─────────────────────────────────────
+const FROM_AIRPORT_BATCH_LIMIT = 500; // tối đa 500 chuyến/request để tránh timeout
+
 const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate, flightsPerRoute, mode }) => {
   // Lấy sân bay nguồn
   const srcRes = await pool.query(
@@ -558,6 +560,7 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
 
       // Helper tạo 1 chuyến bay (dep→arr)
       const createOne = async (depAirport, arrAirport, airline, dateStr, slotTime, durMins) => {
+        if (created >= FROM_AIRPORT_BATCH_LIMIT) { skipped++; return; } // giới hạn batch
         const depTime = `${dateStr}T${slotTime}:00`;
         if (new Date(depTime) <= new Date(Date.now() + 2 * 60 * 60 * 1000)) { skipped++; return; }
 
@@ -652,7 +655,12 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
       }
     }
 
-    return { created, skipped, destinations: destinations.length, airlines: allAirlines.length };
+    return {
+      created, skipped,
+      destinations: destinations.length,
+      airlines: allAirlines.length,
+      limit_reached: created >= FROM_AIRPORT_BATCH_LIMIT,
+    };
   } finally {
     client.release();
   }
