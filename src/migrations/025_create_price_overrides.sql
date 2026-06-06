@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS price_overrides (
     multiplier DECIMAL(4,2) NOT NULL CHECK (multiplier > 0),
     reason VARCHAR(255),
     is_active BOOLEAN DEFAULT true,
-    created_by UUID REFERENCES users(id),
+    created_by BIGINT REFERENCES users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
