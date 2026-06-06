@@ -19,7 +19,7 @@ const checkinRoutes = require('./routes/checkin.routes');
 const { expireHeldBookings }   = require("./services/booking.service");
 const { autoGenerateFlights }  = require("./services/admin/flight.service");
 const { checkAndAlertSLABreach } = require("./services/notification.service");
-const { runBatch: autoFlightBatch } = require("./services/admin/auto-flight.service");
+const { runBatch: autoFlightBatch, processAirportJobBatch } = require("./services/admin/auto-flight.service");
 const pool = require("./config/db");
 require("./scripts/Loyalty.cron");
 
@@ -28,13 +28,21 @@ pool.query(`ALTER TABLE airlines ADD COLUMN IF NOT EXISTS country VARCHAR(100)`)
   .then(() => console.log('[Migration] airlines.country OK'))
   .catch(err => console.error('[Migration] airlines.country:', err.message));
 
-// Migration: thêm route_offset và route_limit vào auto_flight_config
+// Migration: thêm route_offset, route_limit và from-airport job columns
 pool.query(`
   ALTER TABLE auto_flight_config
-    ADD COLUMN IF NOT EXISTS route_offset INTEGER NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS route_limit  INTEGER NOT NULL DEFAULT 100
+    ADD COLUMN IF NOT EXISTS route_offset         INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS route_limit          INTEGER NOT NULL DEFAULT 100,
+    ADD COLUMN IF NOT EXISTS ap_airport_code      VARCHAR(10),
+    ADD COLUMN IF NOT EXISTS ap_start_date        DATE,
+    ADD COLUMN IF NOT EXISTS ap_end_date          DATE,
+    ADD COLUMN IF NOT EXISTS ap_flights_per_route INTEGER DEFAULT 2,
+    ADD COLUMN IF NOT EXISTS ap_mode              VARCHAR(20) DEFAULT 'all_airlines',
+    ADD COLUMN IF NOT EXISTS ap_running           BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ap_created           INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ap_round             INTEGER NOT NULL DEFAULT 0
 `)
-  .then(() => console.log('[Migration] auto_flight_config route_offset/route_limit OK'))
+  .then(() => console.log('[Migration] auto_flight_config columns OK'))
   .catch(err => console.error('[Migration] auto_flight_config:', err.message));
 
 const app = express();
@@ -83,7 +91,8 @@ setInterval(async () => {
   if (isAutoFlighting) return;
   isAutoFlighting = true;
   try {
-    await autoFlightBatch(200); // tạo tối đa 200 chuyến mỗi lần
+    await autoFlightBatch(200);      // tự động đa hãng
+    await processAirportJobBatch();  // from-airport job nếu đang active
   } catch (err) {
     console.error("[AutoFlight] Unhandled error:", err.message);
   } finally {

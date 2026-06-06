@@ -1,6 +1,6 @@
 'use strict';
 
-const svc = require('../../services/admin/auto-flight.service');
+const svc  = require('../../services/admin/auto-flight.service');
 
 // Lưu trạng thái job ngầm trong memory (reset khi server restart)
 const bgJob = { running: false, created: 0, skipped: 0, round: 0, startedAt: null, error: null };
@@ -122,4 +122,27 @@ const runFromAirportBg = (req, res) => {
 
 const getBgJobStatus = (req, res) => res.json(bgJob);
 
-module.exports = { getStatus, getConfig, saveConfig, runNow, runAll, runFromAirport, runFromAirportBg, getBgJobStatus };
+// Lưu job vào DB → cron 5 phút tự xử lý kể cả khi server restart
+const setAirportJob = async (req, res) => {
+  const { airport_code, start_date, end_date, flights_per_route, mode } = req.body;
+  if (!airport_code || !start_date || !end_date || !flights_per_route) {
+    return res.status(400).json({ error: 'Thiếu tham số' });
+  }
+  try {
+    await svc.setAirportJob({ airportCode: airport_code, startDate: start_date, endDate: end_date, flightsPerRoute: parseInt(flights_per_route), mode });
+    res.json({ message: 'Job đã lưu — cron 5 phút sẽ tự xử lý, đóng tab được', airport_code, start_date, end_date });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+const getAirportJobStatus = async (req, res) => {
+  try {
+    const job = await svc.getAirportJob();
+    res.json(job);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+module.exports = { getStatus, getConfig, saveConfig, runNow, runAll, runFromAirport, runFromAirportBg, getBgJobStatus, setAirportJob, getAirportJobStatus };

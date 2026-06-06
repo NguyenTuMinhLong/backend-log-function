@@ -666,4 +666,60 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
   }
 };
 
-module.exports = { getConfig, saveConfig, getStatus, getAutoRoutes, runBatch, runFromAirport };
+// ─── Airport job (DB-persisted, chạy qua cron 5 phút) ────────────────────────
+
+const setAirportJob = async ({ airportCode, startDate, endDate, flightsPerRoute, mode }) => {
+  await pool.query(`
+    UPDATE auto_flight_config SET
+      ap_airport_code      = $1,
+      ap_start_date        = $2::date,
+      ap_end_date          = $3::date,
+      ap_flights_per_route = $4,
+      ap_mode              = $5,
+      ap_running           = TRUE,
+      ap_created           = 0,
+      ap_round             = 0
+    WHERE id = 1
+  `, [airportCode.toUpperCase(), startDate, endDate, flightsPerRoute, mode]);
+};
+
+const getAirportJob = async () => {
+  const { rows } = await pool.query(`
+    SELECT ap_airport_code, ap_start_date, ap_end_date,
+           ap_flights_per_route, ap_mode, ap_running, ap_created, ap_round
+    FROM auto_flight_config WHERE id = 1
+  `);
+  return rows[0] || null;
+};
+
+// Gọi bởi cron mỗi 5 phút — chạy 1 batch 500 chuyến nếu job đang active
+const processAirportJobBatch = async () => {
+  const job = await getAirportJob();
+  if (!job?.ap_running || !job.ap_airport_code) return;
+
+  try {
+    const result = await runFromAirport({
+      airportCode:     job.ap_airport_code,
+      startDate:       String(job.ap_start_date).slice(0, 10),
+      endDate:         String(job.ap_end_date).slice(0, 10),
+      flightsPerRoute: job.ap_flights_per_route || 2,
+      mode:            job.ap_mode || 'all_airlines',
+    });
+
+    const done = !result.limit_reached || (result.created || 0) === 0;
+    await pool.query(`
+      UPDATE auto_flight_config SET
+        ap_created = ap_created + $1,
+        ap_round   = ap_round   + 1,
+        ap_running = $2
+      WHERE id = 1
+    `, [result.created || 0, !done]);
+
+    console.log(`[AirportJob] Đợt ${job.ap_round + 1}: +${result.created} chuyến${done ? ' — HOÀN TẤT' : ''}`);
+  } catch (err) {
+    console.error('[AirportJob] error:', err.message);
+    await pool.query(`UPDATE auto_flight_config SET ap_running = FALSE WHERE id = 1`);
+  }
+};
+
+module.exports = { getConfig, saveConfig, getStatus, getAutoRoutes, runBatch, runFromAirport, setAirportJob, getAirportJob, processAirportJobBatch };
