@@ -95,7 +95,9 @@ router.get("/auto-flights/config",  adminAutoFlightController.getConfig);
 router.put("/auto-flights/config",  adminAutoFlightController.saveConfig);
 router.post("/auto-flights/run",          adminAutoFlightController.runNow);
 router.post("/auto-flights/run-all",     adminAutoFlightController.runAll);
-router.post("/auto-flights/from-airport", adminAutoFlightController.runFromAirport);
+router.post("/auto-flights/from-airport",    adminAutoFlightController.runFromAirport);
+router.post("/auto-flights/from-airport-bg", adminAutoFlightController.runFromAirportBg);
+router.get("/auto-flights/bg-status",        adminAutoFlightController.getBgJobStatus);
 
 // A-11: Cronjob Manual Trigger
 router.post("/cron/run",              adminCronController.runCron);

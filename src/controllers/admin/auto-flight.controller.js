@@ -2,6 +2,9 @@
 
 const svc = require('../../services/admin/auto-flight.service');
 
+// Lưu trạng thái job ngầm trong memory (reset khi server restart)
+const bgJob = { running: false, created: 0, skipped: 0, round: 0, startedAt: null, error: null };
+
 const getStatus = async (req, res) => {
   try {
     const status = await svc.getStatus();
@@ -75,4 +78,48 @@ const runFromAirport = async (req, res) => {
   }
 };
 
-module.exports = { getStatus, getConfig, saveConfig, runNow, runAll, runFromAirport };
+// Trả ngay 202, chạy loop ngầm trên server — đóng browser vẫn tiếp tục
+const runFromAirportBg = (req, res) => {
+  const { airport_code, start_date, end_date, flights_per_route, mode } = req.body;
+  if (!airport_code || !start_date || !end_date || !flights_per_route) {
+    return res.status(400).json({ error: 'Thiếu tham số' });
+  }
+  if (!['per_day', 'total', 'all_airlines'].includes(mode)) {
+    return res.status(400).json({ error: 'mode không hợp lệ' });
+  }
+  if (bgJob.running) {
+    return res.json({ message: 'Job đang chạy', ...bgJob });
+  }
+
+  // Reset và trả về ngay
+  Object.assign(bgJob, { running: true, created: 0, skipped: 0, round: 0, startedAt: new Date().toISOString(), error: null });
+  res.json({ message: 'Job đã bắt đầu — có thể đóng tab', ...bgJob });
+
+  // Chạy ngầm không await
+  (async () => {
+    try {
+      while (true) {
+        bgJob.round++;
+        const result = await svc.runFromAirport({
+          airportCode:     airport_code.toUpperCase(),
+          startDate:       start_date,
+          endDate:         end_date,
+          flightsPerRoute: parseInt(flights_per_route),
+          mode,
+        });
+        bgJob.created += result.created || 0;
+        bgJob.skipped += result.skipped || 0;
+        if (!result.limit_reached || (result.created || 0) === 0) break;
+      }
+    } catch (e) {
+      bgJob.error = e.message;
+      console.error('[BgJob] error:', e.message);
+    } finally {
+      bgJob.running = false;
+    }
+  })();
+};
+
+const getBgJobStatus = (req, res) => res.json(bgJob);
+
+module.exports = { getStatus, getConfig, saveConfig, runNow, runAll, runFromAirport, runFromAirportBg, getBgJobStatus };
