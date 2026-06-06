@@ -433,6 +433,11 @@ const runFromAirport = async ({ airportCode, arrAirportCode, startDate, endDate,
     [airportCode]
   );
   const destinations = destRes.rows;
+  // Shuffle để sân bay được xử lý ngẫu nhiên, không theo alphabet
+  for (let i = destinations.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [destinations[i], destinations[j]] = [destinations[j], destinations[i]];
+  }
 
   // Lấy tất cả hãng có country
   const airlineRes = await pool.query(
