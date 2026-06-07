@@ -19,7 +19,7 @@ const checkinRoutes = require('./routes/checkin.routes');
 const { expireHeldBookings }   = require("./services/booking.service");
 const { autoGenerateFlights }  = require("./services/admin/flight.service");
 const { checkAndAlertSLABreach } = require("./services/notification.service");
-const { runBatch: autoFlightBatch, processAirportJobBatch } = require("./services/admin/auto-flight.service");
+const { runBatch: autoFlightBatch } = require("./services/admin/auto-flight.service");
 const pool = require("./config/db");
 require("./scripts/Loyalty.cron");
 
@@ -92,7 +92,6 @@ setInterval(async () => {
   isAutoFlighting = true;
   try {
     await autoFlightBatch(200);      // tự động đa hãng
-    await processAirportJobBatch();  // from-airport job nếu đang active
   } catch (err) {
     console.error("[AutoFlight] Unhandled error:", err.message);
   } finally {
