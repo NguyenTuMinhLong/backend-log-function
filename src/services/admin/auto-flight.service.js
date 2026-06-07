@@ -345,6 +345,16 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
       // tránh việc cả tuyến dồn cục vào đúng 1-2 mốc giờ cố định khi ngân sách/giới
       // hạn batch hết sớm (trước đây duyệt khung giờ ở vòng ngoài nên mỗi lượt chạy
       // chỉ kịp phủ 1 mốc giờ cho rất nhiều ngày).
+      //
+      // QUAN TRỌNG: mỗi tuyến+hãng chỉ được tạo TỐI ĐA 1 chuyến/ngày trong 1 lượt chạy
+      // (thực tế 1 tuyến cũng chỉ bay 1-2 chuyến/ngày). Nếu không giới hạn, vòng lặp sẽ
+      // tạo đầy hết ~48 khung giờ của ngày 08/06 trước khi sang 09/06 → ngân sách
+      // (limit/perAirlineBudget) cạn ngay trên ngày đầu tiên, các ngày sau (đến 30/06)
+      // không bao giờ được chạm tới — đúng triệu chứng "chỉ tạo toàn ngày 08/06".
+      // Mỗi lượt chạy giờ tạo rải đều 1 chuyến/ngày cho mỗi tuyến, qua nhiều lượt chạy
+      // sẽ tự bồi thêm chuyến ở khung giờ khác (existingSet chặn trùng giờ).
+      const FLIGHTS_PER_ROUTE_PER_DAY = 1;
+
       dateLoop:
       for (const dateStr of dates) {
         if (created >= limit) break outer;
@@ -356,9 +366,11 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
           [slotOrder[i], slotOrder[j]] = [slotOrder[j], slotOrder[i]];
         }
 
+        let createdForDate = 0;
         for (const si of slotOrder) {
           if (created >= limit) break outer;
           if (!unlimited && airlineCreated[airlineId] >= perAirlineBudget) continue dateLoop;
+          if (createdForDate >= FLIGHTS_PER_ROUTE_PER_DAY) continue dateLoop;
 
           const slotTime = timeSlots[si];
           const depTime  = `${dateStr}T${slotTime}:00`;
@@ -403,6 +415,7 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
             existingSet.add(slotKey);
             created++;
             airlineCreated[airlineId]++;
+            createdForDate++;
           } catch (err) {
             await client.query('ROLLBACK');
             console.error(`[AutoFlight] Insert error ${flightNum} ${dateStr}:`, err.message);
