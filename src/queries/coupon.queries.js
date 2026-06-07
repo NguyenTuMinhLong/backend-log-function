@@ -141,6 +141,15 @@ const SELECT_COUPON_USAGE_PER_USER =
      AND user_id = $2
      AND LOWER(status) IN ('reserved', 'used')`;
 
+// Đếm số lần user đã dùng từng coupon trong danh sách — dùng để ẩn coupon đã hết lượt/người
+const SELECT_COUPON_USAGE_PER_USER_BATCH =
+  `SELECT coupon_id, COUNT(*) AS total
+   FROM coupon_usages
+   WHERE coupon_id = ANY($1::uuid[])
+     AND user_id = $2
+     AND LOWER(status) IN ('reserved', 'used')
+   GROUP BY coupon_id`;
+
 const SELECT_WELCOME_ONLY_CHECK =
   `SELECT
      EXISTS (

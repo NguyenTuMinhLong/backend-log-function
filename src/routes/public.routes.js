@@ -3,6 +3,7 @@ const router = express.Router();
 
 const flightController = require("../controllers/flight.controller");
 const couponController = require("../controllers/coupon.controller");
+const { authenticateOptional } = require("../middlewares/auth.middleware");
 const { sendContactEmail } = require("../utils/mailer");
 const pool = require("../config/db");
 
@@ -35,7 +36,7 @@ router.get("/airport-countries", async (req, res) => {
   res.json({ data: rows.map(r => r.country) });
 });
 router.get("/coupons", couponController.getCoupons);
-router.get("/coupons/available", couponController.getAvailableCoupons);
+router.get("/coupons/available", authenticateOptional, couponController.getAvailableCoupons);
 
 router.post("/contact", async (req, res) => {
   const { name, email, subject, message } = req.body;

@@ -25,7 +25,7 @@ const sanitizeCoupon = (row) => ({
   is_available_now:     row.is_available_now,
 });
 
-const getPublicCoupons = async (params = {}, availableOnly = false) => {
+const getPublicCoupons = async (params = {}, availableOnly = false, userId = null) => {
   const {
     search,
     airline_id,
@@ -73,7 +73,37 @@ const getPublicCoupons = async (params = {}, availableOnly = false) => {
   const dk = `WHERE ${conditions.join(" AND ")}`;
 
   const result = await pool.query(Q.SELECT_PUBLIC_COUPONS(dk, idx), [...values, limitNum]);
-  return result.rows.map(sanitizeCoupon);
+  let rows = result.rows;
+
+  // Lọc theo điều kiện riêng của user đang đăng nhập:
+  // - welcome_only: chỉ hiện cho user chưa từng đặt vé / thanh toán thành công
+  // - usage_limit_per_user: ẩn coupon nếu user đã dùng hết lượt cá nhân
+  if (availableOnly && userId) {
+    const welcomeCoupons = rows.filter(r => r.welcome_only);
+    let isNotNewUser = false;
+    if (welcomeCoupons.length > 0) {
+      const wc = await pool.query(Q.SELECT_WELCOME_ONLY_CHECK, [userId]);
+      isNotNewUser = !!(wc.rows[0]?.has_confirmed_booking || wc.rows[0]?.has_success_payment);
+    }
+
+    const perUserCoupons = rows.filter(r => r.usage_limit_per_user !== null && r.usage_limit_per_user !== undefined);
+    let perUserCounts = {};
+    if (perUserCoupons.length > 0) {
+      const pu = await pool.query(Q.SELECT_COUPON_USAGE_PER_USER_BATCH, [perUserCoupons.map(r => r.id), userId]);
+      perUserCounts = Object.fromEntries(pu.rows.map(r => [r.coupon_id, Number(r.total)]));
+    }
+
+    rows = rows.filter(r => {
+      if (r.welcome_only && isNotNewUser) return false;
+      if (r.usage_limit_per_user !== null && r.usage_limit_per_user !== undefined) {
+        const used = perUserCounts[r.id] || 0;
+        if (used >= r.usage_limit_per_user) return false;
+      }
+      return true;
+    });
+  }
+
+  return rows.map(sanitizeCoupon);
 };
 
 module.exports = { getPublicCoupons };

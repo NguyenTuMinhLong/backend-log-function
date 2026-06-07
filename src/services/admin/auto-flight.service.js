@@ -257,12 +257,16 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
 
   const configStart = config.start_date ? new Date(config.start_date) : today;
   const configEnd   = config.end_date   ? new Date(config.end_date)   : null;
-  const advanceCutoff = new Date(today);
-  advanceCutoff.setDate(today.getDate() + (config.advance_days || 30));
 
-  const targetEnd = configEnd
-    ? new Date(Math.min(configEnd.getTime(), advanceCutoff.getTime()))
-    : advanceCutoff;
+  // advance_days chỉ là khoảng chạy MẶC ĐỊNH khi admin không đặt end_date cụ thể —
+  // nếu đã chọn end_date rõ ràng (vd 30/6) thì PHẢI tôn trọng đúng ngày đó, không
+  // được cắt ngắn lại theo advance_days (trước đây luôn lấy min(end_date, today+advance_days)
+  // khiến tạo chuyến dừng sớm hơn ngày kết thúc đã chọn).
+  const targetEnd = configEnd || (() => {
+    const advanceCutoff = new Date(today);
+    advanceCutoff.setDate(today.getDate() + (config.advance_days || 30));
+    return advanceCutoff;
+  })();
 
   if (today > targetEnd) return { created: 0, skipped: 0, reason: 'out_of_range' };
 
@@ -337,19 +341,30 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
       const durationMins = estimateMins(km);
       const tierMult     = Number(route.price_tier) || 1.0;
 
-      slots:
-      for (let si = 0; si < timeSlots.length; si++) {
-        const depHour = parseInt(timeSlots[si].slice(0, 2), 10);
-        const prices  = calcPrices(durationMins, tierMult, depHour);
+      // Duyệt theo NGÀY trước, mỗi ngày xáo trộn lại thứ tự khung giờ riêng —
+      // tránh việc cả tuyến dồn cục vào đúng 1-2 mốc giờ cố định khi ngân sách/giới
+      // hạn batch hết sớm (trước đây duyệt khung giờ ở vòng ngoài nên mỗi lượt chạy
+      // chỉ kịp phủ 1 mốc giờ cho rất nhiều ngày).
+      dateLoop:
+      for (const dateStr of dates) {
+        if (created >= limit) break outer;
+        if (!unlimited && airlineCreated[airlineId] >= perAirlineBudget) break;
 
-        for (const dateStr of dates) {
+        const slotOrder = [...timeSlots.keys()];
+        for (let i = slotOrder.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [slotOrder[i], slotOrder[j]] = [slotOrder[j], slotOrder[i]];
+        }
+
+        for (const si of slotOrder) {
           if (created >= limit) break outer;
-          if (!unlimited && airlineCreated[airlineId] >= perAirlineBudget) break slots;
+          if (!unlimited && airlineCreated[airlineId] >= perAirlineBudget) continue dateLoop;
 
-          const depTime = `${dateStr}T${timeSlots[si]}:00`;
+          const slotTime = timeSlots[si];
+          const depTime  = `${dateStr}T${slotTime}:00`;
           if (new Date(depTime) <= new Date(Date.now() + 2 * 60 * 60 * 1000)) { skipped++; continue; }
 
-          const slotKey = `${airlineId}_${route.dep_id}_${route.arr_id}_${dateStr}_${timeSlots[si]}`;
+          const slotKey = `${airlineId}_${route.dep_id}_${route.arr_id}_${dateStr}_${slotTime}`;
           if (existingSet.has(slotKey)) { skipped++; continue; }
 
           const numsKey = `${dateStr}_${airlineId}`;
@@ -362,7 +377,9 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
           }
           if (!flightNum) { skipped++; continue; }
 
-          const arrTime = addMins(dateStr, timeSlots[si], durationMins);
+          const depHour = parseInt(slotTime.slice(0, 2), 10);
+          const prices  = calcPrices(durationMins, tierMult, depHour);
+          const arrTime = addMins(dateStr, slotTime, durationMins);
 
           try {
             await client.query('BEGIN');
