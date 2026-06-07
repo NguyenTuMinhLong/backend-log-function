@@ -1,6 +1,6 @@
 'use strict';
 
-const svc = require('../../services/admin/auto-flight.service');
+const svc  = require('../../services/admin/auto-flight.service');
 
 const getStatus = async (req, res) => {
   try {

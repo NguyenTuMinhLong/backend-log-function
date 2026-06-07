@@ -14,7 +14,7 @@ const getCoupons = async (req, res) => {
 
 const getAvailableCoupons = async (req, res) => {
   try {
-    const data = await couponService.getPublicCoupons(req.query, true);
+    const data = await couponService.getPublicCoupons(req.query, true, req.user?.id || null);
     res.json({
       message: "Lấy danh sách coupon khả dụng thành công",
       data,

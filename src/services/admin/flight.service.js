@@ -76,6 +76,13 @@ const validateSeats = (seats, requireAtLeastOne = false) => {
 /**
  * Xem danh sách chuyến bay (admin) - có filter + phân trang
  */
+const SORT_MAP = {
+  created_desc: 'f.id DESC',
+  created_asc:  'f.id ASC',
+  dep_desc:     'f.departure_time DESC',
+  dep_asc:      'f.departure_time ASC',
+};
+
 const getFlights = async (params) => {
   const {
     page = 1,
@@ -86,8 +93,11 @@ const getFlights = async (params) => {
     arrival_code,
     departure_date,
     flight_number,
+    search,
+    sort,
   } = params;
 
+  const orderBy = SORT_MAP[sort] || 'f.departure_time ASC';
   const offset = (parseInt(page) - 1) * parseInt(limit);
 
   const conditions = [];
@@ -118,6 +128,15 @@ const getFlights = async (params) => {
     conditions.push(`f.flight_number ILIKE $${idx++}`);
     values.push(`%${flight_number}%`);
   }
+  if (search) {
+    conditions.push(
+      `(f.flight_number ILIKE $${idx} OR al.code ILIKE $${idx} OR al.name ILIKE $${idx}` +
+      ` OR dep.code ILIKE $${idx} OR arr.code ILIKE $${idx}` +
+      ` OR dep.city ILIKE $${idx} OR arr.city ILIKE $${idx})`
+    );
+    values.push(`%${search}%`);
+    idx++;
+  }
 
   if (!params.show_hidden) {
     conditions.push(`f.is_active = TRUE`);
@@ -128,7 +147,7 @@ const getFlights = async (params) => {
   const countResult = await pool.query(QF.COUNT_FLIGHTS(dk), values);
   const total = parseInt(countResult.rows[0].count);
 
-  const dataResult = await pool.query(QF.SELECT_FLIGHTS(dk, idx, idx + 1), [
+  const dataResult = await pool.query(QF.SELECT_FLIGHTS(dk, idx, idx + 1, orderBy), [
     ...values,
     parseInt(limit),
     offset,

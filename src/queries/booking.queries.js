@@ -46,7 +46,13 @@ const SELECT_BOOKING_DETAIL =
      al_ret.logo_dark       AS return_airline_logo_dark,
      al_ret.logo_light      AS return_airline_logo_light,
      dep_ret.code AS return_dep_code, dep_ret.city AS return_dep_city,
-     arr_ret.code AS return_arr_code, arr_ret.city AS return_arr_city
+     arr_ret.code AS return_arr_code, arr_ret.city AS return_arr_city,
+     -- Date change info (nếu booking đã được đổi ngày)
+     dcr.request_code       AS dc_request_code,
+     dcr.old_price          AS dc_original_price,
+     dcr.price_difference   AS dc_surcharge,
+     dcr.old_seat_class     AS dc_old_seat_class,
+     dcr.new_seat_class     AS dc_new_seat_class
    FROM bookings b
    JOIN flights  f_out   ON f_out.id  = b.outbound_flight_id
    JOIN airlines al_out  ON al_out.id = f_out.airline_id
@@ -56,6 +62,13 @@ const SELECT_BOOKING_DETAIL =
    LEFT JOIN airlines al_ret  ON al_ret.id = f_ret.airline_id
    LEFT JOIN airports dep_ret ON dep_ret.id = f_ret.departure_airport_id
    LEFT JOIN airports arr_ret ON arr_ret.id = f_ret.arrival_airport_id
+   LEFT JOIN LATERAL (
+     SELECT request_code, old_price, price_difference, old_seat_class, new_seat_class
+     FROM date_change_requests
+     WHERE booking_id = b.id AND status = 'approved'
+     ORDER BY processed_at DESC
+     LIMIT 1
+   ) dcr ON true
    WHERE b.booking_code = $1`;
 
 const SELECT_MY_BOOKINGS = (dk) =>
@@ -103,7 +116,8 @@ const SELECT_BOOKING_PAYMENT_INFO =
   `SELECT final_amount, discount_amount, status, payment_method
    FROM payments
    WHERE booking_id = $1
-   ORDER BY created_at DESC
+     AND payment_code NOT LIKE 'PAY-DC-%'
+   ORDER BY created_at ASC
    LIMIT 1`;
 
 const CANCEL_BOOKING =

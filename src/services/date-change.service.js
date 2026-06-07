@@ -440,12 +440,21 @@ const confirmDateChange = async (email, otp, requestCode) => {
       status: 'pending_payment',
       requires_payment: true,
       price_difference: parseFloat(request.price_difference),
-      message: 'Quý khách cần thanh toán phụ phí để hoàn tất bước xác nhận. Sau khi thanh toán thành công, yêu cầu sẽ chờ admin xử lý.',
-      next_action: 'create_payment',
+      message: 'Quý khách cần thanh toán phụ phí để hoàn tất yêu cầu đổi ngày bay',
     };
   }
 
-  await markDateChangeRequestAsPending(pool, requestCode);
+  // 4. Không cần payment → auto approve hoặc chờ admin
+  const { AUTO_REFUND } = require('../config/refund.config');
+  const autoApprove = AUTO_REFUND.enabled && absDiff < AUTO_REFUND.threshold;
+
+  // Fix Bug 2: luôn set 'pending' trước — approveDateChange yêu cầu status = 'pending'
+  await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', requestCode]);
+
+  if (autoApprove) {
+    await approveDateChange(null, requestCode, 'Auto-approved sau OTP verification');
+  }
+
 
   return {
     success: true,
@@ -677,45 +686,22 @@ const confirmDateChangePayment = async (paymentCode, options = {}) => {
       throw new Error(`So tien khong dung. Expected: ${expectedAmount}, Received: ${receivedAmount}`);
     }
 
-    const gatewayResponse = payment.gateway_response || {};
-    const normalizedMethod = String(payment.payment_method || '').toUpperCase();
+  // 5. Update payment to SUCCESS
+  await pool.query(`
+    UPDATE payments 
+    SET status = 'SUCCESS', paid_at = NOW(), updated_at = NOW()
+    WHERE payment_code = $1
+  `, [paymentCode]);
 
-    if (!trustedPaid) {
-      if (normalizedMethod === 'PAYPAL') {
-        const approveUrl = gatewayResponse.approve_url || null;
-        if (approveUrl) {
-          throw new Error('Thanh toan PayPal chua duoc xac nhan. Vui long hoan tat checkout PayPal truoc.');
-        }
-      }
+  // 6. Set status='pending' trước để approveDateChange có thể chạy
+  // (approveDateChange yêu cầu status='pending', không được set 'approved' trước)
+  await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', request.request_code]);
 
-      if (normalizedMethod === 'MOMO') {
-        const momoResultCode = Number(gatewayResponse.resultCode);
-        if (Number.isFinite(momoResultCode) && momoResultCode !== 0) {
-          throw new Error('Thanh toan MoMo chua thanh cong.');
-        }
-      }
-    }
+  // 7. Execute the actual date change (release old seats, reserve new seats, update booking)
+  await approveDateChange(null, request.request_code, 'Payment confirmed automatically');
 
-    await client.query(
-      `UPDATE payments 
-       SET status = 'SUCCESS',
-           paid_at = NOW(),
-           updated_at = NOW(),
-           gateway_response = COALESCE($2::jsonb, gateway_response)
-       WHERE payment_code = $1`,
-      [paymentCode, gatewayPayload ? JSON.stringify(gatewayPayload) : null]
-    );
-
-    await client.query(
-      `UPDATE date_change_requests
-       SET status = 'pending',
-           paid_at = NOW(),
-           updated_at = NOW()
-       WHERE request_code = $1`,
-      [request.request_code]
-    );
-
-    await client.query('COMMIT');
+  // 8. Mark paid_at
+  await pool.query(`UPDATE date_change_requests SET paid_at = NOW() WHERE request_code = $1`, [request.request_code]);
 
     return {
       success: true,
@@ -871,11 +857,105 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
     );
     console.log(`[DateChange] Reserved ${passengers} seats on new flight`);
 
+    // === HUỶ ANCILLARY OUTBOUND (trừ bảo hiểm) ===
+    const cancelAncResult = await client.query(`
+      UPDATE booking_ancillaries ba
+      SET status = 'cancelled', updated_at = NOW()
+      FROM ancillary_options ao
+      WHERE ba.ancillary_option_id = ao.id
+        AND ba.booking_id = $1
+        AND ba.flight_type = 'outbound'
+        AND ao.type != 'insurance'
+        AND ba.status != 'cancelled'
+      RETURNING ba.total_price
+    `, [request.booking_id]);
+    const cancelledAncillaryTotal = cancelAncResult.rows
+      .reduce((sum, r) => sum + parseFloat(r.total_price), 0);
+    console.log(`[DateChange] Cancelled ancillary total: ${cancelledAncillaryTotal}`);
+
+    // === CẬP NHẬT TOTAL_PRICE BOOKING ===
+    const bookingRow = await client.query(
+      `SELECT total_price FROM bookings WHERE id = $1`, [request.booking_id]
+    );
+    const currentBookingTotal = parseFloat(bookingRow.rows[0]?.total_price || 0);
+    const oldTicketPrice = parseFloat(request.old_price);
+    const newTicketPrice = parseFloat(request.new_price);
+    const ticketDiff = newTicketPrice - oldTicketPrice;
+    const updatedBookingTotal = Math.max(0, currentBookingTotal + ticketDiff - cancelledAncillaryTotal);
+
+    await client.query(
+      `UPDATE bookings SET total_price = $1, updated_at = NOW() WHERE id = $2`,
+      [updatedBookingTotal, request.booking_id]
+    );
+    console.log(`[DateChange] Updated booking total: ${currentBookingTotal} → ${updatedBookingTotal}`);
+
+    // === AUTO-CREATE REFUND NẾU USER ĐƯỢC HOÀN TIỀN ===
+    // Hoàn = tiền vé giảm (nếu có) + tiền dịch vụ đã huỷ
+    const ticketRefund = Math.max(0, -ticketDiff);
+    const refundableAmount = ticketRefund + cancelledAncillaryTotal;
+    let relatedRefundCode = null;
+
+    if (refundableAmount > 0) {
+      const refundCode = generateRefundCode();
+      const parts = [];
+      if (ticketRefund > 0) parts.push(`chênh lệch vé ${ticketRefund.toLocaleString('vi-VN')} VND`);
+      if (cancelledAncillaryTotal > 0) parts.push(`dịch vụ huỷ ${cancelledAncillaryTotal.toLocaleString('vi-VN')} VND`);
+
+      const refundResult = await client.query(`
+        INSERT INTO refunds (
+          refund_code, booking_id, refund_type, requested_items,
+          refund_amount, admin_fee, net_refund_amount, refund_policy_applied,
+          status, reason, requested_by
+        ) VALUES ($1, $2, 'partial_leg', $3::jsonb, $4, 0, $4, $5::jsonb, 'pending', $6, $7)
+        RETURNING id
+      `, [
+        refundCode,
+        request.booking_id,
+        JSON.stringify({ type: 'date_change', request_code: requestCode }),
+        refundableAmount,
+        JSON.stringify({ name: 'date_change_refund' }),
+        `Hoàn tiền do đổi ngày bay (${requestCode}): ${parts.join(' + ')}`,
+        adminId || null,
+      ]);
+      relatedRefundCode = refundCode;
+
+      await client.query(
+        `UPDATE date_change_requests SET related_refund_id = $1 WHERE request_code = $2`,
+        [refundResult.rows[0].id, requestCode]
+      );
+      console.log(`[DateChange] Auto-created refund ${refundCode}: ${refundableAmount} VND`);
+    }
+
+    // === GHI NOTE PHỤ THU NẾU USER CẦN TRẢ THÊM ===
+    const surchargeAmount = Math.max(0, ticketDiff - cancelledAncillaryTotal);
+    const finalAdminNotes = surchargeAmount > 0
+      ? `${adminNotes ? adminNotes + ' | ' : ''}PHỤ THU: ${surchargeAmount.toLocaleString('vi-VN')} VND chưa thu từ khách`
+      : adminNotes;
+
+    // Update booking flight & status
     await client.query(QCD.UPDATE_BOOKING_FLIGHT, [
       request.new_flight_id,
       request.new_seat_class,
       request.booking_id,
     ]);
+    await client.query(
+      `UPDATE bookings SET status = 'date_changed', updated_at = NOW() WHERE id = $1`,
+      [request.booking_id]
+    );
+
+    // Cập nhật final_amount của payment gốc = tổng tiền mới (bao gồm surcharge)
+    await client.query(`
+      UPDATE payments
+      SET final_amount = $1, updated_at = NOW()
+      WHERE id = (
+        SELECT id FROM payments
+        WHERE booking_id = $2
+          AND payment_code NOT LIKE 'PAY-DC-%'
+          AND status IN ('SUCCESS', 'PAID', 'COMPLETED', 'CONFIRMED')
+        ORDER BY created_at ASC
+        LIMIT 1
+      )
+    `, [updatedBookingTotal, request.booking_id]);
 
     await client.query(QCD.UPDATE_DATE_CHANGE_STATUS, [
       'approved',
