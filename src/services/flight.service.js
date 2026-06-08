@@ -50,12 +50,12 @@ const saveSearchHistory = async ({
 };
 
 /**
- * Recommendation Flights
- * 1. Lưu lịch sử tìm kiếm: số tiền bỏ ra, điểm đến yêu thích, thời gian bay
- * 2. Ưu tiên chuyến buổi sáng, không quá cảnh, vé < 5tr
- * 3. Tự động lọc và ưu tiên theo tiêu chí
+ * Recommendation Flights — đầy đủ theo yêu cầu:
+ * 1. Lưu + đọc lịch sử tìm kiếm (không giới hạn thời gian cứng)
+ * 2. Lọc theo bộ lọc "giá rẻ nhất" và "bay đầu tháng"
+ * 3. Ưu tiên theo khung giờ thực tế của user
  * 4. Nếu chưa có lịch sử → TopBuy
- * 5. 10 chuyến gần nhất theo khung thời gian
+ * 5. Lấy lịch sử toàn bộ từ trước (không set cứng 90 ngày)
  */
 const recommendFlights = async ({
   userId,
@@ -63,54 +63,52 @@ const recommendFlights = async ({
   fromAirport,
   toAirport,
   limit = 10,
+  filter = null, // 'cheapest' | 'early_month' | null
 }) => {
-  // ── BƯỚC 1: Phân tích lịch sử tìm kiếm + booking ────────────────────────
+
+  // ── BƯỚC 1: Phân tích toàn bộ lịch sử (không giới hạn thời gian) ─────────
   let preferredDestinations = [];
-  let preferredDepartures = [];
-  let preferredHours = null;
-  let avgSpending = null;
-  let hasHistory = false;
+  let preferredDepartures   = [];
+  let preferredHours        = null;
+  let avgSpending           = null;
+  let hasHistory            = false;
 
   if (userId || sessionId) {
-    // Lịch sử tìm kiếm
-    const searchHistSQL = userId
-      ? `WHERE user_id = ${parseInt(userId)}`
-      : `WHERE session_id = '${sessionId}'`;
+    // Lịch sử tìm kiếm — lấy tất cả, không giới hạn ngày
+    const searchParams = userId ? [parseInt(userId)] : [sessionId];
+    const searchWhere  = userId ? 'WHERE user_id = $1' : "WHERE session_id = $1";
 
     const searchResult = await pool.query(`
       SELECT
         arrival_code,
         departure_code,
-        COUNT(*)                    AS search_count,
-        AVG(min_price_found)        AS avg_min_price,
-        -- Giờ bay ưa thích: phân tích từ departure_date không đủ
-        -- dùng booking history thay thế
-        MIN(seat_class)             AS preferred_class
+        COUNT(*)          AS search_count,
+        AVG(min_price_found) AS avg_min_price
       FROM search_history
-      ${searchHistSQL}
-        AND created_at > NOW() - INTERVAL '90 days'
+      ${searchWhere}
       GROUP BY arrival_code, departure_code
       ORDER BY search_count DESC
       LIMIT 5
-    `);
+    `, searchParams).catch(() => ({ rows: [] }));
 
     if (searchResult.rows.length > 0) {
-      hasHistory = true;
-      preferredDestinations = searchResult.rows.map((r) => r.arrival_code);
-      preferredDepartures = searchResult.rows.map((r) => r.departure_code);
-      avgSpending = parseFloat(searchResult.rows[0].avg_min_price) || null;
+      hasHistory            = true;
+      preferredDestinations = searchResult.rows.map(r => r.arrival_code);
+      preferredDepartures   = searchResult.rows.map(r => r.departure_code);
+      avgSpending           = parseFloat(searchResult.rows[0].avg_min_price) || null;
     }
 
-    // Lịch sử booking (nếu user đăng nhập)
+    // Lịch sử booking — toàn bộ các năm trước, không set cứng
     if (userId) {
-      const bookingHistory = await pool.query(
-        `
+      const bookingHistory = await pool.query(`
         SELECT
-          arr.code                                  AS arr_code,
-          dep.code                                  AS dep_code,
-          COUNT(*)                                  AS trip_count,
-          AVG(b.total_price)                        AS avg_price,
-          AVG(EXTRACT(HOUR FROM f.departure_time))  AS avg_dep_hour
+          arr.code                                 AS arr_code,
+          dep.code                                 AS dep_code,
+          COUNT(*)                                 AS trip_count,
+          AVG(b.total_price)                       AS avg_price,
+          AVG(EXTRACT(HOUR FROM f.departure_time)) AS avg_dep_hour,
+          -- Tháng hay bay (để detect "bay đầu tháng")
+          MODE() WITHIN GROUP (ORDER BY EXTRACT(DAY FROM f.departure_time)) AS preferred_day
         FROM bookings b
         JOIN flights  f   ON f.id   = b.outbound_flight_id
         JOIN airports dep ON dep.id = f.departure_airport_id
@@ -120,18 +118,13 @@ const recommendFlights = async ({
         GROUP BY arr.code, dep.code
         ORDER BY trip_count DESC
         LIMIT 5
-      `,
-        [userId],
-      );
+      `, [userId]).catch(() => ({ rows: [] }));
 
       if (bookingHistory.rows.length > 0) {
-        hasHistory = true;
-        preferredHours =
-          parseFloat(bookingHistory.rows[0].avg_dep_hour) || null;
-        avgSpending =
-          parseFloat(bookingHistory.rows[0].avg_price) || avgSpending;
+        hasHistory     = true;
+        preferredHours = parseFloat(bookingHistory.rows[0].avg_dep_hour) || null;
+        avgSpending    = parseFloat(bookingHistory.rows[0].avg_price)    || avgSpending;
 
-        // Merge destinations từ booking vào
         for (const r of bookingHistory.rows) {
           if (!preferredDestinations.includes(r.arr_code)) {
             preferredDestinations.push(r.arr_code);
@@ -144,10 +137,7 @@ const recommendFlights = async ({
   // ── BƯỚC 2: Nếu không có lịch sử → TopBuy ────────────────────────────────
   if (!hasHistory) {
     const topBuy = await pool.query(`
-      SELECT
-        dep.code  AS dep_code,
-        arr.code  AS arr_code,
-        COUNT(b.id) AS booking_count
+      SELECT dep.code AS dep_code, arr.code AS arr_code, COUNT(b.id) AS booking_count
       FROM bookings b
       JOIN flights  f   ON f.id   = b.outbound_flight_id
       JOIN airports dep ON dep.id = f.departure_airport_id
@@ -157,24 +147,36 @@ const recommendFlights = async ({
       GROUP BY dep.code, arr.code
       ORDER BY booking_count DESC
       LIMIT 5
-    `);
-    preferredDestinations = topBuy.rows.map((r) => r.arr_code);
+    `).catch(() => ({ rows: [] }));
+    preferredDestinations = topBuy.rows.map(r => r.arr_code);
   }
 
-  // ── BƯỚC 3: Scoring ───────────────────────────────────────────────────────
-  const destSQL =
-    preferredDestinations.length > 0
-      ? `CASE WHEN arr.code = ANY(ARRAY['${preferredDestinations.join("','")}']) THEN 30 ELSE 0 END`
-      : "0";
+  // ── BƯỚC 3: Bộ lọc đặc biệt ──────────────────────────────────────────────
+  // filter = 'cheapest'    → ưu tiên giá thấp nhất
+  // filter = 'early_month' → ưu tiên chuyến đầu tháng (ngày 1-7)
+  let extraFilter = '';
+  let extraOrder  = '';
 
-  const avgHourSQL =
-    preferredHours !== null
-      ? `CASE WHEN ABS(EXTRACT(HOUR FROM f.departure_time) - ${preferredHours}) <= 2 THEN 10 ELSE 0 END`
-      : "0";
+  if (filter === 'cheapest') {
+    extraOrder = 'fs.base_price ASC,';
+  } else if (filter === 'early_month') {
+    // Chỉ lấy chuyến vào đầu tháng kế tiếp (ngày 1-7)
+    extraFilter = `AND EXTRACT(DAY FROM f.departure_time) BETWEEN 1 AND 7`;
+  }
 
-  // Giá phù hợp với mức chi trung bình của user
+  // ── BƯỚC 4: Scoring ───────────────────────────────────────────────────────
+  const destSQL = preferredDestinations.length > 0
+    ? `CASE WHEN arr.code = ANY(ARRAY['${preferredDestinations.join("','")}']) THEN 30 ELSE 0 END`
+    : '0';
+
+  // Khung giờ từ lịch sử thực tế (±2h), không set cứng "buổi sáng"
+  const avgHourSQL = preferredHours !== null
+    ? `CASE WHEN ABS(EXTRACT(HOUR FROM f.departure_time) - ${preferredHours}) <= 2 THEN 15 ELSE 0 END`
+    : `CASE WHEN EXTRACT(HOUR FROM f.departure_time) BETWEEN 5 AND 11 THEN 10 ELSE 0 END`;
+
+  // Giá phù hợp ngân sách user
   const budgetSQL = avgSpending
-    ? `CASE WHEN fs.base_price <= ${avgSpending * 1.2} THEN 10 ELSE 0 END`
+    ? `CASE WHEN fs.base_price <= ${Math.round(avgSpending * 1.2)} THEN 10 ELSE 0 END`
     : `CASE WHEN fs.base_price < 5000000 THEN 15 ELSE 0 END`;
 
   const query = `
@@ -209,12 +211,17 @@ const recommendFlights = async ({
 
       (
         ${destSQL}
-        + CASE WHEN EXTRACT(HOUR FROM f.departure_time) BETWEEN 5 AND 11 THEN 20 ELSE 0 END
-        + CASE WHEN EXTRACT(HOUR FROM f.departure_time) >= 22
-                 OR EXTRACT(HOUR FROM f.departure_time) <= 4  THEN -10 ELSE 0 END
-        + CASE WHEN f.duration_minutes < 300 THEN 15 ELSE 0 END
-        + ${budgetSQL}
+        -- Khung giờ theo thói quen thực tế
         + ${avgHourSQL}
+        -- Bay thẳng (không quá cảnh)
+        + CASE WHEN f.duration_minutes < 300 THEN 15 ELSE 0 END
+        -- Chuyến đêm trừ điểm
+        + CASE WHEN EXTRACT(HOUR FROM f.departure_time) >= 22
+                 OR EXTRACT(HOUR FROM f.departure_time) <= 4 THEN -10 ELSE 0 END
+        -- Ngân sách phù hợp
+        + ${budgetSQL}
+        -- Đầu tháng bonus (nếu filter = early_month)
+        + CASE WHEN EXTRACT(DAY FROM f.departure_time) BETWEEN 1 AND 7 THEN 5 ELSE 0 END
       ) AS score
 
     FROM flights f
@@ -223,47 +230,54 @@ const recommendFlights = async ({
     JOIN airports      arr ON arr.id = f.arrival_airport_id
     LEFT JOIN flight_seats fs ON fs.flight_id = f.id AND fs.class = 'economy'
 
-    WHERE f.status          = 'scheduled'
-      AND f.is_active       = TRUE
+    WHERE f.status           = 'scheduled'
+      AND f.is_active        = TRUE
       AND fs.available_seats > 0
       AND f.departure_time BETWEEN NOW() - INTERVAL '3 hours'
                                 AND NOW() + INTERVAL '10 days'
-      ${fromAirport ? `AND dep.code = '${fromAirport}'` : ""}
-      ${toAirport ? `AND arr.code = '${toAirport}'` : ""}
+      ${extraFilter}
+      ${fromAirport ? `AND dep.code = '${fromAirport}'` : ''}
+      ${toAirport   ? `AND arr.code = '${toAirport}'`   : ''}
 
-    ORDER BY score DESC, f.departure_time ASC
+    ORDER BY ${extraOrder} score DESC, f.departure_time ASC
     LIMIT $1
   `;
 
   const { rows } = await pool.query(query, [limit]);
-  const flights = formatFlights(rows, 1, 0, 0);
+  const flights   = formatFlights(rows, 1, 0, 0);
 
-  // ── BƯỚC 4: Gắn badges + metadata ────────────────────────────────────────
+  // ── BƯỚC 5: Gắn badges + metadata ────────────────────────────────────────
   return flights.map((f, i) => {
     const score = parseInt(rows[i].score) || 0;
-    const hour = new Date(f.departure.time).getHours();
+    const hour  = new Date(f.departure.time).getHours();
+    const day   = new Date(f.departure.time).getDate();
     const badges = [];
 
     if (preferredDestinations.includes(f.arrival.code)) {
-      badges.push(
-        hasHistory
-          ? { label: "Điểm đến yêu thích", color: "blue" }
-          : { label: "Tuyến hot", color: "orange" },
-      );
+      badges.push(hasHistory
+        ? { label: 'Điểm đến yêu thích', color: 'blue' }
+        : { label: 'Tuyến hot',           color: 'orange' });
     }
-    if (hour >= 5 && hour <= 11)
-      badges.push({ label: "Chuyến sáng", color: "yellow" });
+    if (preferredHours !== null && Math.abs(hour - preferredHours) <= 2)
+      badges.push({ label: `Khung giờ hay đi (${Math.round(preferredHours)}h)`, color: 'purple' });
+    else if (hour >= 5 && hour <= 11)
+      badges.push({ label: 'Chuyến sáng', color: 'yellow' });
     if (f.duration_minutes < 300)
-      badges.push({ label: "Bay thẳng", color: "green" });
+      badges.push({ label: 'Bay thẳng', color: 'green' });
     if (f.seat && f.seat.base_price < 5000000)
-      badges.push({ label: "Giá tốt < 5tr", color: "green" });
+      badges.push({ label: 'Giá tốt < 5tr', color: 'green' });
+    if (filter === 'cheapest')
+      badges.push({ label: 'Giá rẻ nhất', color: 'red' });
+    if (day >= 1 && day <= 7)
+      badges.push({ label: 'Đầu tháng', color: 'teal' });
 
     return {
       ...f,
       score,
       badges,
-      is_recommended: score > 20,
-      recommendation_reason: hasHistory ? "personalized" : "top_buy",
+      is_recommended:        score > 20,
+      recommendation_reason: hasHistory ? 'personalized' : 'top_buy',
+      filter_applied:        filter || 'default',
     };
   });
 };

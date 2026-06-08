@@ -130,12 +130,16 @@ const getFlightRecommendations = async (req, res) => {
     const sessionId =
       req.headers["x-session-id"] || req.query.session_id || null;
 
+    // filter: 'cheapest' | 'early_month' | null
+    const { from, to, limit = 10, filter = null } = req.query;
+
     const recommendations = await flightService.recommendFlights({
       userId,
       sessionId,
-      fromAirport: from ? from.toUpperCase() : null,
-      toAirport: to ? to.toUpperCase() : null,
-      limit: parseInt(limit) || 10,
+      fromAirport: from   ? from.toUpperCase() : null,
+      toAirport:   to     ? to.toUpperCase()   : null,
+      limit:       parseInt(limit) || 10,
+      filter:      filter || null,
     });
 
     res.json({
