@@ -88,7 +88,8 @@ const SELECT_TOP_BUY_DESTINATIONS = `
 
 // ── Scored Flights (main recommendation query) ───────────────────────────────
 //
-// params: $1=limit, $2=preferred_destinations[], $3=preferred_hour, $4=avg_spending
+// params: $1=limit, $2=preferred_destinations[], $3=preferred_hour, $4=avg_spending,
+//         $5=preferred_day (ngày trong tháng user thường đặt, từ booking history)
 // extra: extraFilter, extraOrder, fromAirport, toAirport (injected via string concat
 //        because PostgreSQL doesn't support dynamic column filters in parameterized form)
 
@@ -154,8 +155,11 @@ const SELECT_SCORED_FLIGHTS = (
                WHEN fs.base_price < 5000000 AND $4 = 0 THEN 15
                ELSE 0 END
 
-        -- Đầu tháng bonus (ngày 1-7)
-        + CASE WHEN EXTRACT(DAY FROM f.departure_time) BETWEEN 1 AND 7 THEN 5 ELSE 0 END
+        -- Ngày trong tháng theo thói quen booking (±1 ngày)
+        + CASE WHEN $5 > 0
+                 AND ABS(EXTRACT(DAY FROM f.departure_time) - $5) <= 1
+               THEN 20
+               ELSE 0 END
       ) AS score
 
     FROM flights f

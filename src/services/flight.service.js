@@ -46,9 +46,10 @@ const saveSearchHistory = async ({
  * Recommendation Flights — đầy đủ theo yêu cầu:
  * 1. Lưu + đọc lịch sử tìm kiếm (không giới hạn thời gian cứng)
  * 2. Lọc theo bộ lọc "giá rẻ nhất" và "bay đầu tháng"
- * 3. Ưu tiên theo khung giờ thực tế của user
- * 4. Nếu chưa có lịch sử → TopBuy
- * 5. Lấy lịch sử toàn bộ từ trước (không set cứng 90 ngày)
+ * 3. Ưu tiên theo khung giờ thực tế của user (từ booking + search history)
+ * 4. Ưu tiên theo ngày trong tháng user thường đặt (MODE ngày)
+ * 5. Nếu chưa có lịch sử → TopBuy
+ * 6. Lấy lịch sử toàn bộ từ trước (không set cứng 90 ngày)
  */
 const recommendFlights = async ({
   userId,
@@ -64,6 +65,7 @@ const recommendFlights = async ({
   let preferredDepartures   = [];
   let preferredHours        = null;
   let avgSpending           = null;
+  let preferredDay          = 0; // Ngày trong tháng user thường đặt
   let hasHistory            = false;
 
   if (userId || sessionId) {
@@ -78,7 +80,7 @@ const recommendFlights = async ({
       hasHistory            = true;
       preferredDestinations = searchResult.rows.map(r => r.arrival_code);
       preferredDepartures   = searchResult.rows.map(r => r.departure_code);
-      avgSpending           = parseFloat(searchResult.rows[0].avg_min_price) || null;
+      avgSpending          = parseFloat(searchResult.rows[0].avg_min_price) || null;
     }
 
     // Lịch sử booking — toàn bộ các năm trước, không set cứng
@@ -92,6 +94,7 @@ const recommendFlights = async ({
         hasHistory     = true;
         preferredHours = parseFloat(bookingHistory.rows[0].avg_dep_hour) || null;
         avgSpending    = parseFloat(bookingHistory.rows[0].avg_price)    || avgSpending;
+        preferredDay   = parseFloat(bookingHistory.rows[0].preferred_day) || 0;
 
         for (const r of bookingHistory.rows) {
           if (!preferredDestinations.includes(r.arr_code)) {
@@ -116,10 +119,6 @@ const recommendFlights = async ({
   const extraFilter = filter === 'early_month'
     ? `AND EXTRACT(DAY FROM f.departure_time) BETWEEN 1 AND 7` : '';
 
-  // Scoring values
-  const preferredHour  = preferredHours !== null ? preferredHours : 0;
-  const preferredBudget = avgSpending || 0;
-
   const query = RQ.SELECT_SCORED_FLIGHTS(
     extraOrder,
     extraFilter,
@@ -130,12 +129,13 @@ const recommendFlights = async ({
   const { rows } = await pool.query(query, [
     limit,
     preferredDestinations.length > 0 ? preferredDestinations : [''],
-    preferredHour,
-    preferredBudget,
+    preferredHours !== null ? preferredHours : 0,
+    avgSpending || 0,
+    preferredDay, // $5: ngày trong tháng user thường đặt
   ]);
-  const flights   = formatFlights(rows, 1, 0, 0);
+  const flights = formatFlights(rows, 1, 0, 0);
 
-  // ── BƯỚC 5: Gắn badges + metadata ────────────────────────────────────────
+  // ── BƯỚC 4: Gắn badges + metadata ────────────────────────────────────────
   return flights.map((f, i) => {
     const score = parseInt(rows[i].score) || 0;
     const hour  = new Date(f.departure.time).getHours();
@@ -157,7 +157,9 @@ const recommendFlights = async ({
       badges.push({ label: 'Giá tốt < 5tr', color: 'green' });
     if (filter === 'cheapest')
       badges.push({ label: 'Giá rẻ nhất', color: 'red' });
-    if (day >= 1 && day <= 7)
+    if (preferredDay > 0 && Math.abs(day - preferredDay) <= 1)
+      badges.push({ label: `Ngày bạn hay đi (mùng ${preferredDay})`, color: 'pink' });
+    else if (day >= 1 && day <= 7)
       badges.push({ label: 'Đầu tháng', color: 'teal' });
 
     return {
@@ -167,6 +169,11 @@ const recommendFlights = async ({
       is_recommended:        score > 20,
       recommendation_reason: hasHistory ? 'personalized' : 'top_buy',
       filter_applied:        filter || 'default',
+      user_preferences: hasHistory ? {
+        preferred_hours: preferredHours,
+        preferred_day,
+        avg_spending: avgSpending,
+      } : null,
     };
   });
 };
