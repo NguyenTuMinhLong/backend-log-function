@@ -171,7 +171,7 @@ const recommendFlights = async ({
       filter_applied:        filter || 'default',
       user_preferences: hasHistory ? {
         preferred_hours: preferredHours,
-        preferred_day,
+        preferred_day: preferredDay,
         avg_spending: avgSpending,
       } : null,
     };
