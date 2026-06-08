@@ -1,201 +1,366 @@
 "use strict";
 
 /**
- * SQL queries cho recommendation system (CU-05)
- * - search_history: lưu + đọc lịch sử tìm kiếm
- * - booking_history: lấy lịch sử booking để phân tích preference
- * - top_buy: fallback khi chưa có lịch sử
- * - scored_flights: query chính với scoring
+ * SQL queries cho Recommendation Engine (CU-05 v3)
+ * Dùng bảng sẵn có: holidays + holiday_rules
+ *
+ * 3 luồng:
+ *   1. DAY_PATTERN  – gợi ý theo ngày trong tuần user hay đặt nhất
+ *   2. TIME_PROXIMITY – nhóm chuyến bay cách nhau ≤ 30 phút
+ *   3. USER_HISTORY   – score theo thói quen (địa điểm > ngày > giờ)
+ * Fallback: top_popular → top_searched
+ *
+ * holidays: id, name, date, type, created_at
+ * holiday_rules: id, rule_type, date, start_date, end_date, multiplier, created_at
  */
 
-// ── Search History ───────────────────────────────────────────────────────────
-
-const INSERT_SEARCH_HISTORY = `
-  INSERT INTO search_history (
-    user_id, session_id,
-    departure_code, arrival_code, departure_date, return_date,
-    seat_class, adults, children, infants,
-    results_count, min_price_found
-  ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-`;
-
-const SELECT_SEARCH_HISTORY_BY_USER = `
+// ─────────────────────────────────────────────
+// LUỒNG 1: Lấy ngày trong tuần user hay đặt nhất
+// ─────────────────────────────────────────────
+const SELECT_TOP_DAY_OF_WEEK = `
   SELECT
-    arrival_code,
-    departure_code,
-    COUNT(*)             AS search_count,
-    AVG(min_price_found) AS avg_min_price
-  FROM search_history
-  WHERE user_id = $1
-  GROUP BY arrival_code, departure_code
-  ORDER BY search_count DESC
-  LIMIT 5
-`;
-
-const SELECT_SEARCH_HISTORY_BY_SESSION = `
-  SELECT
-    arrival_code,
-    departure_code,
-    COUNT(*)             AS search_count,
-    AVG(min_price_found) AS avg_min_price
-  FROM search_history
-  WHERE session_id = $1
-  GROUP BY arrival_code, departure_code
-  ORDER BY search_count DESC
-  LIMIT 5
-`;
-
-// ── Booking History ──────────────────────────────────────────────────────────
-
-const SELECT_BOOKING_HISTORY_PREFERENCES = `
-  SELECT
-    arr.code                                          AS arr_code,
-    dep.code                                          AS dep_code,
-    COUNT(*)                                          AS trip_count,
-    AVG(b.total_price)                                AS avg_price,
-    AVG(EXTRACT(HOUR FROM f.departure_time))          AS avg_dep_hour,
-    MODE() WITHIN GROUP (
-      ORDER BY EXTRACT(DAY FROM f.departure_time)
-    )                                                  AS preferred_day
+    EXTRACT(DOW FROM f.departure_time) AS day_of_week,
+    COUNT(*)                           AS trip_count
   FROM bookings b
-  JOIN flights  f   ON f.id   = b.outbound_flight_id
+  JOIN flights f ON f.id = b.outbound_flight_id
+  WHERE b.user_id = $1
+    AND b.status IN ('confirmed', 'completed')
+    AND f.departure_time > NOW()
+  GROUP BY day_of_week
+  ORDER BY trip_count DESC
+  LIMIT 1
+`;
+
+// ─────────────────────────────────────────────
+// LUỒNG 1: Đếm số ngày trong tháng rơi vào topDayOfWeek
+// ─────────────────────────────────────────────
+const SELECT_DAYS_IN_MONTH = `
+  SELECT
+    TO_CHAR(d::DATE, 'YYYY-MM-DD') AS date_value,
+    TO_CHAR(d::DATE, 'TMDay')       AS day_name,
+    EXTRACT(DOW FROM d::DATE)       AS day_of_week
+  FROM generate_series(
+    DATE_TRUNC('month', $1::DATE),
+    DATE_TRUNC('month', $1::DATE) + INTERVAL '1 month' - INTERVAL '1 day',
+    INTERVAL '1 day'
+  ) AS d
+  WHERE EXTRACT(DOW FROM d::DATE) = $2
+`;
+
+// ─────────────────────────────────────────────
+// LUỒNG 1: Chuyến bay vào ngày trùng topDayOfWeek trong tháng
+// ─────────────────────────────────────────────
+const SELECT_FLIGHTS_BY_DAY_PATTERN = `
+  SELECT
+    f.id,
+    f.flight_number,
+    f.departure_time,
+    f.arrival_time,
+    f.duration_minutes,
+    f.status,
+    al.id               AS airline_id,
+    al.code             AS airline_code,
+    al.name             AS airline_name,
+    al.logo_url         AS airline_logo,
+    al.logo_dark        AS airline_logo_dark,
+    al.logo_light       AS airline_logo_light,
+    dep.id              AS departure_airport_id,
+    dep.code            AS departure_code,
+    dep.city            AS departure_city,
+    dep.name            AS departure_airport_name,
+    arr.id              AS arrival_airport_id,
+    arr.code            AS arrival_code,
+    arr.city            AS arrival_city,
+    arr.name            AS arrival_airport_name,
+    fs.class            AS seat_class,
+    fs.total_seats,
+    fs.available_seats,
+    fs.base_price,
+    fs.baggage_included_kg,
+    fs.carry_on_kg,
+    fs.extra_baggage_price,
+    h.id                AS holiday_id,
+    h.name              AS holiday_name,
+    h.type              AS holiday_type,
+    TO_CHAR(f.departure_time, 'TMDay') AS day_name
+  FROM flights f
+  JOIN airlines  al  ON al.id  = f.airline_id
+  JOIN airports   dep ON dep.id = f.departure_airport_id
+  JOIN airports   arr ON arr.id = f.arrival_airport_id
+  LEFT JOIN flight_seats fs ON fs.flight_id = f.id AND fs.class = 'economy'
+  LEFT JOIN holidays h ON h.date = DATE(f.departure_time)
+  WHERE f.status = 'scheduled'
+    AND f.is_active = TRUE
+    AND fs.available_seats > 0
+    AND DATE(f.departure_time) = ANY($1)
+    AND f.departure_time > NOW()
+  ORDER BY f.departure_time
+  LIMIT $2
+`;
+
+// ─────────────────────────────────────────────
+// LUỒNG 2: Tất cả chuyến bay trong tháng (group 30 phút ở service)
+// JOIN thêm holiday_rules để lấy price multiplier
+// ─────────────────────────────────────────────
+const SELECT_FLIGHTS_FOR_TIME_GROUPING = `
+  SELECT
+    f.id,
+    f.flight_number,
+    f.departure_time,
+    f.arrival_time,
+    f.duration_minutes,
+    f.status,
+    al.id               AS airline_id,
+    al.code             AS airline_code,
+    al.name             AS airline_name,
+    al.logo_url         AS airline_logo,
+    al.logo_dark        AS airline_logo_dark,
+    al.logo_light       AS airline_logo_light,
+    dep.id              AS departure_airport_id,
+    dep.code            AS departure_code,
+    dep.city            AS departure_city,
+    dep.name            AS departure_airport_name,
+    arr.id              AS arrival_airport_id,
+    arr.code            AS arrival_code,
+    arr.city            AS arrival_city,
+    arr.name            AS arrival_airport_name,
+    fs.class            AS seat_class,
+    fs.total_seats,
+    fs.available_seats,
+    fs.base_price,
+    fs.baggage_included_kg,
+    fs.carry_on_kg,
+    fs.extra_baggage_price,
+    h.id                AS holiday_id,
+    h.name              AS holiday_name,
+    h.type              AS holiday_type,
+    hr.id               AS holiday_rule_id,
+    hr.multiplier       AS price_multiplier
+  FROM flights f
+  JOIN airlines  al  ON al.id  = f.airline_id
+  JOIN airports   dep ON dep.id = f.departure_airport_id
+  JOIN airports   arr ON arr.id = f.arrival_airport_id
+  LEFT JOIN flight_seats fs ON fs.flight_id = f.id AND fs.class = 'economy'
+  LEFT JOIN holidays h ON h.date = DATE(f.departure_time)
+  LEFT JOIN holiday_rules hr
+    ON (hr.date = DATE(f.departure_time)
+        OR (DATE(f.departure_time) BETWEEN hr.start_date AND hr.end_date))
+  WHERE f.status = 'scheduled'
+    AND f.is_active = TRUE
+    AND fs.available_seats > 0
+    AND f.departure_time BETWEEN $1::TIMESTAMP AND $2::TIMESTAMP
+  ORDER BY f.departure_time
+`;
+
+// ─────────────────────────────────────────────
+// LUỒNG 3: Thói quen cá nhân – pattern địa điểm, ngày, giờ
+// ─────────────────────────────────────────────
+const SELECT_USER_HISTORY_PATTERN = `
+  SELECT
+    dep.code                                  AS dep_code,
+    arr.code                                  AS arr_code,
+    EXTRACT(DOW FROM f.departure_time)        AS day_of_week,
+    EXTRACT(HOUR FROM f.departure_time)::INT AS dep_hour,
+    COUNT(*)                                 AS trip_count
+  FROM bookings b
+  JOIN flights f ON f.id = b.outbound_flight_id
   JOIN airports dep ON dep.id = f.departure_airport_id
   JOIN airports arr ON arr.id = f.arrival_airport_id
   WHERE b.user_id = $1
     AND b.status IN ('confirmed', 'completed')
-  GROUP BY arr.code, dep.code
-  ORDER BY trip_count DESC
-  LIMIT 5
-`;
-
-// ── TopBuy Fallback ─────────────────────────────────────────────────────────
-
-const SELECT_TOP_BUY_DESTINATIONS = `
-  SELECT
-    dep.code  AS dep_code,
-    arr.code  AS arr_code,
-    COUNT(b.id) AS booking_count
-  FROM bookings b
-  JOIN flights  f   ON f.id   = b.outbound_flight_id
-  JOIN airports dep ON dep.id = f.departure_airport_id
-  JOIN airports arr ON arr.id = f.arrival_airport_id
-  WHERE b.status IN ('confirmed', 'completed')
     AND f.departure_time > NOW()
-  GROUP BY dep.code, arr.code
-  ORDER BY booking_count DESC
+  GROUP BY dep.code, arr.code,
+           EXTRACT(DOW FROM f.departure_time),
+           EXTRACT(HOUR FROM f.departure_time)
+  ORDER BY trip_count DESC
+`;
+
+// ─────────────────────────────────────────────
+// LUỒNG 3: Chuyến bay phù hợp pattern cá nhân
+// score = địa điểm*5 + ngày*3 + giờ*1
+// ─────────────────────────────────────────────
+const SELECT_FLIGHTS_BY_USER_PATTERN = `
+  SELECT
+    f.id,
+    f.flight_number,
+    f.departure_time,
+    f.arrival_time,
+    f.duration_minutes,
+    f.status,
+    al.id               AS airline_id,
+    al.code             AS airline_code,
+    al.name             AS airline_name,
+    al.logo_url         AS airline_logo,
+    al.logo_dark        AS airline_logo_dark,
+    al.logo_light       AS airline_logo_light,
+    dep.id              AS departure_airport_id,
+    dep.code            AS departure_code,
+    dep.city            AS departure_city,
+    dep.name            AS departure_airport_name,
+    arr.id              AS arrival_airport_id,
+    arr.code            AS arrival_code,
+    arr.city            AS arrival_city,
+    arr.name            AS arrival_airport_name,
+    fs.class            AS seat_class,
+    fs.total_seats,
+    fs.available_seats,
+    fs.base_price,
+    fs.baggage_included_kg,
+    fs.carry_on_kg,
+    fs.extra_baggage_price,
+    h.id                AS holiday_id,
+    h.name              AS holiday_name,
+    h.type              AS holiday_type,
+    hr.id               AS holiday_rule_id,
+    hr.multiplier       AS price_multiplier,
+
+    (
+      CASE WHEN arr.code = ANY($2) AND dep.code = ANY($3) THEN 5 ELSE 0 END
+      + CASE WHEN EXTRACT(DOW FROM f.departure_time) = ANY($4::INT[]) THEN 3 ELSE 0 END
+      + CASE WHEN EXTRACT(HOUR FROM f.departure_time)::INT = ANY($5::INT[])
+             AND EXTRACT(HOUR FROM f.departure_time) = ANY($5::INT[]) THEN 1 ELSE 0 END
+    ) AS score
+
+  FROM flights f
+  JOIN airlines  al  ON al.id  = f.airline_id
+  JOIN airports   dep ON dep.id = f.departure_airport_id
+  JOIN airports   arr ON arr.id = f.arrival_airport_id
+  LEFT JOIN flight_seats fs ON fs.flight_id = f.id AND fs.class = 'economy'
+  LEFT JOIN holidays h ON h.date = DATE(f.departure_time)
+  LEFT JOIN holiday_rules hr
+    ON (hr.date = DATE(f.departure_time)
+        OR (DATE(f.departure_time) BETWEEN hr.start_date AND hr.end_date))
+  WHERE f.status = 'scheduled'
+    AND f.is_active = TRUE
+    AND fs.available_seats > 0
+    AND f.departure_time BETWEEN $6::TIMESTAMP AND $7::TIMESTAMP
+  ORDER BY score DESC, f.departure_time ASC
+  LIMIT $8
+`;
+
+// ─────────────────────────────────────────────
+// FALLBACK: Top popular flights (theo lượt đặt)
+// ─────────────────────────────────────────────
+const SELECT_TOP_POPULAR_FLIGHTS = `
+  SELECT
+    f.id,
+    f.flight_number,
+    f.departure_time,
+    f.arrival_time,
+    f.duration_minutes,
+    f.status,
+    al.id               AS airline_id,
+    al.code             AS airline_code,
+    al.name             AS airline_name,
+    al.logo_url         AS airline_logo,
+    al.logo_dark        AS airline_logo_dark,
+    al.logo_light       AS airline_logo_light,
+    dep.id              AS departure_airport_id,
+    dep.code            AS departure_code,
+    dep.city            AS departure_city,
+    dep.name            AS departure_airport_name,
+    arr.id              AS arrival_airport_id,
+    arr.code            AS arrival_code,
+    arr.city            AS arrival_city,
+    arr.name            AS arrival_airport_name,
+    fs.class            AS seat_class,
+    fs.total_seats,
+    fs.available_seats,
+    fs.base_price,
+    fs.baggage_included_kg,
+    fs.carry_on_kg,
+    fs.extra_baggage_price,
+    h.id                AS holiday_id,
+    h.name              AS holiday_name,
+    h.type              AS holiday_type,
+    hr.id               AS holiday_rule_id,
+    hr.multiplier       AS price_multiplier,
+    COUNT(b.id)         AS booking_count,
+    0                   AS score
+  FROM flights f
+  JOIN airlines  al  ON al.id  = f.airline_id
+  JOIN airports   dep ON dep.id = f.departure_airport_id
+  JOIN airports   arr ON arr.id = f.arrival_airport_id
+  LEFT JOIN flight_seats fs ON fs.flight_id = f.id AND fs.class = 'economy'
+  LEFT JOIN holidays h ON h.date = DATE(f.departure_time)
+  LEFT JOIN holiday_rules hr
+    ON (hr.date = DATE(f.departure_time)
+        OR (DATE(f.departure_time) BETWEEN hr.start_date AND hr.end_date))
+  LEFT JOIN bookings b
+    ON b.outbound_flight_id = f.id
+    AND b.status IN ('confirmed', 'completed')
+  WHERE f.status = 'scheduled'
+    AND f.is_active = TRUE
+    AND fs.available_seats > 0
+    AND f.departure_time BETWEEN $1::TIMESTAMP AND $2::TIMESTAMP
+  GROUP BY f.id, f.flight_number, f.departure_time, f.arrival_time,
+           f.duration_minutes, f.status, al.id, al.code, al.name,
+           al.logo_url, al.logo_dark, al.logo_light,
+           dep.id, dep.code, dep.city, dep.name,
+           arr.id, arr.code, arr.city, arr.name,
+           fs.class, fs.total_seats, fs.available_seats,
+           fs.base_price, fs.baggage_included_kg, fs.carry_on_kg, fs.extra_baggage_price,
+           h.id, h.name, h.type,
+           hr.id, hr.multiplier
+  ORDER BY booking_count DESC, f.departure_time ASC
+  LIMIT $3
+`;
+
+// ─────────────────────────────────────────────
+// FALLBACK: Top searched routes
+// ─────────────────────────────────────────────
+const SELECT_TOP_SEARCHED_ROUTES = `
+  SELECT
+    sh.departure_code,
+    sh.arrival_code,
+    COUNT(*) AS search_count
+  FROM search_history sh
+  WHERE sh.user_id = $1
+  GROUP BY sh.departure_code, sh.arrival_code
+  ORDER BY search_count DESC
   LIMIT 5
 `;
 
-// ── Scored Flights (main recommendation query) ───────────────────────────────
-//
-// params: $1=limit, $2=preferred_destinations[], $3=preferred_hour, $4=avg_spending,
-//         $5=preferred_day (ngày trong tháng user thường đặt, từ booking history)
-// extra: extraFilter, extraOrder, fromAirport, toAirport (injected via string concat
-//        because PostgreSQL doesn't support dynamic column filters in parameterized form)
+// ─────────────────────────────────────────────
+// Lấy holidays trong khoảng tháng
+// ─────────────────────────────────────────────
+const SELECT_HOLIDAYS_IN_RANGE = `
+  SELECT date, name, type
+  FROM holidays
+  WHERE date BETWEEN $1 AND $2
+  ORDER BY date
+`;
 
-const SELECT_SCORED_FLIGHTS = (
-  extraOrder = "",
-  extraFilter = "",
-  fromAirport = null,
-  toAirport = null,
-) => {
-  const fromFilter = fromAirport ? `AND dep.code = '${fromAirport}'` : "";
-  const toFilter   = toAirport   ? `AND arr.code = '${toAirport}'`   : "";
-
-  return `
-    SELECT
-      f.id                AS flight_id,
-      f.flight_number,
-      f.departure_time,
-      f.arrival_time,
-      f.duration_minutes,
-      f.status,
-      al.id               AS airline_id,
-      al.code             AS airline_code,
-      al.name             AS airline_name,
-      al.logo_url         AS airline_logo,
-      al.logo_dark        AS airline_logo_dark,
-      al.logo_light       AS airline_logo_light,
-      dep.id              AS departure_airport_id,
-      dep.code            AS departure_code,
-      dep.city            AS departure_city,
-      dep.name            AS departure_airport_name,
-      arr.id              AS arrival_airport_id,
-      arr.code            AS arrival_code,
-      arr.city            AS arrival_city,
-      arr.name            AS arrival_airport_name,
-      fs.class            AS seat_class,
-      fs.total_seats,
-      fs.available_seats,
-      fs.base_price,
-      fs.baggage_included_kg,
-      fs.carry_on_kg,
-      fs.extra_baggage_price,
-
-      (
-        -- Điểm đến yêu thích
-        + CASE WHEN arr.code = ANY($2) THEN 30 ELSE 0 END
-
-        -- Khung giờ theo thói quen thực tế (±2h)
-        + CASE WHEN ABS(EXTRACT(HOUR FROM f.departure_time) - $3) <= 2
-                 AND $3 > 0 THEN 15
-               WHEN EXTRACT(HOUR FROM f.departure_time) BETWEEN 5 AND 11
-                 AND $3 = 0  THEN 10
-               ELSE 0 END
-
-        -- Bay thẳng (không quá cảnh, < 5h)
-        + CASE WHEN f.duration_minutes < 300 THEN 15 ELSE 0 END
-
-        -- Chuyến đêm trừ điểm
-        + CASE WHEN EXTRACT(HOUR FROM f.departure_time) >= 22
-                 OR EXTRACT(HOUR FROM f.departure_time) <= 4  THEN -10 ELSE 0 END
-
-        -- Ngân sách phù hợp với mức chi trung bình của user
-        + CASE WHEN fs.base_price <= ($4 * 1.2) AND $4 > 0 THEN 10
-               WHEN fs.base_price < 5000000 AND $4 = 0 THEN 15
-               ELSE 0 END
-
-        -- Ngày trong tháng theo thói quen booking (±1 ngày)
-        + CASE WHEN $5 > 0
-                 AND ABS(EXTRACT(DAY FROM f.departure_time) - $5) <= 1
-               THEN 20
-               ELSE 0 END
-      ) AS score
-
-    FROM flights f
-    JOIN airlines al  ON al.id  = f.airline_id
-    JOIN airports dep ON dep.id = f.departure_airport_id
-    JOIN airports arr ON arr.id = f.arrival_airport_id
-    LEFT JOIN flight_seats fs ON fs.flight_id = f.id AND fs.class = 'economy'
-
-    WHERE f.status           = 'scheduled'
-      AND f.is_active        = TRUE
-      AND fs.available_seats > 0
-      AND f.departure_time BETWEEN NOW() - INTERVAL '3 hours'
-                                AND NOW() + INTERVAL '10 days'
-      ${extraFilter}
-      ${fromFilter}
-      ${toFilter}
-
-    ORDER BY ${extraOrder} score DESC, f.departure_time ASC
-    LIMIT $1
-  `;
-};
-
-// ── Module Exports ───────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// Lấy holiday_rules trong khoảng tháng (cho admin)
+// ─────────────────────────────────────────────
+const SELECT_HOLIDAY_RULES_IN_RANGE = `
+  SELECT id, rule_type, date, start_date, end_date, multiplier
+  FROM holiday_rules
+  WHERE date BETWEEN $1 AND $2
+     OR start_date BETWEEN $1 AND $2
+     OR end_date BETWEEN $1 AND $2
+  ORDER BY date, start_date
+`;
 
 module.exports = {
-  // Search History
-  INSERT_SEARCH_HISTORY,
-  SELECT_SEARCH_HISTORY_BY_USER,
-  SELECT_SEARCH_HISTORY_BY_SESSION,
+  // Luồng 1
+  SELECT_TOP_DAY_OF_WEEK,
+  SELECT_DAYS_IN_MONTH,
+  SELECT_FLIGHTS_BY_DAY_PATTERN,
 
-  // Booking History
-  SELECT_BOOKING_HISTORY_PREFERENCES,
+  // Luồng 2
+  SELECT_FLIGHTS_FOR_TIME_GROUPING,
+
+  // Luồng 3
+  SELECT_USER_HISTORY_PATTERN,
+  SELECT_FLIGHTS_BY_USER_PATTERN,
 
   // Fallback
-  SELECT_TOP_BUY_DESTINATIONS,
+  SELECT_TOP_POPULAR_FLIGHTS,
+  SELECT_TOP_SEARCHED_ROUTES,
 
-  // Recommendation
-  SELECT_SCORED_FLIGHTS,
+  // Helpers
+  SELECT_HOLIDAYS_IN_RANGE,
+  SELECT_HOLIDAY_RULES_IN_RANGE,
 };
