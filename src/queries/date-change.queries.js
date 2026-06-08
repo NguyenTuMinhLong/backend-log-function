@@ -24,9 +24,10 @@ const INSERT_DATE_CHANGE = `
     price_difference,
     status,
     reason,
-    requested_by
+    requested_by,
+    flight_leg
   )
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
   RETURNING *
 `;
 

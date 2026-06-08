@@ -278,6 +278,7 @@ const requestDateChange = async (userId, bookingCode, data) => {
       'pending_otp', // Status: cho OTP verification
       reason,
       userId,
+      'outbound', // Hiện tại chỉ hỗ trợ đổi chặng đi
     ]);
 
     const request = requestResult.rows[0];
