@@ -1,21 +1,20 @@
 "use strict";
 
 /**
- * Recommendation Service v3 — CU-05
+ * Recommendation Service v4 — CU-05
  * Dùng bảng sẵn có: holidays + holiday_rules
  *
- * 3 luồng gợi ý:
+ * 3 luồng:
  *   1. DAY_PATTERN  – theo ngày trong tuần user hay đặt nhất
  *   2. TIME_PROXIMITY – nhóm chuyến cách nhau ≤ 30 phút
- *   3. USER_HISTORY   – score địa điểm*5 + ngày*3 + giờ*1
- * Fallback: top_popular → top_searched
- * Mix 3 luồng, tối đa 1000 kết quả
+ *   3. USER_HISTORY   – score địa điểm*5 + ngày*3 + giờ*2
+ * Fallback: top_popular (100) → top_searched
  */
 
 const pool = require("../config/db");
 const Q = require("../queries/recommendation.queries");
 
-// ─── Badge definitions ─────────────────────────────────────────────
+// ─── Badges ────────────────────────────────────────────────────────
 const BADGE = {
   DAY_PATTERN: { label: "📅 Ngày bạn hay đặt", color: "blue" },
   TIME_PROXIMITY: { label: "⏰ Nhiều chuyến gần giờ", color: "purple" },
@@ -26,30 +25,17 @@ const BADGE = {
 };
 
 // ─── Constants ─────────────────────────────────────────────────────
-const MAX_RESULTS = 1000;
 const TIME_WINDOW_MINUTES = 30;
 const MAX_PER_GROUP = 1000;
 
-// ─── Day name helpers ─────────────────────────────────────────────
+// ─── Helpers ───────────────────────────────────────────────────────
 const DOW_NAMES = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+const formatDOW = (dow) => DOW_NAMES[parseInt(dow, 10)] || `T${dow}`;
 
-const formatDOW = (dow) =>
-  DOW_NAMES[parseInt(dow, 10)] || `T${dow}`;
-
-// ─── Duration ─────────────────────────────────────────────────────
 const formatDuration = (minutes) => {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return m > 0 ? `${h}h${m}m` : `${h}h`;
-};
-
-// ─── Price helpers ────────────────────────────────────────────────
-const calcTotalPrice = (basePrice, multiplier, adults, children, infants) => {
-  const adjusted = basePrice * (multiplier || 1);
-  const adultTotal = adjusted * adults;
-  const childTotal = adjusted * 0.75 * children;
-  const infantTotal = adjusted * 0.1 * infants;
-  return Math.round(adultTotal + childTotal + infantTotal);
 };
 
 const buildBaggageOptions = (extraBaggagePrice) => {
@@ -63,11 +49,12 @@ const buildBaggageOptions = (extraBaggagePrice) => {
   ];
 };
 
-// ─── Format 1 flight row → object ────────────────────────────────
+// ─── Format 1 flight row → object ─────────────────────────────────
 const formatFlight = (r, adults = 1, children = 0, infants = 0) => {
   const base = parseFloat(r.base_price) || 0;
   const multiplier = parseFloat(r.price_multiplier) || 1;
   const extraPrice = parseFloat(r.extra_baggage_price) || 0;
+  const adjusted = base * multiplier;
 
   return {
     id: r.id,
@@ -103,29 +90,28 @@ const formatFlight = (r, adults = 1, children = 0, infants = 0) => {
       total_seats: r.total_seats,
       base_price: base,
       price_multiplier: multiplier,
-      adjusted_price: Math.round(base * multiplier),
+      adjusted_price: Math.round(adjusted),
       baggage_included_kg: r.baggage_included_kg,
       carry_on_kg: r.carry_on_kg,
       extra_baggage_price: extraPrice,
       extra_baggage_options: buildBaggageOptions(extraPrice),
       price_breakdown: {
-        adult_price: Math.round(base * multiplier),
-        child_price: Math.round(base * multiplier * 0.75),
-        infant_price: Math.round(base * multiplier * 0.1),
+        adult_price: Math.round(adjusted),
+        child_price: Math.round(adjusted * 0.75),
+        infant_price: Math.round(adjusted * 0.1),
       },
-      total_price: calcTotalPrice(base, multiplier, adults, children, infants),
+      total_price: Math.round(
+        adjusted * adults + adjusted * 0.75 * children + adjusted * 0.1 * infants,
+      ),
     },
     holiday: r.holiday_id
-      ? {
-          id: r.holiday_id,
-          name: r.holiday_name,
-          type: r.holiday_type || r.type,
-        }
+      ? { id: r.holiday_id, name: r.holiday_name, type: r.holiday_type || r.type }
       : null,
   };
 };
 
 // ─── Group flights by 30-minute window ────────────────────────────
+// Luồng 2: nhóm 2+ chuyến cùng route cách nhau ≤ 30 phút
 const groupFlightsBy30Min = (flights) => {
   if (!flights || flights.length === 0) return [];
 
@@ -135,44 +121,38 @@ const groupFlightsBy30Min = (flights) => {
 
   const groups = [];
   let currentGroup = {
-    group_id: 1,
     flights: [sorted[0]],
     departure_time: sorted[0].departure_time,
-    route: `${sorted[0].departure.code} → ${sorted[0].arrival.code}`,
-    count: 1,
+    route: `${sorted[0].departure.code}→${sorted[0].arrival.code}`,
   };
 
   for (let i = 1; i < sorted.length; i++) {
-    const prev = sorted[i - 1];
-    const curr = sorted[i];
     const diffMs =
-      new Date(curr.departure_time) - new Date(prev.departure_time);
+      new Date(sorted[i].departure_time) - new Date(sorted[i - 1].departure_time);
     const diffMin = diffMs / (1000 * 60);
 
     if (diffMin <= TIME_WINDOW_MINUTES) {
-      currentGroup.flights.push(curr);
-      currentGroup.count = currentGroup.flights.length;
+      currentGroup.flights.push(sorted[i]);
     } else {
-      if (currentGroup.count > 0) groups.push(currentGroup);
+      if (currentGroup.flights.length > 0) groups.push(currentGroup);
       currentGroup = {
-        group_id: groups.length + 1,
-        flights: [curr],
-        departure_time: curr.departure_time,
-        route: `${curr.departure.code} → ${curr.arrival.code}`,
-        count: 1,
+        flights: [sorted[i]],
+        departure_time: sorted[i].departure_time,
+        route: `${sorted[i].departure.code}→${sorted[i].arrival.code}`,
       };
     }
   }
+  if (currentGroup.flights.length > 0) groups.push(currentGroup);
 
-  if (currentGroup.count > 0) groups.push(currentGroup);
-
+  // Gán group_id, trim oversized groups
   return groups
     .map((g, idx) => ({
       ...g,
       group_id: idx + 1,
+      count: g.flights.length,
       flights: g.flights.slice(0, MAX_PER_GROUP),
     }))
-    .filter((g) => g.count > 1);
+    .filter((g) => g.count >= 1); // giữ cả nhóm 1 chuyến (sẽ hiển thị riêng)
 };
 
 // ─── Month range ──────────────────────────────────────────────────
@@ -182,34 +162,29 @@ const getMonthRange = (year, month) => {
   return { start: start.toISOString(), end: end.toISOString() };
 };
 
-// ─── Main recommendation function ──────────────────────────────────
+// ─── Main function ────────────────────────────────────────────────
 const getRecommendations = async ({
   userId,
   sessionId,
   monthsAhead = 3,
-  limit = MAX_RESULTS,
+  limit = 200,
 }) => {
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
 
-  // ── Build month ranges ────────────────────────────────────────────
+  // Build month ranges
   const monthRanges = [];
   for (let i = 0; i < monthsAhead; i++) {
     const d = new Date(currentYear, currentMonth - 1 + i, 1);
     monthRanges.push(getMonthRange(d.getFullYear(), d.getMonth() + 1));
   }
-
   const firstRange = monthRanges[0];
   const lastRange = monthRanges[monthRanges.length - 1];
 
-  // ── Step 1: User history ──────────────────────────────────────────
+  // ── Step 1: User history ────────────────────────────────────────
   let hasHistory = false;
-  let userPatterns = {
-    topRoutes: [],
-    topDayOfWeek: null,
-    topHours: [],
-  };
+  let userPatterns = { topRoutes: [], topDayOfWeek: null, topHours: [] };
 
   if (userId) {
     try {
@@ -219,10 +194,9 @@ const getRecommendations = async ({
         userPatterns.topDayOfWeek = parseInt(dayResult.rows[0].day_of_week, 10);
       }
 
-      const patternResult = await pool.query(
-        Q.SELECT_USER_HISTORY_PATTERN,
-        [userId],
-      );
+      const patternResult = await pool.query(Q.SELECT_USER_HISTORY_PATTERN, [
+        userId,
+      ]);
       if (patternResult.rows.length > 0) {
         hasHistory = true;
 
@@ -234,9 +208,7 @@ const getRecommendations = async ({
           hourCount[r.dep_hour] = (hourCount[r.dep_hour] || 0) + r.trip_count;
         });
 
-        const topRoute = Object.entries(routeCount).sort(
-          (a, b) => b[1] - a[1],
-        )[0];
+        const topRoute = Object.entries(routeCount).sort((a, b) => b[1] - a[1])[0];
         if (topRoute) {
           const [routeStr] = topRoute;
           const [dep, arr] = routeStr.split("→");
@@ -253,7 +225,7 @@ const getRecommendations = async ({
     }
   }
 
-  // ── Step 2: Holidays ───────────────────────────────────────────────
+  // ── Step 2: Holidays ────────────────────────────────────────────
   let holidayDates = new Set();
   try {
     const result = await pool.query(Q.SELECT_HOLIDAYS_IN_RANGE, [
@@ -265,7 +237,47 @@ const getRecommendations = async ({
     console.error("[Recommendation] Lỗi lấy holidays:", err.message);
   }
 
-  // ── Step 3: LUỒNG 1 — DAY_PATTERN ───────────────────────────────
+  // ── Step 3: Lấy tất cả flights trong tháng ────────────────────
+  // Dùng chung cho cả 3 luồng + fallback
+  let allFlights = [];
+  try {
+    const { start, end } = firstRange;
+    const flightsResult = await pool.query(
+      Q.SELECT_FLIGHTS_FOR_TIME_GROUPING,
+      [start, end],
+    );
+    allFlights = flightsResult.rows;
+  } catch (err) {
+    console.error(
+      "[Recommendation] Lỗi lấy flights:",
+      err.message,
+    );
+  }
+
+  if (allFlights.length === 0) {
+    // Không có chuyến bay nào → trả rỗng
+    return {
+      groups: [],
+      flights: [],
+      meta: {
+        total: 0,
+        total_groups: 0,
+        limit,
+        has_history: hasHistory,
+        holiday_dates: Array.from(holidayDates),
+        user_preferences: hasHistory
+          ? {
+              top_day_of_week: userPatterns.topDayOfWeek,
+              top_day_of_week_name: formatDOW(userPatterns.topDayOfWeek),
+              top_hours: userPatterns.topHours,
+            }
+          : null,
+        source: hasHistory ? "personalized" : "popular",
+      },
+    };
+  }
+
+  // ── Step 4: LUỒNG 1 — DAY_PATTERN ───────────────────────────
   let dayPatternFlights = [];
   let dayPatternDates = [];
 
@@ -280,7 +292,7 @@ const getRecommendations = async ({
       if (dayPatternDates.length > 0) {
         const flightsResult = await pool.query(
           Q.SELECT_FLIGHTS_BY_DAY_PATTERN,
-          [dayPatternDates, Math.min(limit, 200)],
+          [dayPatternDates, limit],
         );
         dayPatternFlights = flightsResult.rows.map((r) => ({
           ...formatFlight(r),
@@ -298,24 +310,21 @@ const getRecommendations = async ({
     }
   }
 
-  // ── Step 4: LUỒNG 2 — TIME_PROXIMITY ───────────────────────────
+  // ── Step 5: LUỒNG 2 — TIME_PROXIMITY ───────────────────────
   let timeProximityGroups = [];
 
   try {
-    const { start, end } = firstRange;
-    const flightsResult = await pool.query(
-      Q.SELECT_FLIGHTS_FOR_TIME_GROUPING,
-      [start, end],
-    );
-    const allFlights = flightsResult.rows.map((r) => formatFlight(r));
+    const formattedFlights = allFlights.map((r) => formatFlight(r));
 
+    // Group theo route trước
     const routeGroups = {};
-    allFlights.forEach((f) => {
+    formattedFlights.forEach((f) => {
       const key = `${f.departure.code}→${f.arrival.code}`;
       if (!routeGroups[key]) routeGroups[key] = [];
       routeGroups[key].push(f);
     });
 
+    // Gom nhóm 30 phút cho từng route
     Object.entries(routeGroups).forEach(([route, flights]) => {
       const groups = groupFlightsBy30Min(flights);
       groups.forEach((g) => {
@@ -323,14 +332,14 @@ const getRecommendations = async ({
           ...g,
           route,
           recommendation_type: "time_proximity",
-          badge: BADGE.TIME_PROXIMITY,
-          score: 30 - g.group_id * 2,
+          badge: g.count > 1 ? BADGE.TIME_PROXIMITY : null,
+          score: g.count > 1 ? 30 - g.group_id * 2 : 5,
         });
       });
     });
 
     timeProximityGroups.sort((a, b) => b.score - a.score);
-    timeProximityGroups = timeProximityGroups.slice(0, 50);
+    timeProximityGroups = timeProximityGroups.slice(0, 100);
   } catch (err) {
     console.error(
       "[Recommendation] Lỗi luồng 2 (TIME_PROXIMITY):",
@@ -338,7 +347,7 @@ const getRecommendations = async ({
     );
   }
 
-  // ── Step 5: LUỒNG 3 — USER_HISTORY ──────────────────────────────
+  // ── Step 6: LUỒNG 3 — USER_HISTORY ──────────────────────────
   let userHistoryFlights = [];
 
   if (hasHistory) {
@@ -347,11 +356,14 @@ const getRecommendations = async ({
 
       const arrCodes = userPatterns.topRoutes.map((r) => r.arr);
       const depCodes = userPatterns.topRoutes.map((r) => r.dep);
-      const dayArray = userPatterns.topDayOfWeek !== null
-        ? [userPatterns.topDayOfWeek]
-        : [99];
+      const dayArray =
+        userPatterns.topDayOfWeek !== null
+          ? [userPatterns.topDayOfWeek]
+          : [];
       const hourArray =
-        userPatterns.topHours.length > 0 ? userPatterns.topHours.slice(0, 3) : [99];
+        userPatterns.topHours.length > 0
+          ? userPatterns.topHours.slice(0, 3)
+          : [];
 
       const result = await pool.query(Q.SELECT_FLIGHTS_BY_USER_PATTERN, [
         userId,
@@ -361,7 +373,7 @@ const getRecommendations = async ({
         hourArray,
         start,
         end,
-        Math.min(limit, 200),
+        limit,
       ]);
 
       userHistoryFlights = result.rows.map((r) => ({
@@ -378,17 +390,23 @@ const getRecommendations = async ({
     }
   }
 
-  // ── Step 6: FALLBACK — top popular ───────────────────────────────
+  // ── Step 7: FALLBACK — top popular ───────────────────────────
   let popularFlights = [];
 
-  if (!hasHistory || userHistoryFlights.length === 0) {
+  // Luôn chạy fallback nếu không có kết quả từ các luồng trên
+  const hasAnyResults =
+    userHistoryFlights.length > 0 ||
+    dayPatternFlights.length > 0 ||
+    timeProximityGroups.length > 0;
+
+  if (!hasAnyResults) {
     try {
       const { start, end } = firstRange;
-      const popularResult = await pool.query(Q.SELECT_TOP_POPULAR_FLIGHTS, [
-        start,
-        end,
-      ]);
-      popularFlights = popularResult.rows.slice(0, 100).map((r) => ({
+      const popularResult = await pool.query(
+        Q.SELECT_TOP_POPULAR_FLIGHTS,
+        [start, end, 100],
+      );
+      popularFlights = popularResult.rows.map((r) => ({
         ...formatFlight(r),
         recommendation_type: "popular",
         badge: BADGE.POPULAR,
@@ -402,36 +420,29 @@ const getRecommendations = async ({
     }
   }
 
-  // ── Step 7: FALLBACK — top searched routes ───────────────────────
+  // ── Step 8: FALLBACK — top searched ───────────────────────────
   let searchedFlights = [];
 
-  if (!hasHistory || searchedFlights.length === 0) {
+  if (!hasAnyResults && userId) {
     try {
-      if (userId) {
-        const searchedResult = await pool.query(Q.SELECT_TOP_SEARCHED_ROUTES, [
-          userId,
-        ]);
-        const topSearched = searchedResult.rows[0];
-        if (topSearched) {
-          const { start, end } = firstRange;
-          const allFlightsResult = await pool.query(
-            Q.SELECT_FLIGHTS_FOR_TIME_GROUPING,
-            [start, end],
-          );
-          searchedFlights = allFlightsResult.rows
-            .filter(
-              (r) =>
-                r.departure_code === topSearched.departure_code &&
-                r.arrival_code === topSearched.arrival_code,
-            )
-            .slice(0, 50)
-            .map((r) => ({
-              ...formatFlight(r),
-              recommendation_type: "searched",
-              badge: BADGE.SEARCHED,
-              score: topSearched.search_count,
-            }));
-        }
+      const searchedResult = await pool.query(Q.SELECT_TOP_SEARCHED_ROUTES, [
+        userId,
+      ]);
+      const topSearched = searchedResult.rows[0];
+      if (topSearched) {
+        searchedFlights = allFlights
+          .filter(
+            (r) =>
+              r.departure_code === topSearched.departure_code &&
+              r.arrival_code === topSearched.arrival_code,
+          )
+          .slice(0, 100)
+          .map((r) => ({
+            ...formatFlight(r),
+            recommendation_type: "searched",
+            badge: BADGE.SEARCHED,
+            score: topSearched.search_count,
+          }));
       }
     } catch (err) {
       console.error(
@@ -441,18 +452,27 @@ const getRecommendations = async ({
     }
   }
 
-  // ── Step 8: MIX 3 luồng ──────────────────────────────────────────
-  const groups = timeProximityGroups;
+  // ── Step 9: MIX — gom groups + flights ────────────────────────
+  // Mỗi group trả về 1 object { group_id, route, count, flights: [...] }
+  const groups = timeProximityGroups.map((g) => ({
+    group_id: g.group_id,
+    route: g.route,
+    count: g.count,
+    flights: g.flights,
+    badge: g.badge,
+    score: g.score,
+    recommendation_type: g.recommendation_type,
+  }));
 
+  // Flatten groups → flights để mix chung
   const groupItems = groups.flatMap((g) =>
     g.flights.map((f) => ({
       ...f,
+      group_id: g.group_id,
+      group_count: g.count,
       recommendation_type: g.recommendation_type,
       badge: g.badge,
       score: g.score,
-      group_id: g.group_id,
-      group_count: g.count,
-      route: g.route,
     })),
   );
 
@@ -461,43 +481,43 @@ const getRecommendations = async ({
       ...f,
       group_id: null,
       group_count: 0,
-      route: null,
     })),
     ...dayPatternFlights.map((f) => ({
       ...f,
       group_id: null,
       group_count: 0,
-      route: null,
     })),
     ...groupItems,
     ...popularFlights.map((f) => ({
       ...f,
       group_id: null,
       group_count: 0,
-      route: null,
     })),
     ...searchedFlights.map((f) => ({
       ...f,
       group_id: null,
       group_count: 0,
-      route: null,
     })),
   ];
 
-  // Sort by score desc
-  allItems.sort((a, b) => b.score - a.score);
+  // Sort by score desc, deduplicate by id
+  const seen = new Set();
+  const finalItems = allItems
+    .filter((f) => {
+      if (seen.has(f.id)) return false;
+      seen.add(f.id);
+      return true;
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
 
-  // ── Step 9: Tách ngày lễ vs ngày thường ───────────────────────
-  // Duy trì 1 danh sách mix nhưng có nhãn rõ ràng trong từng item
-  const finalItems = allItems.slice(0, limit);
-
-  // ── Step 10: Build response ──────────────────────────────────────
   return {
-    groups: groups.slice(0, 20),
+    groups: groups.slice(0, 50),
     flights: finalItems,
     meta: {
       total: finalItems.length,
       total_groups: groups.length,
+      all_flights_count: allFlights.length,
       limit,
       has_history: hasHistory,
       holiday_dates: Array.from(holidayDates),
