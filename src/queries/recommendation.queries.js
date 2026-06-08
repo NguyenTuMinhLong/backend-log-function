@@ -1,13 +1,19 @@
 "use strict";
 
 /**
- * SQL queries cho Recommendation Engine (CU-05 v4)
+ * SQL queries cho Recommendation Engine (CU-05 v6)
  * Dùng bảng sẵn có: holidays + holiday_rules
+ *
+ * holidays:     id, name, date, year, month, day, multiplier, reason, is_active
+ * holiday_rules: id, name, rule_type, calendar_type, anchor_month, anchor_day,
+ *                offset_days, multiplier, reason, priority, group_key, is_active
+ *   → holiday_rules là bảng quy tắc ADMIN, KHÔNG dùng để join ở recommendation
+ *   → Chỉ dùng holidays để lấy date + multiplier
  *
  * 3 luồng:
  *   1. DAY_PATTERN  – theo ngày trong tuần user hay đặt nhất
  *   2. TIME_PROXIMITY – nhóm chuyến bay cách nhau ≤ 30 phút
- *   3. USER_HISTORY   – score địa điểm*5 + ngày*3 + giờ*1
+ *   3. USER_HISTORY   – score địa điểm*5 + ngày*3 + giờ*2
  * Fallback: top_popular → top_searched
  */
 
@@ -77,7 +83,7 @@ const SELECT_FLIGHTS_BY_DAY_PATTERN = `
     fs.extra_baggage_price,
     h.id                AS holiday_id,
     h.name              AS holiday_name,
-    h.type              AS holiday_type,
+    h.multiplier        AS holiday_multiplier,
     TO_CHAR(f.departure_time, 'TMDay') AS day_name
   FROM flights f
   JOIN airlines  al  ON al.id = f.airline_id
@@ -95,7 +101,7 @@ const SELECT_FLIGHTS_BY_DAY_PATTERN = `
 `;
 
 // ─────────────────────────────────────────────
-// LUỒNG 2: Tất cả chuyến bay trong khoảng tháng (group 30p ở service)
+// LUỒNG 2: Tất cả chuyến bay trong khoảng tháng
 // ─────────────────────────────────────────────
 const SELECT_FLIGHTS_FOR_TIME_GROUPING = `
   SELECT
@@ -128,17 +134,13 @@ const SELECT_FLIGHTS_FOR_TIME_GROUPING = `
     fs.extra_baggage_price,
     h.id                AS holiday_id,
     h.name              AS holiday_name,
-    h.type              AS holiday_type,
-    hr.multiplier       AS price_multiplier
+    h.multiplier        AS holiday_multiplier
   FROM flights f
   JOIN airlines  al  ON al.id = f.airline_id
   JOIN airports   dep ON dep.id = f.departure_airport_id
   JOIN airports   arr ON arr.id = f.arrival_airport_id
   LEFT JOIN flight_seats fs ON fs.flight_id = f.id AND fs.class = 'economy'
   LEFT JOIN holidays h ON h.date = DATE(f.departure_time)
-  LEFT JOIN holiday_rules hr
-    ON (hr.date = DATE(f.departure_time)
-        OR DATE(f.departure_time) BETWEEN hr.start_date AND hr.end_date)
   WHERE f.status = 'scheduled'
     AND f.is_active = TRUE
     AND fs.available_seats > 0
@@ -154,7 +156,7 @@ const SELECT_USER_HISTORY_PATTERN = `
     dep.code                                    AS dep_code,
     arr.code                                    AS arr_code,
     EXTRACT(DOW FROM f.departure_time)        AS day_of_week,
-    EXTRACT(HOUR FROM f.departure_time)::INT   AS dep_hour,
+    EXTRACT(HOUR FROM f.departure_time)::INT AS dep_hour,
     COUNT(*)                                   AS trip_count
   FROM bookings b
   JOIN flights f ON f.id = b.outbound_flight_id
@@ -203,8 +205,7 @@ const SELECT_FLIGHTS_BY_USER_PATTERN = `
     fs.extra_baggage_price,
     h.id                AS holiday_id,
     h.name              AS holiday_name,
-    h.type              AS holiday_type,
-    hr.multiplier       AS price_multiplier,
+    h.multiplier        AS holiday_multiplier,
 
     (
       CASE WHEN arr.code = ANY($2) AND dep.code = ANY($3) THEN 5 ELSE 0 END
@@ -218,9 +219,6 @@ const SELECT_FLIGHTS_BY_USER_PATTERN = `
   JOIN airports   arr ON arr.id = f.arrival_airport_id
   LEFT JOIN flight_seats fs ON fs.flight_id = f.id AND fs.class = 'economy'
   LEFT JOIN holidays h ON h.date = DATE(f.departure_time)
-  LEFT JOIN holiday_rules hr
-    ON (hr.date = DATE(f.departure_time)
-        OR DATE(f.departure_time) BETWEEN hr.start_date AND hr.end_date)
   WHERE f.status = 'scheduled'
     AND f.is_active = TRUE
     AND fs.available_seats > 0
@@ -230,7 +228,7 @@ const SELECT_FLIGHTS_BY_USER_PATTERN = `
 `;
 
 // ─────────────────────────────────────────────
-// FALLBACK: Top popular flights (theo lượt đặt, LIMIT tăng lên)
+// FALLBACK: Top popular flights
 // ─────────────────────────────────────────────
 const SELECT_TOP_POPULAR_FLIGHTS = `
   SELECT
@@ -263,8 +261,7 @@ const SELECT_TOP_POPULAR_FLIGHTS = `
     fs.extra_baggage_price,
     h.id                AS holiday_id,
     h.name              AS holiday_name,
-    h.type              AS holiday_type,
-    hr.multiplier       AS price_multiplier,
+    h.multiplier        AS holiday_multiplier,
     COUNT(b.id)         AS booking_count
   FROM flights f
   JOIN airlines  al  ON al.id = f.airline_id
@@ -272,9 +269,6 @@ const SELECT_TOP_POPULAR_FLIGHTS = `
   JOIN airports   arr ON arr.id = f.arrival_airport_id
   LEFT JOIN flight_seats fs ON fs.flight_id = f.id AND fs.class = 'economy'
   LEFT JOIN holidays h ON h.date = DATE(f.departure_time)
-  LEFT JOIN holiday_rules hr
-    ON (hr.date = DATE(f.departure_time)
-        OR DATE(f.departure_time) BETWEEN hr.start_date AND hr.end_date)
   LEFT JOIN bookings b
     ON b.outbound_flight_id = f.id
     AND b.status IN ('confirmed', 'completed')
@@ -289,14 +283,13 @@ const SELECT_TOP_POPULAR_FLIGHTS = `
            arr.id, arr.code, arr.city, arr.name,
            fs.class, fs.total_seats, fs.available_seats,
            fs.base_price, fs.baggage_included_kg, fs.carry_on_kg, fs.extra_baggage_price,
-           h.id, h.name, h.type,
-           hr.multiplier
+           h.id, h.name, h.multiplier
   ORDER BY booking_count DESC, f.departure_time ASC
   LIMIT $3
 `;
 
 // ─────────────────────────────────────────────
-// FALLBACK: Top searched routes (cho user chưa có booking)
+// FALLBACK: Top searched routes
 // ─────────────────────────────────────────────
 const SELECT_TOP_SEARCHED_ROUTES = `
   SELECT
@@ -314,7 +307,7 @@ const SELECT_TOP_SEARCHED_ROUTES = `
 // Lấy holidays trong khoảng tháng
 // ─────────────────────────────────────────────
 const SELECT_HOLIDAYS_IN_RANGE = `
-  SELECT date, name, type
+  SELECT date, name, multiplier
   FROM holidays
   WHERE date BETWEEN $1 AND $2
   ORDER BY date
