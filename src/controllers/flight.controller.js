@@ -123,15 +123,12 @@ const getSeatMap = async (req, res) => {
  */
 const getFlightRecommendations = async (req, res) => {
   try {
-    // Lấy tham số từ query string (?from=SGN&to=HAN&limit=10)
-    const { from, to, limit = 10 } = req.query;
+    // Lấy tham số từ query string (?from=SGN&to=HAN&limit=10&filter=cheapest)
+    const { from, to, limit = 10, filter = null } = req.query;
 
     const userId = req.user?.id || req.query.userId || null;
     const sessionId =
       req.headers["x-session-id"] || req.query.session_id || null;
-
-    // filter: 'cheapest' | 'early_month' | null
-    const { from, to, limit = 10, filter = null } = req.query;
 
     const recommendations = await flightService.recommendFlights({
       userId,

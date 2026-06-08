@@ -1,5 +1,5 @@
 -- =============================================
--- MIGRATION 018: Create Search History Table
+-- MIGRATION 022: Create Search History Table
 -- Lưu lịch sử tìm kiếm để hỗ trợ CU-05 Recommendation
 -- =============================================
 
