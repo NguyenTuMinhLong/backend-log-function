@@ -40,6 +40,8 @@ const SELECT_DATE_CHANGE_BY_CODE = `
     dcr.*,
     b.booking_code,
     b.status AS booking_status,
+    b.contact_email,
+    b.contact_name,
     u.full_name AS user_name,
     u.email AS user_email,
     admin.full_name AS admin_name,

@@ -90,6 +90,7 @@ const SELECT_MY_BOOKINGS = (dk) =>
      arr.code AS arr_code, arr.city AS arr_city,
      al.name AS airline_name, al.code AS airline_code,
      COUNT(p.id) AS passenger_count,
+     COALESCE(anc.ancillary_total, 0) AS ancillary_total,
      CASE
        WHEN b.status = 'cancelled' THEN 'cancelled'
        WHEN b.status = 'expired'   THEN 'expired'
@@ -97,10 +98,11 @@ const SELECT_MY_BOOKINGS = (dk) =>
        WHEN b.status = 'confirmed' THEN 'completed'
        ELSE 'upcoming'
      END AS history_type,
-     (
-       SELECT final_amount FROM payments
-       WHERE booking_id = b.id
-       ORDER BY created_at DESC LIMIT 1
+     COALESCE(
+       (SELECT SUM(pay.final_amount) FROM payments pay
+        WHERE pay.booking_id = b.id
+          AND pay.status IN ('SUCCESS', 'PAID', 'COMPLETED', 'CONFIRMED')),
+       b.total_price
      ) AS final_amount
    FROM bookings b
    JOIN flights  f   ON f.id  = b.outbound_flight_id
@@ -108,8 +110,13 @@ const SELECT_MY_BOOKINGS = (dk) =>
    JOIN airports arr ON arr.id = f.arrival_airport_id
    JOIN airlines al  ON al.id  = f.airline_id
    LEFT JOIN passengers p ON p.booking_id = b.id
+   LEFT JOIN (
+     SELECT booking_id, COALESCE(SUM(total_price), 0) AS ancillary_total
+     FROM booking_ancillaries WHERE status != 'cancelled'
+     GROUP BY booking_id
+   ) anc ON anc.booking_id = b.id
    ${dk}
-   GROUP BY b.id, f.id, dep.id, arr.id, al.id
+   GROUP BY b.id, f.id, dep.id, arr.id, al.id, anc.ancillary_total
    ORDER BY b.created_at DESC`;
 
 const SELECT_BOOKING_PAYMENT_INFO =

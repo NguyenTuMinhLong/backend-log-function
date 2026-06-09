@@ -12,7 +12,7 @@ const QR = require('../queries/refund.queries');
 const QP = require('../queries/payment.queries');
 const { DATE_CHANGE } = require('../config/refund.config');
 const { createDateChangeNotification } = require('./notification.service');
-const { sendRefundOTPEmail } = require('../utils/mailer');
+const { sendRefundOTPEmail, sendBookingConfirmedEmail } = require('../utils/mailer');
 const { OTP_CONFIG } = require('../config/refund.config');
 const { buildPaymentInstruction } = require('../utils/formatters');
 const paymentConfig = require('../config/payment.config');
@@ -848,6 +848,41 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
 
     await client.query('COMMIT');
     console.log(`[DateChange Approve] SUCCESS: ${requestCode}`);
+
+    // Gửi thông báo + email xác nhận sau khi COMMIT
+    try {
+      await createDateChangeNotification({
+        event: 'DATE_CHANGE_APPROVED',
+        request: { ...request, status: 'approved', admin_notes: finalAdminNotes },
+        booking: { booking_code: request.booking_code },
+        adminId,
+      });
+    } catch (notifErr) {
+      console.error('[DateChange] Approval notification error:', notifErr.message);
+    }
+
+    const toEmail = request.contact_email || request.user_email;
+    if (toEmail) {
+      try {
+        await sendBookingConfirmedEmail(toEmail, {
+          bookingCode: request.booking_code,
+          contactName: request.contact_name || request.user_name || 'Quý khách',
+          finalAmount: updatedBookingTotal,
+          paymentMethod: 'DATE_CHANGE',
+          paidAt: new Date().toISOString(),
+          booking: {
+            flight_number: request.new_flight_number,
+            departure_time: request.new_departure_time,
+            arrival_time: request.new_arrival_time,
+            dep_code: request.new_departure_code,
+            arr_code: request.new_arrival_code,
+            seat_class: request.new_seat_class,
+          },
+        });
+      } catch (mailErr) {
+        console.error('[DateChange] Approval email error:', mailErr.message);
+      }
+    }
 
     return {
       success: true,
