@@ -1,4 +1,5 @@
 const flightService = require("../services/flight.service");
+const recommendationService = require("../services/recommendation.service");
 
 /** GET /api/flights/search */
 const searchFlights = async (req, res) => {
@@ -130,7 +131,7 @@ const getFlightRecommendations = async (req, res) => {
     const sessionId =
       req.headers["x-session-id"] || req.query.session_id || null;
 
-    const recommendations = await flightService.recommendFlights({
+    const recommendations = await recommendationService.getRecommendations({
       userId,
       sessionId,
       fromAirport: from   ? from.toUpperCase() : null,

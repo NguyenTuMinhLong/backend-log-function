@@ -1,7 +1,6 @@
 const express = require("express");
 const router = express.Router();
 const bookingController = require("../controllers/booking.controller");
-const flightController = require("../controllers/flight.controller");
 const refundController = require("../controllers/refund.controller");
 const dateChangeController  = require("../controllers/date-change.controller");
 const ancillaryController   = require("../controllers/ancillary.controller");
@@ -11,9 +10,6 @@ const { authenticate, authenticateOptional } = require("../middlewares/auth.midd
 
 // Lịch sử booking của tôi: phải đăng nhập
 router.get("/my", authenticate, bookingController.getMyBookings);
-
-// Flight Recommendation (mới)
-router.get("/recommendations", flightController.getFlightRecommendations);
 
 // Tạo booking
 router.post("/", authenticateOptional, bookingController.createBooking);

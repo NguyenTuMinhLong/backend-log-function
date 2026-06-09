@@ -795,7 +795,6 @@ const getPriceCalendar = async (params = {}) => {
 };
 
 module.exports = {
-  recommendFlights,
   saveSearchHistory,
   searchFlights,
   getAirports,
