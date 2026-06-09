@@ -292,7 +292,14 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
 
   const client = await pool.connect();
   try {
-    // ── 1 query duy nhất cho toàn bộ range ────────────────────────────────────
+    // Chỉ load chuyến đã có của các hãng / sân bay trong batch này —
+    // không query toàn bộ DB (gây OOM khi DB có hàng chục nghìn chuyến).
+    // ANY($3) / ANY($4) / ANY($5) thu hẹp kết quả xuống còn đúng tập tuyến
+    // đang xử lý; over-inclusion lành tính vì key 5-trường vẫn chính xác.
+    const batchAirlines = [...new Set(routes.map(r => r.airline_id))];
+    const batchDeps     = [...new Set(routes.map(r => r.dep_id))];
+    const batchArrs     = [...new Set(routes.map(r => r.arr_id))];
+
     const existingRes = await client.query(`
       SELECT airline_id, departure_airport_id, arrival_airport_id,
              flight_number,
@@ -301,7 +308,10 @@ const runBatch = async (batchSize = 20, force = false, unlimited = false) => {
       FROM flights
       WHERE DATE(departure_time) >= $1
         AND DATE(departure_time) <= $2
-    `, [dates[0], dates[dates.length - 1]]);
+        AND airline_id              = ANY($3)
+        AND departure_airport_id    = ANY($4)
+        AND arrival_airport_id      = ANY($5)
+    `, [dates[0], dates[dates.length - 1], batchAirlines, batchDeps, batchArrs]);
 
     // existingSet: "airlineId_depId_arrId_date_HH:MM"
     const existingSet = new Set(
