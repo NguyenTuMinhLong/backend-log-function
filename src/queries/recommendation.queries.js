@@ -304,6 +304,57 @@ const SELECT_TOP_SEARCHED_ROUTES = `
 `;
 
 // ─────────────────────────────────────────────
+// FALLBACK: Flights matching user's top searched routes
+// ─────────────────────────────────────────────
+const SELECT_FLIGHTS_BY_SEARCH_PATTERN = `
+  SELECT
+    f.id,
+    f.flight_number,
+    f.departure_time,
+    f.arrival_time,
+    f.duration_minutes,
+    f.status,
+    al.id               AS airline_id,
+    al.code             AS airline_code,
+    al.name             AS airline_name,
+    al.logo_url         AS airline_logo,
+    al.logo_dark        AS airline_logo_dark,
+    al.logo_light       AS airline_logo_light,
+    dep.id              AS departure_airport_id,
+    dep.code            AS departure_code,
+    dep.city            AS departure_city,
+    dep.name            AS departure_airport_name,
+    arr.id              AS arrival_airport_id,
+    arr.code            AS arrival_code,
+    arr.city            AS arrival_city,
+    arr.name            AS arrival_airport_name,
+    fs.class            AS seat_class,
+    fs.total_seats,
+    fs.available_seats,
+    fs.base_price,
+    fs.baggage_included_kg,
+    fs.carry_on_kg,
+    fs.extra_baggage_price,
+    h.id                AS holiday_id,
+    h.name              AS holiday_name,
+    h.multiplier        AS holiday_multiplier
+  FROM flights f
+  JOIN airlines  al  ON al.id = f.airline_id
+  JOIN airports   dep ON dep.id = f.departure_airport_id
+  JOIN airports   arr ON arr.id = f.arrival_airport_id
+  LEFT JOIN flight_seats fs ON fs.flight_id = f.id AND fs.class = 'economy'
+  LEFT JOIN holidays h ON h.date = DATE(f.departure_time)
+  WHERE f.status = 'scheduled'
+    AND f.is_active = TRUE
+    AND fs.available_seats > 0
+    AND dep.code = ANY($1)
+    AND arr.code = ANY($2)
+    AND f.departure_time BETWEEN $3::TIMESTAMP AND $4::TIMESTAMP
+  ORDER BY f.departure_time ASC
+  LIMIT $5
+`;
+
+// ─────────────────────────────────────────────
 // Lấy holidays trong khoảng tháng
 // ─────────────────────────────────────────────
 const SELECT_HOLIDAYS_IN_RANGE = `
@@ -322,5 +373,6 @@ module.exports = {
   SELECT_FLIGHTS_BY_USER_PATTERN,
   SELECT_TOP_POPULAR_FLIGHTS,
   SELECT_TOP_SEARCHED_ROUTES,
+  SELECT_FLIGHTS_BY_SEARCH_PATTERN,
   SELECT_HOLIDAYS_IN_RANGE,
 };

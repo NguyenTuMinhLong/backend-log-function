@@ -1,7 +1,8 @@
 "use strict";
 
 /**
- * Recommendation Service v5 — CU-05
+ * Recommendation Service v6 — CU-05
+ * Luồng ưu tiên: user_booking_history → user_search_history → popular
  * Dùng bảng sẵn có: holidays + holiday_rules
  *
  * Giới hạn: mỗi query chỉ lấy tối đa 200 rows để tránh timeout
@@ -117,7 +118,7 @@ const getRecommendations = async ({ userId, sessionId, monthsAhead = 1, limit = 
 
   // ── Step 1: User history ────────────────────────────────────────
   let hasHistory = false;
-  let userPatterns = { topRoutes: [], topDayOfWeek: null, topHours: [] };
+  let userPatterns = { topRoutes: [], allRoutes: [], topDayOfWeek: null, topHours: [] };
 
   if (userId) {
     try {
@@ -139,12 +140,15 @@ const getRecommendations = async ({ userId, sessionId, monthsAhead = 1, limit = 
           hourCount[r.dep_hour] = (hourCount[r.dep_hour] || 0) + r.trip_count;
         });
 
-        const topRoute = Object.entries(routeCount).sort((a, b) => b[1] - a[1])[0];
-        if (topRoute) {
-          const [routeStr] = topRoute;
-          const [dep, arr] = routeStr.split("→");
-          userPatterns.topRoutes = [{ dep, arr }];
-        }
+        const sortedRoutes = Object.entries(routeCount)
+          .sort((a, b) => b[1] - a[1])
+          .map(([routeStr, count]) => {
+            const [dep, arr] = routeStr.split("→");
+            return { dep, arr, count };
+          });
+
+        userPatterns.allRoutes = sortedRoutes;
+        userPatterns.topRoutes = sortedRoutes.slice(0, 1);
 
         userPatterns.topHours = Object.entries(hourCount)
           .sort((a, b) => b[1] - a[1])
@@ -202,6 +206,35 @@ const getRecommendations = async ({ userId, sessionId, monthsAhead = 1, limit = 
       console.log("[Recommendation] Step 3 — userHistoryFlights:", userHistoryFlights.length);
     } catch (err) {
       console.error("[Recommendation] Step 3 error:", err.message);
+    }
+  }
+
+  // ── Step 3b: Search history (chỉ khi không có booking history) ──
+  let searchHistoryFlights = [];
+  if (!hasHistory && userId) {
+    try {
+      const searchResult = await pool.query(Q.SELECT_TOP_SEARCHED_ROUTES, [userId]);
+      if (searchResult.rows.length > 0) {
+        const { start, end } = monthRange;
+        const depCodes = searchResult.rows.map((r) => r.departure_code);
+        const arrCodes = searchResult.rows.map((r) => r.arrival_code);
+        const result = await pool.query(Q.SELECT_FLIGHTS_BY_SEARCH_PATTERN, [
+          depCodes,
+          arrCodes,
+          start,
+          end,
+          limit,
+        ]);
+        searchHistoryFlights = result.rows.map((r) => ({
+          ...formatFlight(r),
+          recommendation_type: "search_history",
+          badge: BADGE.SEARCHED,
+          score: 80,
+        }));
+        console.log("[Recommendation] Step 3b — searchHistoryFlights:", searchHistoryFlights.length);
+      }
+    } catch (err) {
+      console.error("[Recommendation] Step 3b error:", err.message);
     }
   }
 
@@ -291,8 +324,16 @@ const getRecommendations = async ({ userId, sessionId, monthsAhead = 1, limit = 
     console.error("[Recommendation] Step 5 error:", err.message);
   }
 
-  // ── Step 6: MIX ────────────────────────────────────────────────
+  // ── Step 6: MIX — ưu tiên địa điểm hay đặt nhất → search history → popular ──
+  // Tier 1: user booking history (địa điểm, ngày, giờ hay đặt nhất — score cao nhất)
+  // Tier 2: user search history (tuyến hay tìm nhất)
+  // Tier 3: popular flights (fallback cuối cùng)
+  // Time proximity groups xen kẽ giữa các tier theo score
+
   const groups = timeProximityGroups.slice(0, 30);
+
+  // Gán tier cho mỗi loại để sort đúng thứ tự ưu tiên
+  const TIER = { user_history: 1, day_pattern: 1, search_history: 2, popular: 3, time_proximity: 0 };
 
   const groupItems = groups.flatMap((g) =>
     g.flights.map((f) => ({
@@ -306,10 +347,11 @@ const getRecommendations = async ({ userId, sessionId, monthsAhead = 1, limit = 
   );
 
   const allItems = [
-    ...userHistoryFlights.map((f) => ({ ...f, group_id: null, group_count: 0 })),
-    ...dayPatternFlights.map((f) => ({ ...f, group_id: null, group_count: 0 })),
-    ...groupItems,
-    ...popularFlights.map((f) => ({ ...f, group_id: null, group_count: 0 })),
+    ...userHistoryFlights.map((f) => ({ ...f, _tier: TIER.user_history })),
+    ...dayPatternFlights.map((f) => ({ ...f, _tier: TIER.day_pattern })),
+    ...searchHistoryFlights.map((f) => ({ ...f, _tier: TIER.search_history })),
+    ...groupItems.map((f) => ({ ...f, _tier: TIER.time_proximity })),
+    ...popularFlights.map((f) => ({ ...f, _tier: TIER.popular })),
   ];
 
   const seen = new Set();
@@ -319,10 +361,20 @@ const getRecommendations = async ({ userId, sessionId, monthsAhead = 1, limit = 
       seen.add(f.id);
       return true;
     })
-    .sort((a, b) => b.score - a.score)
+    // Ưu tiên tier thấp (cao hơn) trước, rồi mới đến score cao
+    .sort((a, b) => {
+      if (a._tier !== b._tier) return a._tier - b._tier;
+      return b.score - a.score;
+    })
     .slice(0, limit);
 
-  console.log("[Recommendation] Done — finalItems:", finalItems.length, "groups:", groups.length);
+  // metadata: ưu tiên nguồn nào có dữ liệu thì dùng nguồn đó
+  let topSource = "popular";
+  if (userHistoryFlights.length > 0) topSource = "user_history";
+  else if (searchHistoryFlights.length > 0) topSource = "search_history";
+  else if (popularFlights.length > 0) topSource = "popular";
+
+  console.log("[Recommendation] Done — finalItems:", finalItems.length, "topSource:", topSource);
 
   return {
     groups: groups.slice(0, 30),
@@ -332,12 +384,14 @@ const getRecommendations = async ({ userId, sessionId, monthsAhead = 1, limit = 
       total_groups: groups.length,
       limit,
       has_history: hasHistory,
+      top_source: topSource,
       user_preferences: hasHistory
         ? {
             top_routes: userPatterns.topRoutes,
             top_day_of_week: userPatterns.topDayOfWeek,
             top_day_of_week_name: formatDOW(userPatterns.topDayOfWeek),
             top_hours: userPatterns.topHours,
+            all_routes: userPatterns.allRoutes,
             month_range: {
               start: monthRange.start.split("T")[0],
               end: monthRange.end.split("T")[0],
