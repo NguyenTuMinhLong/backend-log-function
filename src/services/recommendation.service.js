@@ -28,6 +28,25 @@ const BADGE = {
 };
 
 const DOW_NAMES = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+
+// Helper: chuyển UTC timestamp → giờ VN (UTC+7)
+const getLocalHour = (utcString) => {
+  const d = new Date(utcString);
+  return (d.getUTCHours() + 7) % 24;
+};
+
+// Helper: lấy ngày trong tháng theo giờ VN
+const getLocalDay = (utcString) => {
+  const d = new Date(utcString);
+  return d.getUTCDate(); // departure_time lưu ở 00:00 local → UTC date = local date
+};
+
+// Helper: lấy day-of-week theo giờ VN (0=CN, 1=T2, ..., 6=T7)
+const getLocalDOW = (utcString) => {
+  const d = new Date(utcString);
+  return (d.getUTCDay() + 6) % 7; // JS: 0=Sun → chuyển: 0=Mon
+};
+
 const formatDOW = (dow) => DOW_NAMES[parseInt(dow, 10)] || `T${dow}`;
 
 const formatDuration = (minutes) => {
@@ -244,8 +263,8 @@ const getRecommendations = async ({
   const scoredFlights = scoredResult.rows.map((r, i) => {
     const f = formatFlight(r);
     const score = parseInt(r.score, 10) || 0;
-    const hour  = new Date(f.departure_time).getHours();
-    const day   = new Date(f.departure_time).getDate();
+    const hour  = getLocalHour(f.departure_time);
+    const day   = getLocalDay(f.departure_time);
     const badges = [];
 
     if (preferredDestinations.includes(f.arrival.code)) {
@@ -269,10 +288,9 @@ const getRecommendations = async ({
       badges.push({ label: "Đầu tháng", color: "teal" });
 
     if (preferredDOW !== null) {
-      const dowNames = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
-      const dowFlight = new Date(f.departure_time).getDay();
+      const dowFlight = getLocalDOW(f.departure_time);
       if (dowFlight === preferredDOW) {
-        badges.push({ label: `Thứ ${dowNames[preferredDOW]} bạn hay đi`, color: "orange" });
+        badges.push({ label: `Thứ ${DOW_NAMES[preferredDOW]} bạn hay đi`, color: "orange" });
       }
     }
 
@@ -313,7 +331,7 @@ const getRecommendations = async ({
           const destScore   = preferredDestinations.includes(f.arrival.code) ? 5 : 0;
           const dayScore    = 3; // Luồng 1: ngày trùng preferredDay luôn = 3
           const hourScore   = (preferredHours !== null)
-            ? (Math.abs(new Date(f.departure_time).getHours() - preferredHours) <= 2 ? 2 : 0)
+            ? (Math.abs(getLocalHour(f.departure_time) - preferredHours) <= 2 ? 2 : 0)
             : 0;
           const score = destScore + dayScore + hourScore;
 
