@@ -148,7 +148,7 @@ const buildBaggageOptions = (extraBaggagePrice) => {
 // Weekend premium: Fri/Sat/Sun cost more
 const { applyDynamicPricing } = require('../utils/pricing');
 const seasonService = require('./season.service');
-const { generatePriceAlertsForFlights, getDetailedAnalysis } = require('./price-alert.service');
+const { generatePriceAlert, getDetailedAnalysis } = require('./price-alert.service');
 
 // Áp dụng dynamic pricing có tính thêm hệ số mùa cao điểm/ngày lễ
 const getSeasonAwarePrice = async (basePrice, availableSeats, totalSeats, departureTime) => {
@@ -163,6 +163,13 @@ const formatFlights = async (rows, adults, children, infants) => Promise.all(
     const seasonInfo  = await seasonService.getSeasonInfo(r.departure_time);
     const seasonMult  = seasonInfo ? seasonInfo.multiplier : 1.0;
     const price       = applyDynamicPricing(base, r.available_seats, r.total_seats, r.departure_time, seasonMult);
+    const priceAlert  = await generatePriceAlert({
+      id: r.flight_id,
+      departure_time: r.departure_time,
+      base_price: base,
+      available_seats: r.available_seats,
+      total_seats: r.total_seats,
+    });
 
     return {
       flight_id:     r.flight_id,
@@ -183,6 +190,7 @@ const formatFlights = async (rows, adults, children, infants) => Promise.all(
       duration_minutes: r.duration_minutes,
       duration_label:   formatDuration(r.duration_minutes),
       season_info: seasonInfo,
+      price_alert: priceAlert,
       seat: {
         class:                 r.seat_class,
         available_seats:       r.available_seats,
@@ -297,8 +305,7 @@ const searchFlights = async (params) => {
   };
 
   const outboundRows    = await queryFlights(baseParams);
-  let outboundFlights = await formatFlights(outboundRows, a, c, i);
-  outboundFlights = await generatePriceAlertsForFlights(outboundFlights);
+  const outboundFlights = await formatFlights(outboundRows, a, c, i);
 
   let returnFlights = null;
   if (return_date) {
@@ -309,7 +316,6 @@ const searchFlights = async (params) => {
       departure_date: return_date,
     });
     returnFlights = await formatFlights(returnRows, a, c, i);
-    returnFlights = await generatePriceAlertsForFlights(returnFlights);
   }
 
   return {

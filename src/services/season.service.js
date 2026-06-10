@@ -1,7 +1,8 @@
 'use strict';
 
 const pool = require('../config/db');
-const solarLunar = require('solarlunar');
+// solarlunar v3 build dưới dạng ESM, require() trả về { default: {...} }
+const solarLunar = require('solarlunar').default || require('solarlunar');
 
 /*
 ============================================================
