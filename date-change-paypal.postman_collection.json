@@ -1,0 +1,713 @@
+{
+  "info": {
+    "_postman_id": "dc-quick-test-paypal-001",
+    "name": "Date Change - PayPal Quick Test",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000/api"
+    },
+    {
+      "key": "userToken",
+      "value": ""
+    },
+    {
+      "key": "adminToken",
+      "value": ""
+    },
+    {
+      "key": "bookingCode",
+      "value": "BK-2026-XXXX"
+    },
+    {
+      "key": "newFlightId",
+      "value": "100"
+    },
+    {
+      "key": "newSeatClass",
+      "value": "economy"
+    },
+    {
+      "key": "flightLeg",
+      "value": "outbound"
+    },
+    {
+      "key": "otp",
+      "value": "123456"
+    },
+    {
+      "key": "dateChangeRequestCode",
+      "value": ""
+    },
+    {
+      "key": "paymentCode",
+      "value": ""
+    },
+    {
+      "key": "paypalApproveUrl",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "0 - Get Booking Detail",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response has booking_code', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data).to.have.property('booking_code');",
+              "    if (json.data.booking_code) {",
+              "        pm.variables.set('bookingCode', json.data.booking_code);",
+              "        console.log('bookingCode set to:', json.data.booking_code);",
+              "    }",
+              "});",
+              "",
+              "pm.test('Booking is confirmed', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data.status).to.equal('confirmed');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/bookings/{{bookingCode}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "bookings",
+            "{{bookingCode}}"
+          ]
+        },
+        "description": "Confirm the booking is confirmed and note the outbound_flight_id to use for date change test."
+      },
+      "response": []
+    },
+    {
+      "name": "1 - Create Date Change Request",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 201', function() {",
+              "    pm.response.to.have.status(201);",
+              "});",
+              "",
+              "pm.test('Response has request_code and pending_otp status', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data).to.have.property('request_code');",
+              "    pm.expect(json.data.status).to.equal('pending_otp');",
+              "    pm.expect(json.data).to.have.property('price_difference');",
+              "",
+              "    pm.variables.set('dateChangeRequestCode', json.data.request_code);",
+              "    console.log('request_code set to:', json.data.request_code);",
+              "    console.log('price_difference:', json.data.price_difference);",
+              "});",
+              "",
+              "pm.test('price_difference_label reflects extra charge needed', function() {",
+              "    const json = pm.response.json();",
+              "    // For this test scenario, expect price_difference > 0 to trigger PayPal flow",
+              "    const diff = parseFloat(json.data.price_difference);",
+              "    if (diff > 0) {",
+              "        pm.expect(json.data.price_difference_label).to.include('tra them');",
+              "        pm.test('requires_otp is true', function() {",
+              "            pm.expect(json.data.requires_otp).to.equal(true);",
+              "        });",
+              "    } else {",
+              "        console.log('price_difference is not positive:', diff);",
+              "    }",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userToken}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"new_flight_id\": \"{{newFlightId}}\",\n  \"new_seat_class\": \"{{newSeatClass}}\",\n  \"flight_leg\": \"{{flightLeg}}\",\n  \"reason\": \"Test date change PayPal flow\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/date-changes/bookings/{{bookingCode}}/change-flight",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "date-changes",
+            "bookings",
+            "{{bookingCode}}",
+            "change-flight"
+          ]
+        },
+        "description": "Create a date change request. Requires Bearer token. Returns request_code and price_difference. If price_difference > 0 and chargeIfPositive config is on, flow will go to pending_payment after OTP."
+      },
+      "response": []
+    },
+    {
+      "name": "2 - Verify OTP",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('OTP verified successfully', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data.success).to.equal(true);",
+              "});",
+              "",
+              "pm.test('After OTP, status is pending_payment if price_difference > 0', function() {",
+              "    const json = pm.response.json();",
+              "    const diff = parseFloat(json.data.price_difference || 0);",
+              "",
+              "    if (diff > 0) {",
+              "        pm.expect(json.data.status).to.equal('pending_payment');",
+              "        pm.expect(json.data.requires_payment).to.equal(true);",
+              "        console.log('Flow confirmed: pending_payment with requires_payment=true');",
+              "    } else {",
+              "        pm.expect(json.data.status).to.equal('pending');",
+              "        pm.expect(json.data.requires_payment).to.equal(false);",
+              "        console.log('Flow confirmed: pending (no extra charge needed)');",
+              "    }",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{bookingEmail}}\",\n  \"otp\": \"{{otp}}\",\n  \"requestCode\": \"{{dateChangeRequestCode}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/date-changes/confirm",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "date-changes",
+            "confirm"
+          ]
+        },
+        "description": "Verify OTP sent to booking contact email. After successful OTP, if price_difference > 0 the request moves to pending_payment. Replace {{otp}} with the actual OTP from email (or mock in dev)."
+      },
+      "response": []
+    },
+    {
+      "name": "3 - Get Date Change Detail",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('request_code matches', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data.request_code).to.equal(pm.variables.get('dateChangeRequestCode'));",
+              "});",
+              "",
+              "pm.test('price_difference is shown', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data).to.have.property('price_difference');",
+              "    const diff = parseFloat(json.data.price_difference);",
+              "    console.log('price_difference in detail:', diff);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/date-changes/{{dateChangeRequestCode}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "date-changes",
+            "{{dateChangeRequestCode}}"
+          ]
+        },
+        "description": "Check date change request detail. Shows status, price_difference, and payment info."
+      },
+      "response": []
+    },
+    {
+      "name": "4 - Create PayPal Payment",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 201', function() {",
+              "    pm.response.to.have.status(201);",
+              "});",
+              "",
+              "pm.test('payment_code is returned', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data).to.have.property('payment_code');",
+              "    pm.variables.set('paymentCode', json.data.payment_code);",
+              "    console.log('paymentCode set to:', json.data.payment_code);",
+              "});",
+              "",
+              "pm.test('payment_method is PAYPAL', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data.payment_method).to.equal('PAYPAL');",
+              "});",
+              "",
+              "pm.test('gateway_response contains PayPal order info', function() {",
+              "    const json = pm.response.json();",
+              "    const gw = json.data.gateway_response || {};",
+              "    console.log('gateway_response:', JSON.stringify(gw, null, 2));",
+              "",
+              "    // PayPal order fields vary by provider version",
+              "    if (gw.approve_url || gw.redirect_url) {",
+              "        const approveUrl = gw.approve_url || gw.redirect_url;",
+              "        pm.variables.set('paypalApproveUrl', approveUrl);",
+              "        console.log('paypalApproveUrl:', approveUrl);",
+              "    } else if (gw.order_id) {",
+              "        console.log('PayPal order_id:', gw.order_id);",
+              "    }",
+              "",
+              "    pm.expect(gw.provider).to.equal('PAYPAL');",
+              "});",
+              "",
+              "pm.test('price_difference in payment matches request', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data.price_difference).to.be.ok;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"payment_method\": \"PAYPAL\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/date-changes/{{dateChangeRequestCode}}/payment",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "date-changes",
+            "{{dateChangeRequestCode}}",
+            "payment"
+          ]
+        },
+        "description": "Create PayPal payment for the date change price_difference. Returns payment_code and gateway_response with PayPal approval URL. Open the approve_url / redirect_url in browser to complete checkout. After checkout, use the payment status requests in this collection to verify the backend has processed the PayPal return/webhook and moved the date-change request forward."
+      },
+      "response": []
+    },
+    {
+      "name": "5 - Get Payment Status",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('payment status is shown', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data).to.have.property('status');",
+              "    pm.expect(json.data).to.have.property('price_difference');",
+              "    console.log('payment status:', json.data.status);",
+              "",
+              "    const payment = json.data.payment;",
+              "    if (payment) {",
+              "        console.log('payment.payment_method:', payment.payment_method);",
+              "        console.log('payment.status:', payment.status);",
+              "        console.log('payment.amount:', payment.amount);",
+              "    }",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/date-changes/{{dateChangeRequestCode}}/payment",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "date-changes",
+            "{{dateChangeRequestCode}}",
+            "payment"
+          ]
+        },
+        "description": "Poll this after completing PayPal checkout. Status should transition from PENDING to SUCCESS once payment is confirmed. If status is still PENDING, wait and re-run this request."
+      },
+      "response": []
+    },
+    {
+      "name": "6 - Check Payment Status After PayPal Checkout",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response includes request and payment info', function() {",
+              "    const json = pm.response.json();",
+              "    console.log('payment status payload:', JSON.stringify(json.data, null, 2));",
+              "    pm.expect(json.data).to.have.property('request_code');",
+              "    pm.expect(json.data).to.have.property('status');",
+              "    pm.expect(json.data).to.have.property('price_difference');",
+              "});",
+              "",
+              "pm.test('If webhook/return completed, request should move out of pending_payment', function() {",
+              "    const json = pm.response.json();",
+              "    const reqStatus = json.data.status;",
+              "    const payment = json.data.payment;",
+              "    if (payment && ['SUCCESS', 'PAID', 'COMPLETED', 'CONFIRMED'].includes(String(payment.status || '').toUpperCase())) {",
+              "        pm.expect(['pending', 'approved']).to.include(reqStatus);",
+              "        console.log('Payment is completed and request moved to:', reqStatus);",
+              "    } else {",
+              "        console.log('Payment not completed yet. Re-run this request after PayPal checkout/webhook.');",
+              "    }",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/date-changes/{{dateChangeRequestCode}}/payment",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "date-changes",
+            "{{dateChangeRequestCode}}",
+            "payment"
+          ]
+        },
+        "description": "Run this after completing PayPal checkout in the browser. The actual success transition happens through backend payment return/webhook handling. Re-run until payment.status becomes SUCCESS (or equivalent) and request status moves from pending_payment to pending/approved."
+      },
+      "response": []
+    },
+    {
+      "name": "7 - Admin: Get Date Change Pending List",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Returns pending date change requests', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data).to.be.an('array');",
+              "",
+              "    const target = json.data.find(r => r.request_code === pm.variables.get('dateChangeRequestCode'));",
+              "    if (target) {",
+              "        console.log('Found request:', target.request_code);",
+              "        console.log('status:', target.status);",
+              "        console.log('price_difference:', target.price_difference);",
+              "    } else {",
+              "        console.log('Request not found in pending list, may already be approved or status changed');",
+              "    }",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/date-changes/admin?status=pending",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "date-changes",
+            "admin"
+          ],
+          "query": [
+            {
+              "key": "status",
+              "value": "pending"
+            }
+          ]
+        },
+        "description": "Admin checks the pending date change requests. The PayPal-paid request should appear here with status pending after payment is confirmed."
+      },
+      "response": []
+    },
+    {
+      "name": "8 - Admin: Approve Date Change",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Date change approved successfully', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data.success).to.equal(true);",
+              "    pm.expect(json.data.status).to.equal('approved');",
+              "    console.log('Approved:', json.data.request_code);",
+              "});",
+              "",
+              "pm.test('Booking is updated (date_changed status)', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data.message).to.be.ok;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"admin_notes\": \"Approved after PayPal payment confirmed - date change quick test\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/date-changes/{{dateChangeRequestCode}}/approve",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "date-changes",
+            "{{dateChangeRequestCode}}",
+            "approve"
+          ]
+        },
+        "description": "Admin approves the date change request. This executes the actual flight change: releases old seats, reserves new seats, updates booking. If the net effect reduces booking total, a refund record may be auto-created."
+      },
+      "response": []
+    },
+    {
+      "name": "9 - Verify Final Booking Detail",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Booking status updated to date_changed', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data.status).to.equal('date_changed');",
+              "});",
+              "",
+              "pm.test('outbound flight is updated to new flight', function() {",
+              "    const json = pm.response.json();",
+              "    const newFlightId = pm.variables.get('newFlightId');",
+              "    pm.expect(json.data.outbound_flight_id.toString()).to.equal(newFlightId.toString());",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/bookings/{{bookingCode}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "bookings",
+            "{{bookingCode}}"
+          ]
+        },
+        "description": "Final verification that the booking now reflects the new flight and has status date_changed."
+      },
+      "response": []
+    },
+    {
+      "name": "X - Cancel Date Change Request",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 on successful cancel', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Request cancelled', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data.status).to.equal('cancelled');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/date-changes/{{dateChangeRequestCode}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "date-changes",
+            "{{dateChangeRequestCode}}"
+          ]
+        },
+        "description": "Cancel the date change request (only allowed while status is pending_otp, pending_payment, or pending). Associated pending payment will also be cancelled."
+      },
+      "response": []
+    },
+    {
+      "name": "X - Cancel Date Change Payment",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 on successful payment cancel', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Payment cancelled', function() {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.data.success).to.equal(true);",
+              "    console.log('Cancelled payment:', json.data.payment_code);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/date-changes/{{dateChangeRequestCode}}/payment",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "date-changes",
+            "{{dateChangeRequestCode}}",
+            "payment"
+          ]
+        },
+        "description": "Cancel the pending payment without cancelling the date change request itself. Request stays at pending_payment so user can create a new payment."
+      },
+      "response": []
+    }
+  ]
+}

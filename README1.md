@@ -97,12 +97,87 @@ Hiện service đã xử lý:
 - không cho tạo payment nếu request không cần trả thêm
 - lock request để tránh race condition
 - có thể reuse payment cũ nếu payment đó vẫn còn hiệu lực và chưa terminal
-- sau khi payment được xác nhận thành công thì request chuyển về `pending`, **không tự approve**
+- sau khi payment được xác nhận thành công thì service set payment `SUCCESS`, đưa request về `pending`, rồi gọi flow approve thực tế để đổi ghế/chuyến
 
 Các method hiện support theo config:
 - `BANK_QR`
 - `MOMO`
 - `PAYPAL`
+
+Với nhánh `PAYPAL`:
+- `POST /api/date-changes/:requestCode/payment` với `payment_method = "PAYPAL"` sẽ tạo payment code dạng `PAY-DC-*`
+- service gọi provider PayPal để tạo order
+- response payment sẽ mang theo `gateway_response` / instruction để frontend redirect user sang PayPal checkout
+- nếu payment PayPal cũ còn pending và vẫn còn checkout URL hợp lệ thì service có thể reuse thay vì tạo payment mới
+
+### Nếu khách phải trả thêm thì flow hiện tại đi như nào?
+
+Đây là nhánh quan trọng nhất của date change V1 khi chuyến mới đắt hơn.
+
+Flow thực tế:
+1. User tạo request đổi ngày → request được tạo với `status = pending_otp`
+2. System trả về `price_difference`
+3. User verify OTP qua `POST /api/date-changes/confirm`
+4. Nếu `price_difference > 0` và config `chargeIfPositive` bật, request chuyển sang `pending_payment`
+5. User gọi `POST /api/date-changes/:requestCode/payment` với `payment_method = "PAYPAL"`
+6. Khi payment được xác nhận thành công, request được đẩy về `pending`
+7. Sau đó flow approve thực tế sẽ đổi ghế/chuyến và hoàn tất cập nhật booking
+
+Điểm cần nhớ:
+- nhánh này là **thu thêm trước rồi mới hoàn tất đổi chuyến**
+- request không nhảy thẳng sang `approved` ngay sau OTP
+- payment thành công là điều kiện để request quay lại hàng chờ xử lý tiếp
+
+### Nếu khách được hoàn tiền thì tiền được xử lý lúc nào?
+
+Đây là phần dễ hiểu nhầm nhất nếu chỉ nhìn `price_difference` ở lúc tạo request.
+
+Hiện logic refund của date change **không phải** là cứ `price_difference < 0` thì lập tức tạo refund ngay sau OTP.
+
+Thực tế flow đang là:
+- sau OTP, nếu không cần thu thêm thì request đi vào `pending`
+- đến lúc `approveDateChange` chạy thật, service mới:
+  - release ghế cũ
+  - reserve ghế mới
+  - hủy ancillary outbound không còn phù hợp (trừ insurance)
+  - cập nhật lại `booking.total_price`
+  - tính phần hoàn thực tế
+
+Công thức refund thực tế ở bước approve đang là:
+- `ticketRefund = max(0, -ticketDiff)`
+- `refundableAmount = ticketRefund + cancelledAncillaryTotal`
+
+Tức là khoản hoàn có thể đến từ 2 nguồn:
+1. **chênh lệch vé giảm** nếu chuyến mới rẻ hơn chuyến cũ
+2. **dịch vụ outbound bị hủy** do đổi chuyến, ví dụ baggage/ancillary không còn áp dụng nữa
+
+Nếu `refundableAmount > 0` thì system sẽ:
+- auto tạo một record trong bảng `refunds`
+- gắn `refund_type = partial_leg`
+- link refund đó vào `date_change_requests.related_refund_id`
+- để `status = pending` cho refund này
+
+Nói ngắn gọn:
+- **thu thêm** được xử lý ở nhánh payment trước khi hoàn tất đổi chuyến
+- **hoàn tiền** chỉ được quyết toán sau khi approve đổi chuyến và sau khi biết chính xác ticket diff + ancillary bị hủy
+
+### Có trường hợp vừa đổi chuyến vừa phát sinh refund không?
+
+Có.
+
+Ví dụ thực tế:
+- vé chuyến mới đắt hơn ở phần ticket
+- nhưng khi approve thì outbound ancillary bị hủy tạo ra một khoản hoàn
+- hoặc vé mới rẻ hơn và lại còn có ancillary bị hủy
+
+Lúc đó system sẽ tính trên tổng thực tế sau approve:
+- nếu có khoản hoàn dương thì tạo refund record
+- nếu phần vé tăng sau khi trừ ancillary vẫn còn dương thì admin notes có thể được ghi thêm thông tin phụ thu
+
+Code hiện tại còn có bước ghi note nội bộ kiểu:
+- `PHỤ THU: ... VND chưa thu từ khách`
+
+Điều này cho thấy approve flow đang cố phản ánh **net effect cuối cùng** của việc đổi ngày, chứ không chỉ nhìn duy nhất vào một con số ở bước request ban đầu.
 
 ### Admin flow trong V1
 
@@ -228,63 +303,245 @@ Nói đơn giản: service đang cố cân bằng giữa **rẻ**, **đỡ lâu*
 
 ---
 
-## 3. Season: hiện tại đã có override, holiday, season nhưng chưa phải custom engine hoàn chỉnh cho admin
+## 3. Season: logic hiện tại đã thành một flow pricing khá đầy đủ, có cache, holiday rules âm lịch và override theo ngày
 
-Phần season hiện giờ đã rõ về thứ tự ưu tiên và cách hệ thống quyết định multiplier cho một ngày bay.
+Phần season hiện tại không còn chỉ là mấy mốc mùa cao điểm đơn giản nữa. Logic thực tế bây giờ là một flow resolve thống nhất để backend quyết định **một ngày bay cụ thể** đang thuộc diện nào, lấy multiplier bao nhiêu, và trả metadata gì ra cho client.
+
+Điểm quan trọng nhất là toàn bộ hệ thống đang cố dùng **một nguồn season info chung** cho pricing, search, combo, detail và price alert để tránh mỗi nơi tính một kiểu.
 
 ### Thứ tự ưu tiên hiện tại
 
 Service đang resolve theo đúng thứ tự này:
 
 ```text
-override -> holiday -> season -> off-peak
+override -> holiday_rules -> holidays -> season -> normal(1.0)
 ```
 
 Cụ thể:
-1. **Override**: admin chỉnh tay theo một ngày cụ thể, priority cao nhất
-2. **Holiday**: ngày lễ được định nghĩa riêng
-3. **Season**: các mùa cao điểm theo period
-4. Không match gì thì coi là off-peak, multiplier = `1.0`
+1. **Override**: admin chỉnh tay cho đúng một ngày cụ thể trong `price_overrides`, priority cao nhất
+2. **Holiday rule**: rule động trong `holiday_rules`, có thể resolve theo solar hoặc lunar calendar
+3. **Holiday cố định**: dữ liệu trong bảng `holidays`
+4. **Season period**: dữ liệu trong `season_periods`
+5. Không match gì thì coi là normal/off-peak, multiplier = `1.0`
+
+Điểm này quan trọng vì nếu đã có override thì holiday/season phía dưới **không còn tác dụng** cho ngày đó nữa.
+
+### Các nguồn dữ liệu season hiện đang dùng
+
+Hiện tại season service đang đọc từ 4 nguồn dữ liệu chính:
+- `season_periods`: mùa cao điểm theo khoảng ngày-tháng
+- `holidays`: ngày lễ kiểu fixed-date hoặc date có year cụ thể
+- `holiday_rules`: rule lễ động, có thể resolve theo năm
+- `price_overrides`: override một ngày cụ thể do admin tạo
+
+Nói ngắn gọn:
+- `season_periods` giải quyết bài toán “mùa”
+- `holidays` giải quyết bài toán “ngày lễ tĩnh”
+- `holiday_rules` giải quyết bài toán “ngày lễ động”, đặc biệt hữu ích cho Tết âm lịch
+- `price_overrides` là lớp manual control mạnh nhất hiện tại
+
+### Holiday rules là phần mới quan trọng nhất
+
+Đây là chỗ season logic hiện tại đã tiến hơn bản cũ khá nhiều.
+
+`holiday_rules` cho phép backend định nghĩa một ngày lễ theo rule thay vì phải seed thủ công từng ngày cho từng năm.
+
+Hiện service support:
+- `calendar_type = solar`
+- `calendar_type = lunar`
+- `offset_days` để dịch trước/sau ngày anchor
+- `priority` để xử lý khi nhiều rule rơi vào cùng một ngày
+- `group_key` để gom nhóm cùng một dịp lễ nếu cần dùng ở tầng trên
+
+Ý nghĩa thực tế:
+- với lễ dương như 01/01 hoặc 30/04 thì có thể resolve trực tiếp theo solar
+- với Tết âm lịch thì có thể resolve từ lịch âm sang ngày dương bằng `solarlunar`
+- nếu cần “cao điểm trước Tết 2 ngày” hay “sau lễ 1 ngày” thì dùng `offset_days`
+
+Tức là nếu sau này muốn làm Tết đúng business logic thì hướng chuẩn hơn là seed `holiday_rules`, không phải hardcode trong code, cũng không phải mỗi năm lại nhập tay toàn bộ ngày lễ vào `holidays`.
+
+### Season period hiện đang match như nào?
+
+`season_periods` hiện không bị giới hạn ở các khoảng nằm gọn trong một năm dương lịch. Service đã support cả season **cross-year**.
+
+Ví dụ kiểu:
+- bắt đầu tháng 12 năm nay
+- kết thúc tháng 1 năm sau
+
+thì vẫn match đúng.
+
+Cách làm hiện tại là service build season window theo `referenceYear - 1` và `referenceYear`, rồi check xem `departureDate` có nằm trong một trong các window đó không.
+
+Điểm này giúp các mùa kiểu cuối năm - đầu năm hoạt động đúng mà không cần hack dữ liệu.
+
+### Nếu có nhiều season cùng match thì chọn cái nào?
+
+Nếu một ngày rơi vào nhiều season periods cùng lúc, hệ thống không lấy đại bản ghi đầu tiên.
+
+Nó sẽ chọn theo rule:
+1. `priority` cao hơn thắng
+2. nếu `priority` bằng nhau thì `multiplier` cao hơn thắng
+
+Nghĩa là admin/data layer có thể chồng season lên nhau, miễn là biết season nào cần priority cao hơn.
 
 ### `getSeasonInfo()` hiện trả về gì?
 
-Nếu match được thì thường sẽ có các thông tin kiểu:
+`getSeasonInfo(departureDate)` là hàm trung tâm của toàn bộ flow.
+
+Nếu match được override / holiday / season thì response thường có các thông tin như:
 - `name`
 - `multiplier`
 - `reason`
 - `type` (`override`, `holiday`, `season`)
-- một số flag như `isPeak`, `isHoliday`, `isOverride`, `isApproaching`
+- `daysUntil`
+- các flag như `isPeak`, `isHoliday`, `isOverride`, `isApproaching`, `isInside`
 
-Điểm này quan trọng vì cùng một nguồn season info đang được tái sử dụng cho:
-- pricing
-- `season_info` trong flight search / combo search
-- `price_alert`
+Ngoài ra còn có metadata phụ thuộc loại match:
+- holiday từ rule có thể có thêm `calendar_type`, `rule_type`, `group_key`
+- season có thể có `approachingInfo`
 
-### Override chính là phần “custom” gần nhất hiện có
+Nếu không match gì thì `getSeasonInfo()` trả `null`.
 
-Nếu hỏi admin hiện custom được đến đâu thì câu trả lời thực tế là:
+Điểm này dẫn tới một rule rất thực dụng ở tầng pricing:
+- có info thì lấy `info.multiplier`
+- không có info thì mặc định `1.0`
+
+### `isPeak`, `isHoliday`, `isOverride` hiện nên hiểu như nào?
+
+- `isOverride`: ngày đó đang bị override tay bởi admin
+- `isHoliday`: ngày đó match holiday hoặc holiday rule
+- `isPeak`: hiện đang hiểu khá thực dụng là multiplier đủ cao để coi là peak, hoặc holiday thì luôn được coi là peak
+
+Cụ thể:
+- với override: `isPeak = multiplier >= 1.20`
+- với season: `isPeak = multiplier >= 1.20`
+- với holiday/rule holiday: service đang trả `isPeak = true`
+
+Tức là holiday đang được coi là một dạng peak day về mặt messaging/pricing context.
+
+### `isApproachingPeakSeason()` đang làm gì?
+
+Đây là phần README cũ chưa nói rõ.
+
+Service hiện có thêm khái niệm **approaching peak season** để phục vụ alert/messaging.
+
+Logic này:
+- default threshold là `30` ngày
+- nếu ngày bay đang nằm trong season thì trả `isApproaching: true` và `isInside: true`
+- nếu hiện tại đang ở gần ngày bắt đầu một season sắp tới, và ngày bay nằm từ điểm season bắt đầu trở đi, service có thể trả trạng thái “sắp vào mùa cao điểm”
+
+Khi match season thường, `getSeasonInfo()` có thể đính kèm:
+- `isApproaching`
+- `isInside`
+- `approachingInfo.reason`
+- `approachingInfo.daysUntilSeasonStart`
+
+Điểm quan trọng: đây không phải một loại `type` riêng, mà là metadata bổ sung quanh một season match.
+
+### Cache của season service hiện tại
+
+Season service hiện đã có cache trong memory để giảm query DB lặp lại:
+- `seasonCache`
+- `holidayCache`
+- `holidayRuleCache`
+- `overrideCache`
+
+TTL hiện tại là khoảng `1 giờ`.
+
+Ý nghĩa thực tế:
+- search flight nhiều lần sẽ không phải query full season tables liên tục
+- override theo ngày cũng có cache riêng theo `dateStr`
+- khi admin tạo/sửa/xóa override thì controller có gọi clear cache override để tránh stale data quá lâu
+- service cũng có `refreshCache()` để clear toàn bộ cache season/holiday/rule/override
+
+Nói đơn giản: logic này thiên về performance đủ dùng chứ chưa phải distributed cache phức tạp.
+
+### Override hiện custom được tới đâu?
+
+Nếu hỏi admin hiện “custom season” được gì thì câu trả lời thực tế là:
 - custom mạnh nhất đang nằm ở `price_overrides`
-- đây là dạng chỉnh multiplier cho **một ngày cụ thể**
-- và nó có priority cao hơn holiday/season
+- admin có thể set multiplier cho **một ngày cụ thể**
+- override này thắng toàn bộ holiday/season bên dưới
+- create/update/delete override đều có clear override cache
 
-Còn `season_periods` thì vẫn là logic theo khoảng thời gian đã định nghĩa sẵn. Tức là admin có thể quản trị dữ liệu season, nhưng chưa phải kiểu rule engine quá linh hoạt.
+Đây chính là cơ chế phù hợp nhất cho các case test nhanh, hotfix pricing, hoặc dịp đặc biệt chưa kịp seed rule chính thức.
 
-### Mùa hiện tại đang dùng để làm gì?
+Nhưng cũng cần nói rõ là:
+- override hiện chỉ target theo **date**
+- chưa target theo route, airline, cabin, campaign hay segmentation nâng cao
 
-Chủ yếu là:
-- tăng / giảm giá theo mùa
-- trả `season_info` cho phía client
-- hỗ trợ `price_alert`
-- phân biệt high season, holiday, approaching peak
+Tức là đây là custom control hữu ích, nhưng chưa phải pricing rule engine tổng quát.
 
-Nói cách khác, season hiện tại phục vụ khá tốt cho pricing và messaging, nhưng chưa phải framework custom toàn diện cho admin kiểu muốn target theo route, airline, campaign hay condition phức tạp.
+### Season logic hiện đang đi vào pricing như nào?
 
-### Ý chính cần nhớ về season
+Flow hiện tại về bản chất là:
+1. lấy `seasonInfo` hoặc `seasonMultiplier`
+2. đưa multiplier đó vào dynamic pricing chung
+3. trả kết quả giá cuối cùng + metadata season cho client
 
-- Hệ thống đã có priority rõ: `override > holiday > season > normal`
-- Có admin override theo ngày cụ thể
-- Có season info thống nhất để feed cho pricing, combo và alert
-- Chưa có “admin custom season engine” đầy đủ, mới dừng ở mức cấu hình theo ngày lễ / mùa / override ngày cụ thể
+Với `flight.service`:
+- `getSeasonMultiplier(departureTime)` được đưa vào `applyDynamicPricing(...)`
+- `formatFlights(...)` đồng thời gắn luôn `season_info` vào từng flight
+- `seat.base_price`, `price_breakdown`, `seat.total_price` đều đã phản ánh multiplier mùa tương ứng
+
+Với `flight-combo.service`:
+- mỗi leg trong combo cũng có `season_info`
+- combo pricing hiện đã đi cùng season logic, không còn là nhánh giá tách rời
+
+Nói ngắn gọn: season bây giờ không chỉ để “ghi chú là đang mùa cao điểm”, mà thực sự đã đi vào số tiền trả ra.
+
+### Season info hiện đang được trả ra ở đâu?
+
+Hiện season metadata đang được dùng lại ở nhiều chỗ:
+- `GET /api/flights/search`
+- `GET /api/flights/combo`
+- các response flight detail
+- `GET /api/flights/:id/price-analysis`
+- `price_alert` / detailed analysis
+
+Điểm tốt của kiến trúc hiện tại là client không phải tự đoán mùa từ ngày bay. Backend đã resolve sẵn và trả `season_info` cùng dữ liệu giá.
+
+### Price alert hiện đang phụ thuộc vào season ra sao?
+
+`price-alert.service` cũng reuse season service thay vì tự tính riêng.
+
+Hiện alert logic dùng season theo mấy cách chính:
+- lấy `seasonMultiplier` để tính breakdown giá
+- lấy `seasonInfo` để build message/recommendation
+- dùng `shouldAlert(departureDate)` để quyết định có nên alert mạnh không
+
+Rule trong `shouldAlert()` hiện là:
+- alert nếu là holiday
+- hoặc là peak
+- hoặc là approaching peak với `multiplier >= 1.15`
+
+Nghĩa là season không chỉ ảnh hưởng giá, mà còn ảnh hưởng cả cách backend giải thích cho người dùng rằng giá đang cao vì sao.
+
+### Tết hiện tại nên hiểu đúng như nào?
+
+Đây là phần rất dễ hiểu nhầm nếu chỉ nhìn README cũ.
+
+Hiện code **đã có khả năng support Tết âm lịch** thông qua `holiday_rules` + `calendar_type = lunar` + thư viện `solarlunar`.
+
+Nhưng khả năng support trong code **không đồng nghĩa** với việc môi trường hiện tại chắc chắn đã có dữ liệu Tết trong DB.
+
+Nên cần tách 2 ý:
+- **về code**: đã hỗ trợ resolve Tết âm lịch
+- **về dữ liệu DB**: có thể vẫn chưa seed `holiday_rules` hoặc `holidays` cho Tết
+
+Vì vậy nếu DB chưa có dữ liệu Tết thì cách test nhanh hợp lý nhất vẫn là dùng `price_overrides` để mô phỏng.
+
+### Ý chính cần nhớ về season hiện tại
+
+- Hệ thống không còn chỉ có `override > holiday > season`, mà thực tế là `override > holiday_rules > holidays > season > normal`
+- Có support holiday rule theo **solar và lunar calendar**
+- Có support season cross-year
+- Có cơ chế chọn season theo `priority`, rồi fallback theo `multiplier`
+- Có cache in-memory khoảng 1 giờ cho season/holiday/rule/override
+- `getSeasonInfo()` là nguồn dữ liệu trung tâm cho pricing, search, combo, detail và alert
+- `price_overrides` là công cụ custom/manual mạnh nhất hiện tại
+- Đã support Tết ở tầng code nếu DB có `holiday_rules` đúng, nhưng không đảm bảo mọi môi trường đã có dữ liệu đó
+- Chưa phải custom pricing engine đầy đủ theo route/airline/campaign/segment
 
 ---
 

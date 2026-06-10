@@ -218,6 +218,84 @@ const formatFlights = async (rows, adults, children, infants) => {
 
 // Validate tham số tìm kiếm
 
+const queryFlights = async ({
+  departure_code,
+  arrival_code,
+  departure_date,
+  adults = 1,
+  children = 0,
+  seat_class,
+  sort_by,
+  min_price,
+  max_price,
+  airline_code,
+  departure_city,
+  arrival_city,
+}) => {
+  const cls = (seat_class || 'economy').toLowerCase();
+  const seatsNeeded = Math.max(1, (parseInt(adults, 10) || 1) + (parseInt(children, 10) || 0));
+
+  const conditions = [
+    "f.status = 'scheduled'",
+    'f.is_active = true',
+    'f.departure_time > NOW()',
+    `dep.code = $1`,
+    `arr.code = $2`,
+    `fs.class = $3`,
+    `DATE(f.departure_time) = $4`,
+    `fs.available_seats >= $5`,
+  ];
+
+  const params = [
+    String(departure_code).toUpperCase(),
+    String(arrival_code).toUpperCase(),
+    cls,
+    departure_date,
+    seatsNeeded,
+  ];
+
+  let paramIndex = params.length + 1;
+
+  if (airline_code) {
+    conditions.push(`al.code = $${paramIndex++}`);
+    params.push(String(airline_code).toUpperCase());
+  }
+
+  if (departure_city) {
+    conditions.push(`LOWER(dep.city) = LOWER($${paramIndex++})`);
+    params.push(departure_city);
+  }
+
+  if (arrival_city) {
+    conditions.push(`LOWER(arr.city) = LOWER($${paramIndex++})`);
+    params.push(arrival_city);
+  }
+
+  if (min_price) {
+    conditions.push(`fs.base_price >= $${paramIndex++}`);
+    params.push(parseFloat(min_price));
+  }
+
+  if (max_price) {
+    conditions.push(`fs.base_price <= $${paramIndex++}`);
+    params.push(parseFloat(max_price));
+  }
+
+  const orderByMap = {
+    price_asc: 'fs.base_price ASC, f.departure_time ASC',
+    price_desc: 'fs.base_price DESC, f.departure_time ASC',
+    departure_asc: 'f.departure_time ASC',
+    departure_desc: 'f.departure_time DESC',
+    duration_asc: 'f.duration_minutes ASC, f.departure_time ASC',
+    duration_desc: 'f.duration_minutes DESC, f.departure_time ASC',
+  };
+
+  const orderBy = orderByMap[String(sort_by || '').toLowerCase()] || 'f.departure_time ASC, fs.base_price ASC';
+  const query = QF.SEARCH_FLIGHTS(conditions.join('\n    AND '), orderBy);
+  const { rows } = await pool.query(query, params);
+  return rows;
+};
+
 const validateSearchParams = ({ departure_code, arrival_code, departure_date, adults, children, infants, seat_class }) => {
   if (!departure_code) throw new Error("Mã sân bay đi là bắt buộc");
   if (!arrival_code) throw new Error("Mã sân bay đến là bắt buộc");
@@ -297,10 +375,10 @@ const getPopularFlights = async (fromAirport, toAirport, limit) => {
   let query, params;
 
   if (isGeneralMode) {
-    query = queries.GET_POPULAR_FLIGHTS_GENERAL;
+    query = QF.GET_POPULAR_FLIGHTS_GENERAL;
     params = [limit];
   } else {
-    query = queries.GET_POPULAR_FLIGHTS_ROUTE;
+    query = QF.GET_POPULAR_FLIGHTS_ROUTE;
     params = [fromAirport, toAirport, limit];
   }
 

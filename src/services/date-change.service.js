@@ -446,23 +446,26 @@ const confirmDateChange = async (email, otp, requestCode) => {
 
   // 4. Không cần payment → auto approve hoặc chờ admin
   const { AUTO_REFUND } = require('../config/refund.config');
+  const absDiff = Math.abs(parseFloat(request.price_difference) || 0);
   const autoApprove = AUTO_REFUND.enabled && absDiff < AUTO_REFUND.threshold;
 
   // Fix Bug 2: luôn set 'pending' trước — approveDateChange yêu cầu status = 'pending'
   await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', requestCode]);
 
   if (autoApprove) {
-    await approveDateChange(null, requestCode, 'Auto-approved sau OTP verification');
+    await approveDateChange(null, requestCode, 'Auto-approved');
   }
 
 
   return {
     success: true,
     status: 'pending',
-    auto_approved: false,
+    auto_approved: autoApprove,
     requires_payment: false,
-    message: 'Yêu cầu đổi ngày bay đã được tiếp nhận và đang chờ admin xử lý.',
-    next_action: 'wait_for_admin',
+    message: autoApprove
+      ? 'Yêu cầu đổi ngày bay đã được tự động duyệt.'
+      : 'Yêu cầu đổi ngày bay đã được tiếp nhận và đang chờ admin xử lý.',
+    next_action: autoApprove ? 'completed' : 'wait_for_admin',
   };
 };
 
@@ -698,7 +701,7 @@ const confirmDateChangePayment = async (paymentCode, options = {}) => {
   await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', request.request_code]);
 
   // 7. Execute the actual date change (release old seats, reserve new seats, update booking)
-  await approveDateChange(null, request.request_code, 'Payment confirmed automatically');
+  await approveDateChange(null, request.request_code, 'Payment confirmed');
 
   // 8. Mark paid_at
   await pool.query(`UPDATE date_change_requests SET paid_at = NOW() WHERE request_code = $1`, [request.request_code]);
@@ -1083,7 +1086,7 @@ const cancelDateChangeRequest = async (userId, requestCode) => {
     await client.query(QCD.UPDATE_DATE_CHANGE_STATUS, [
       'cancelled',
       userId,
-      'User cancelled request',
+      'User cancelled',
       requestCode,
     ]);
 
@@ -1186,5 +1189,6 @@ module.exports = {
   confirmDateChangePayment,
   getDateChangePaymentStatus,
   cancelDateChangePayment,
+  getAdminDateChanges,
 
 };

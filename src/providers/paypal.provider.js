@@ -22,6 +22,33 @@ const getBaseUrl = () =>
     ? 'https://api-m.paypal.com'
     : 'https://api-m.sandbox.paypal.com';
 
+const isPlaceholderValue = (value = '') => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return (
+    !normalized ||
+    normalized === 'your_paypal_client_id' ||
+    normalized === 'your_paypal_client_secret'
+  );
+};
+
+const logPayPalConfigDebug = (stage) => {
+  const clientId = String(config.paypal.clientId || '').trim();
+  const clientSecret = String(config.paypal.clientSecret || '').trim();
+
+  console.log('[PayPal Debug]', {
+    stage,
+    env: config.paypal.env,
+    baseUrl: getBaseUrl(),
+    enabled: Boolean(config.paypal.enabled),
+    hasClientId: Boolean(clientId),
+    hasClientSecret: Boolean(clientSecret),
+    clientIdLength: clientId.length,
+    clientSecretLength: clientSecret.length,
+    clientIdPlaceholder: isPlaceholderValue(clientId),
+    clientSecretPlaceholder: isPlaceholderValue(clientSecret),
+  });
+};
+
 const getFrontendResultBaseUrl = () =>
   config.paypal.frontendUrl
     ? `${config.paypal.frontendUrl}/payment/paypal/result`
@@ -64,6 +91,8 @@ const getAccessToken = async () => {
     return accessTokenCache.token;
   }
 
+  logPayPalConfigDebug('getAccessToken:start');
+
   const clientId = getRequiredConfig('PAYPAL_CLIENT_ID', config.paypal.clientId);
   const clientSecret = getRequiredConfig('PAYPAL_CLIENT_SECRET', config.paypal.clientSecret);
 
@@ -79,6 +108,12 @@ const getAccessToken = async () => {
   const payload = await parseJsonSafe(response);
 
   if (!response.ok || !payload.access_token) {
+    console.error('[PayPal Debug] OAuth failed', {
+      status: response.status,
+      statusText: response.statusText,
+      error: payload.error || null,
+      errorDescription: payload.error_description || null,
+    });
     throw new Error(payload.error_description || payload.error || 'Cannot authenticate with PayPal');
   }
 
@@ -181,17 +216,17 @@ const createPayPalOrder = async (payment) => {
           },
         },
       ],
-      payment_source: {
-        paypal: {
-          experience_context: {
-            brand_name: config.paypal.brandName || 'FlightBooking',
-            user_action: 'PAY_NOW',
-            return_url: returnUrl,
-            cancel_url: cancelUrl,
-          },
-        },
-      },
     },
+  }).catch(async (err) => {
+    console.error('[PayPal Debug] createOrder failed', {
+      error: err.message,
+      paymentCode,
+      amountValue,
+      currency,
+      returnUrl,
+      cancelUrl,
+    });
+    throw err;
   });
 
   const approveUrl = findLink(response.links, 'approve') || findLink(response.links, 'payer-action');
