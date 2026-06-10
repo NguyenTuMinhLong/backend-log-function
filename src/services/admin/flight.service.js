@@ -664,6 +664,23 @@ const toggleFlightVisibility = async (flightId) => {
   };
 };
 
+/**
+ * Ẩn (is_active = false) các chuyến bay đã bay quá `daysOld` ngày và
+ * chưa từng có booking nào tham chiếu (outbound/return), nhằm giảm số
+ * dòng các query tìm kiếm/listing phải quét qua.
+ * Chuyến bay đã có booking KHÔNG bị ẩn — vẫn cần để xem tracker/booking.
+ */
+const hideOldFlights = async (daysOld = 1) => {
+  const days = Math.max(0, parseInt(daysOld, 10) || 0);
+  const { rows } = await pool.query(QF.HIDE_OLD_FLIGHTS, [days]);
+
+  return {
+    days_threshold: days,
+    hidden_count: rows.length,
+    flights: rows,
+  };
+};
+
 // ══════════════════════════════════════════════════════
 // A-02: Manage Airports
 // ══════════════════════════════════════════════════════
@@ -1302,6 +1319,7 @@ module.exports = {
   updateFlight,
   updateFlightStatus,
   toggleFlightVisibility,
+  hideOldFlights,
   // A-02
   getAirports,
   createAirport,

@@ -100,6 +100,7 @@ router.post("/auto-flights/from-airport",    adminAutoFlightController.runFromAi
 // A-11: Cronjob Manual Trigger
 router.post("/cron/run",              adminCronController.runCron);
 router.post("/cron/expired-bookings", adminCronController.runExpiredBookings);
+router.post("/cron/hide-old-flights", adminCronController.hideOldFlights);
 router.post("/loyalty/recalculate",   adminCronController.recalculateLoyalty);
 
 // A-10: Admin Chat

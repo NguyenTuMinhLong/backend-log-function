@@ -100,6 +100,20 @@ const FIND_FLIGHT_VISIBILITY = `
   SELECT id, flight_number, is_active FROM flights WHERE id = $1
 `;
 
+// Ẩn các chuyến bay đã bay quá $1 ngày và CHƯA từng có booking nào tham chiếu
+// (giữ nguyên các chuyến đã có người đặt để tracker/booking vẫn xem được)
+const HIDE_OLD_FLIGHTS = `
+  UPDATE flights f
+  SET is_active = FALSE, updated_at = NOW()
+  WHERE f.is_active = TRUE
+    AND f.departure_time < NOW() - ($1 || ' days')::interval
+    AND NOT EXISTS (
+      SELECT 1 FROM bookings b
+      WHERE b.outbound_flight_id = f.id OR b.return_flight_id = f.id
+    )
+  RETURNING f.id, f.flight_number, f.departure_time
+`;
+
 const SET_FLIGHT_VISIBILITY = `
   UPDATE flights SET is_active = $1, updated_at = NOW() WHERE id = $2
 `;
@@ -540,6 +554,7 @@ module.exports = {
   GET_AFFECTED_BOOKINGS_BY_FLIGHT,
   FIND_FLIGHT_VISIBILITY,
   SET_FLIGHT_VISIBILITY,
+  HIDE_OLD_FLIGHTS,
   INSERT_FLIGHT_SEAT,
   SELECT_FLIGHT_SEAT_CLASS_INFO,
   SELECT_FLIGHT_BY_ID,
