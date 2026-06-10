@@ -116,10 +116,32 @@ const buildPassengerRows = (passengers) =>
   `).join("");
 
 // ─── E-ticket (after payment confirmed) ──────────────────────────────────────
-const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAmount, paymentMethod, paidAt, booking, passengers = [] }) => {
+const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAmount, surchargeAmount = 0, paymentMethod, paidAt, booking, passengers = [], isDateChange = false }) => {
   try {
     const outboundHtml = buildFlightSection("outbound", booking);
     const returnHtml   = buildFlightSection("return", booking);
+
+    const headerTitle = isDateChange
+      ? `Đổi vé thành công! ${PLANE_EMOJI_HEADER}`
+      : `Đặt vé thành công! ${PLANE_EMOJI_HEADER}`;
+    const headerSubtitle = isDateChange
+      ? "Yêu cầu đổi ngày bay của bạn đã được duyệt"
+      : "Cảm ơn bạn đã tin tưởng Vivudee";
+    const bodyIntro = isDateChange
+      ? "Yêu cầu đổi ngày bay của bạn đã được duyệt và xử lý thành công. Vé của bạn đã được cập nhật theo chuyến bay mới dưới đây."
+      : "Thanh toán của bạn đã được xác nhận thành công.";
+    const emailSubject = isDateChange
+      ? `Xác nhận đổi vé thành công — Mã booking: ${bookingCode}`
+      : `Xác nhận đặt vé thành công — Mã booking: ${bookingCode}`;
+    const paymentMethodLabel = PAYMENT_METHOD_LABEL[paymentMethod]
+      || paymentMethod
+      || (isDateChange ? "Không phát sinh phụ thu" : "--");
+    const totalAmountLabel = isDateChange ? "Tổng giá trị đặt vé (sau khi đổi)" : "Số tiền đã thanh toán";
+    const surchargeRowHtml = (isDateChange && surchargeAmount > 0) ? `
+          <tr>
+            <td class="em-td-label em-td-border" style="padding:10px 16px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;">Phụ thu đổi vé đã thanh toán</td>
+            <td class="em-amount em-td-border" style="padding:10px 16px;font-size:15px;color:#1a56db;font-weight:700;text-align:right;border-bottom:1px solid #f3f4f6;">${fmtCurrency(surchargeAmount)}</td>
+          </tr>` : "";
 
     const outboundPassengers = passengers.filter((p) => !p.flight_type || p.flight_type === "outbound");
     const returnPassengers   = passengers.filter((p) => p.flight_type === "return");
@@ -157,15 +179,15 @@ const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAm
       <!-- Header -->
       <div style="background:linear-gradient(135deg,#1a56db,#1e40af);padding:36px 24px;text-align:center;">
         <img src="https://iili.io/qvDF3Kl.png" width="110" style="margin-bottom:14px;display:block;margin-left:auto;margin-right:auto;filter:brightness(0) invert(1);" />
-        <h1 style="color:#fff;font-size:22px;margin:0 0 6px;font-weight:700;">Đặt vé thành công! ${PLANE_EMOJI_HEADER}</h1>
-        <p style="color:#bfdbfe;font-size:14px;margin:0;">Cảm ơn bạn đã tin tưởng Vivudee</p>
+        <h1 style="color:#fff;font-size:22px;margin:0 0 6px;font-weight:700;">${headerTitle}</h1>
+        <p style="color:#bfdbfe;font-size:14px;margin:0;">${headerSubtitle}</p>
       </div>
 
       <!-- Body -->
       <div style="padding:28px 24px;">
         <p class="em-text-primary" style="color:#374151;font-size:15px;margin:0 0 20px;">
           Xin chào <strong>${contactName || "Quý khách"}</strong>,<br/>
-          Thanh toán của bạn đã được xác nhận thành công.
+          ${bodyIntro}
         </p>
 
         <!-- Booking code box -->
@@ -178,12 +200,12 @@ const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAm
         <!-- Payment summary -->
         <table style="width:100%;border-collapse:collapse;margin-bottom:24px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
           <tr>
-            <td class="em-td-label em-td-border" style="padding:10px 16px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;">Số tiền đã thanh toán</td>
+            <td class="em-td-label em-td-border" style="padding:10px 16px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;">${totalAmountLabel}</td>
             <td class="em-amount em-td-border" style="padding:10px 16px;font-size:15px;color:#1a56db;font-weight:700;text-align:right;border-bottom:1px solid #f3f4f6;">${fmtCurrency(finalAmount)}</td>
-          </tr>
+          </tr>${surchargeRowHtml}
           <tr>
             <td class="em-td-label em-td-border" style="padding:10px 16px;font-size:13px;color:#6b7280;border-bottom:1px solid #f3f4f6;">Phương thức thanh toán</td>
-            <td class="em-td-value em-td-border" style="padding:10px 16px;font-size:13px;color:#374151;text-align:right;border-bottom:1px solid #f3f4f6;">${PAYMENT_METHOD_LABEL[paymentMethod] || paymentMethod || "--"}</td>
+            <td class="em-td-value em-td-border" style="padding:10px 16px;font-size:13px;color:#374151;text-align:right;border-bottom:1px solid #f3f4f6;">${paymentMethodLabel}</td>
           </tr>
           <tr>
             <td class="em-td-label" style="padding:10px 16px;font-size:13px;color:#6b7280;">Thời gian xác nhận</td>
@@ -223,7 +245,7 @@ const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAm
     const { data, error } = await resend.emails.send({
       from: process.env.EMAIL_FROM,
       to,
-      subject: `Xác nhận đặt vé thành công — Mã booking: ${bookingCode}`,
+      subject: emailSubject,
       html,
     });
 

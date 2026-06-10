@@ -883,20 +883,44 @@ const approveDateChange = async (adminId, requestCode, adminNotes = null) => {
     const toEmail = request.contact_email || request.user_email;
     if (toEmail) {
       try {
+        // Lấy phương thức thanh toán thực tế của khoản phụ thu (nếu có)
+        let actualPaymentMethod = null;
+        if (request.payment_id) {
+          const payRes = await pool.query(
+            `SELECT payment_method FROM payments WHERE id = $1`,
+            [request.payment_id]
+          );
+          actualPaymentMethod = payRes.rows[0]?.payment_method || null;
+        }
+
+        // Lấy danh sách hành khách của booking để hiển thị trong email
+        const passRes = await pool.query(
+          `SELECT full_name, passenger_type, seat_number, baggage_kg, flight_type
+           FROM passengers WHERE booking_id = $1
+           ORDER BY flight_type, passenger_type`,
+          [request.booking_id]
+        );
+
         await sendBookingConfirmedEmail(toEmail, {
           bookingCode: request.booking_code,
           contactName: request.contact_name || request.user_name || 'Quý khách',
           finalAmount: updatedBookingTotal,
-          paymentMethod: 'DATE_CHANGE',
+          surchargeAmount,
+          paymentMethod: actualPaymentMethod,
           paidAt: new Date().toISOString(),
+          isDateChange: true,
           booking: {
-            flight_number: request.new_flight_number,
-            departure_time: request.new_departure_time,
-            arrival_time: request.new_arrival_time,
-            dep_code: request.new_departure_code,
-            arr_code: request.new_arrival_code,
-            seat_class: request.new_seat_class,
+            outbound_flight_number: request.new_flight_number,
+            outbound_airline_name: request.new_airline_name,
+            outbound_departure_time: request.new_departure_time,
+            outbound_arrival_time: request.new_arrival_time,
+            outbound_dep_code: request.new_departure_code,
+            outbound_dep_city: request.new_departure_city,
+            outbound_arr_code: request.new_arrival_code,
+            outbound_arr_city: request.new_arrival_city,
+            outbound_seat_class: request.new_seat_class,
           },
+          passengers: passRes.rows,
         });
       } catch (mailErr) {
         console.error('[DateChange] Approval email error:', mailErr.message);

@@ -57,6 +57,7 @@ const SELECT_DATE_CHANGE_BY_CODE = `
 
     -- New flight info
     new_f.flight_number AS new_flight_number,
+    new_al.name AS new_airline_name,
     new_dep.code AS new_departure_code,
     new_dep.city AS new_departure_city,
     new_arr.code AS new_arrival_code,
@@ -69,6 +70,7 @@ const SELECT_DATE_CHANGE_BY_CODE = `
   JOIN airports old_dep ON old_f.departure_airport_id = old_dep.id
   JOIN airports old_arr ON old_f.arrival_airport_id = old_arr.id
   JOIN flights new_f ON dcr.new_flight_id = new_f.id
+  JOIN airlines new_al ON new_al.id = new_f.airline_id
   JOIN airports new_dep ON new_f.departure_airport_id = new_dep.id
   JOIN airports new_arr ON new_f.arrival_airport_id = new_arr.id
   LEFT JOIN users u ON dcr.requested_by = u.id
