@@ -224,16 +224,16 @@ const getRecommendations = async ({
   const scoredResult = await pool.query(scoredQuery, [
     limit,
     preferredDestinations.length > 0 ? preferredDestinations : [""],
-    preferredHours !== null ? preferredHours : 0,
-    avgSpending || 0,
-    preferredDay,
     preferredDepartures.length > 0 ? preferredDepartures : [""],
+    avgSpending || 0,
+    preferredDay > 0 ? [preferredDay] : [],
     preferredRoutes,
-    preferredDOW !== null ? preferredDOW : -1,
+    preferredDOW !== null ? [preferredDOW] : [],
+    preferredHours !== null ? [preferredHours] : [],
   ]).catch((err) => {
     console.error("[Recommendation] Step 2 query error:", err.message);
     console.error("[Recommendation] Step 2 query text:", scoredQuery.substring(0, 200));
-    console.error("[Recommendation] Step 2 params:", limit, preferredDestinations, preferredHours, avgSpending, preferredDay, preferredDepartures.length, preferredRoutes, preferredDOW);
+    console.error("[Recommendation] Step 2 params:", limit, preferredDestinations, preferredDepartures, avgSpending, preferredDay, preferredRoutes, preferredDOW, preferredHours);
     return { rows: [] };
   });
 
@@ -303,15 +303,34 @@ const getRecommendations = async ({
       const dates = dayResult.rows.map((r) => r.date_value);
 
       if (dates.length > 0) {
-        const flightsResult = await pool.query(Q.SELECT_FLIGHTS_BY_DAY_PATTERN, [dates, limit]);
-      dayPatternFlights = flightsResult.rows.map((r) => ({
-        ...formatFlight(r),
-        recommendation_type: "day_pattern",
-        badge: BADGE.DAY_PATTERN,
-        score: 20,
-        note: `Thứ ${formatDOW(preferredDay)} trong tháng`,
-        _tier: 1, // day_pattern
-      }));
+        const flightsResult = await pool.query(
+          Q.SELECT_FLIGHTS_BY_DAY_PATTERN(preferredRoutes, preferredDestinations),
+          [dates, limit, preferredRoutes, preferredDestinations],
+        );
+        dayPatternFlights = flightsResult.rows.map((r) => {
+          const f = formatFlight(r);
+          // Tính score động: địa điểm×5 + ngày×3 + giờ×2 (theo spec Luồng 3)
+          const destScore   = preferredDestinations.includes(f.arrival.code) ? 5 : 0;
+          const dayScore    = 3; // Luồng 1: ngày trùng preferredDay luôn = 3
+          const hourScore   = (preferredHours !== null)
+            ? (Math.abs(new Date(f.departure_time).getHours() - preferredHours) <= 2 ? 2 : 0)
+            : 0;
+          const score = destScore + dayScore + hourScore;
+
+          return {
+            ...f,
+            score,
+            badges: [
+              { label: `Ngày ${preferredDay} hàng tháng`, color: "blue" },
+              ...(destScore > 0 ? [{ label: "Điểm đến yêu thích", color: "blue" }] : []),
+              ...(hourScore > 0 ? [{ label: `Khung giờ hay đi`, color: "purple" }] : []),
+            ],
+            recommendation_type: "day_pattern",
+            badge: BADGE.DAY_PATTERN,
+            note: `Ngày ${preferredDay} hàng tháng`,
+            _tier: 1,
+          };
+        });
       }
     } catch (err) {
       console.error("[Recommendation] Step 3a error:", err.message);
@@ -322,7 +341,10 @@ const getRecommendations = async ({
   let timeProximityGroups = [];
   try {
     const { start, end } = monthRange;
-    const result = await pool.query(Q.SELECT_FLIGHTS_FOR_TIME_GROUPING, [start, end, limit]);
+    const result = await pool.query(
+      Q.SELECT_FLIGHTS_FOR_TIME_GROUPING(preferredRoutes, preferredDestinations),
+      [start, end, limit, preferredRoutes, preferredDestinations],
+    );
 
     if (result.rows.length > 0) {
       const formatted = result.rows.map((r) => formatFlight(r));
@@ -383,6 +405,46 @@ const getRecommendations = async ({
   console.log("[Recommendation] Step 3 — dayPatternFlights:", dayPatternFlights.length,
     "timeProximityGroups:", timeProximityGroups.length);
 
+  // ── Bước 3c: Luồng 3 — pattern cá nhân (địa điểm×5 + ngày×3 + giờ×2)
+  let userPatternFlights = [];
+  if (hasHistory && (preferredDestinations.length > 0 || preferredDepartures.length > 0)) {
+    try {
+      const { start, end } = monthRange;
+      const preferredDOWs   = preferredDOW !== null ? [preferredDOW] : [];
+      const preferredHoursArr = preferredHours !== null ? [Math.floor(preferredHours)] : [];
+
+      const patternResult = await pool.query(
+        Q.SELECT_FLIGHTS_BY_USER_PATTERN(
+          preferredDestinations,
+          preferredDepartures,
+          preferredDOWs,
+          preferredHoursArr,
+          start,
+          end,
+          limit,
+        ),
+      );
+
+      if (patternResult.rows.length > 0) {
+        userPatternFlights = patternResult.rows.map((r) => {
+          const f = formatFlight(r);
+          return {
+            ...f,
+            score:   parseInt(r.score, 10) || 0,
+            badges:  [],
+            recommendation_type: "user_pattern",
+            badge:   BADGE.USER_HISTORY,
+            note:    "Phù hợp sở thích cá nhân",
+            _tier:   0,
+          };
+        });
+      }
+      console.log("[Recommendation] Step 3c — userPatternFlights:", userPatternFlights.length);
+    } catch (err) {
+      console.error("[Recommendation] Step 3c error:", err.message);
+    }
+  }
+
   // ── Bước 4: Gom nhóm và trộn theo tier ──────────────────────────────────────
   const TIER   = { user_history: 0, day_pattern: 1, search_history: 2, popular: 3, time_proximity: 4 };
 
@@ -401,30 +463,57 @@ const getRecommendations = async ({
     badge:               null,
     score:               flights[0]?.score || 0,
     recommendation_type: hasHistory ? "user_history" : "popular",
+    _tier:               hasHistory ? 0 : 3,
   }));
 
-  // 4b. Nhóm day_pattern
-  const dayPatternGroups = dayPatternFlights.length > 0 ? [{
-    group_id:            personalizedGroups.length + 1,
-    route:               `${dayPatternFlights[0].departure.code}→${dayPatternFlights[0].arrival.code}`,
-    count:               dayPatternFlights.length,
-    flights:             dayPatternFlights,
-    badge:               null,
-    score:               20,
-    recommendation_type: "day_pattern",
-  }] : [];
+  // 4b. Nhóm user_pattern (Luồng 3) — tier 0, xen kẽ với personalized
+  const userPatternRouteMap = {};
+  userPatternFlights.forEach((f) => {
+    const key = `${f.departure.code}→${f.arrival.code}`;
+    if (!userPatternRouteMap[key]) userPatternRouteMap[key] = [];
+    userPatternRouteMap[key].push(f);
+  });
+  const userPatternGroups = Object.entries(userPatternRouteMap).map(([route, flights], i) => ({
+    group_id:            personalizedGroups.length + i + 1,
+    route,
+    count:               flights.length,
+    flights,
+    badge:               flights.length > 0 ? BADGE.USER_HISTORY : null,
+    score:               flights.reduce((max, f) => Math.max(max, f.score || 0), 0),
+    recommendation_type: "user_pattern",
+    _tier:               0,
+  }));
 
-  // 4c. Gán group_id liên tục và _tier=4 cho time_proximity
-  let nextGroupId = personalizedGroups.length + dayPatternGroups.length + 1;
+  // 4c. Nhóm day_pattern theo route (Fix E+F: badge đúng, score động từ flights)
+  const dayPatternRouteMap = {};
+  dayPatternFlights.forEach((f) => {
+    const key = `${f.departure.code}→${f.arrival.code}`;
+    if (!dayPatternRouteMap[key]) dayPatternRouteMap[key] = [];
+    dayPatternRouteMap[key].push(f);
+  });
+  const dayPatternGroups = Object.entries(dayPatternRouteMap).map(([route, flights], i) => ({
+    group_id:            personalizedGroups.length + userPatternGroups.length + i + 1,
+    route,
+    count:               flights.length,
+    flights,
+    badge:               flights.length > 0 ? BADGE.DAY_PATTERN : null,
+    score:               flights.reduce((max, f) => Math.max(max, f.score || 0), 0),
+    recommendation_type: "day_pattern",
+    _tier:               1,
+  }));
+
+  // 4d. Gán group_id liên tục và _tier=4 cho time_proximity
+  let nextGroupId = personalizedGroups.length + userPatternGroups.length + dayPatternGroups.length + 1;
   const tpGroups = timeProximityGroups.map((g) => ({
     ...g,
     group_id: nextGroupId++,
-    _tier: 4, // time_proximity
+    _tier: 4,
   }));
 
-  // 4d. Trộn tất cả groups theo thứ tự tier
+  // 4e. Trộn tất cả groups theo thứ tự tier
   const allGroups = [
     ...personalizedGroups,
+    ...userPatternGroups,
     ...dayPatternGroups,
     ...tpGroups,
   ];
@@ -453,19 +542,50 @@ const getRecommendations = async ({
     })
     .slice(0, limit);
 
-  // 4f. Top source và top group
+  // 4g. Fallback H: nếu finalItems vẫn rỗng → dùng SELECT_TOP_POPULAR_FLIGHTS
+  let finalFlights = finalItems;
+  if (finalFlights.length === 0) {
+    try {
+      const { start, end } = monthRange;
+      const popularResult = await pool.query(
+        Q.SELECT_TOP_POPULAR_FLIGHTS(start, end, limit),
+        [start, end, limit],
+      );
+      if (popularResult.rows.length > 0) {
+        const popularGroupId = allGroups.length + 1;
+        finalFlights = popularResult.rows.map((r) => {
+          const f = formatFlight(r);
+          return {
+            ...f,
+            score:               0,
+            badges:              [{ label: "Tuyến phổ biến", color: "orange" }],
+            recommendation_type: "popular",
+            badge:               BADGE.POPULAR,
+            group_id:            popularGroupId,
+            group_count:         popularResult.rows.length,
+            _tier:               3,
+          };
+        });
+        console.log("[Recommendation] Step 4g — used popular fallback, rows:", finalFlights.length);
+      }
+    } catch (err) {
+      console.error("[Recommendation] Step 4g fallback error:", err.message);
+    }
+  }
+
+  // 4h. Top source và top group
   let topSource = hasHistory ? "personalized" : "popular";
   const topGroup = allGroups[0] || null;
 
-  console.log("[Recommendation] Done — finalItems:", finalItems.length,
+  console.log("[Recommendation] Done — finalFlights:", finalFlights.length,
     "topSource:", topSource,
     "topGroup:", topGroup ? `${topGroup.route} (${topGroup.recommendation_type})` : "none");
 
   return {
     groups: allGroups.slice(0, 30),
-    flights: finalItems,
+    flights: finalFlights,
     meta: {
-      total:              finalItems.length,
+      total:              finalFlights.length,
       total_groups:       allGroups.length,
       limit,
       has_history:        hasHistory,
