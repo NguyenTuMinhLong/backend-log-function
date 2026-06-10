@@ -15,6 +15,7 @@ const adminUserController = require("../controllers/admin/user.controller");
 const adminChatController = require("../controllers/admin/chat.controller");
 const adminCronController      = require("../controllers/admin/cron.controller");
 const adminAutoFlightController = require("../controllers/admin/auto-flight.controller");
+const adminPriceOverrideController = require("../controllers/admin/price-override.controller");
 
 // Tất cả routes admin: phải đăng nhập + role = 'admin'
 router.use(authenticate, authorize("admin"));
@@ -102,6 +103,14 @@ router.post("/cron/run",              adminCronController.runCron);
 router.post("/cron/expired-bookings", adminCronController.runExpiredBookings);
 router.post("/cron/hide-old-flights", adminCronController.hideOldFlights);
 router.post("/loyalty/recalculate",   adminCronController.recalculateLoyalty);
+
+// A-13: Price Overrides (Season Pricing)
+router.get("/price-overrides", adminPriceOverrideController.getOverrides);
+router.get("/price-overrides/:id", adminPriceOverrideController.getOverrideById);
+router.post("/price-overrides", adminPriceOverrideController.createOverride);
+router.put("/price-overrides/:id", adminPriceOverrideController.updateOverride);
+router.delete("/price-overrides/:id", adminPriceOverrideController.deleteOverride);
+router.post("/price-overrides/bulk", adminPriceOverrideController.bulkCreate);
 
 // A-10: Admin Chat
 router.get("/chat/config", adminChatController.getChatConfig);

@@ -36,8 +36,8 @@ const getDemandMult = (availableSeats, totalSeats) => {
   return 0.97;
 };
 
-const applyDynamicPricing = (basePrice, availableSeats, totalSeats, depTime) => {
-  const mult = getDayOfWeekMult(depTime) * getAdvanceMult(depTime) * getDemandMult(availableSeats, totalSeats);
+const applyDynamicPricing = (basePrice, availableSeats, totalSeats, depTime, seasonMultiplier = 1.0) => {
+  const mult = getDayOfWeekMult(depTime) * getAdvanceMult(depTime) * getDemandMult(availableSeats, totalSeats) * seasonMultiplier;
   return Math.round(basePrice * mult / 1000) * 1000;
 };
 

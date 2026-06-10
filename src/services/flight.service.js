@@ -147,12 +147,22 @@ const buildBaggageOptions = (extraBaggagePrice) => {
 
 // Weekend premium: Fri/Sat/Sun cost more
 const { applyDynamicPricing } = require('../utils/pricing');
+const seasonService = require('./season.service');
+const { generatePriceAlertsForFlights, getDetailedAnalysis } = require('./price-alert.service');
 
-const formatFlights = (rows, adults, children, infants) =>
-  rows.map((r) => {
+// Áp dụng dynamic pricing có tính thêm hệ số mùa cao điểm/ngày lễ
+const getSeasonAwarePrice = async (basePrice, availableSeats, totalSeats, departureTime) => {
+  const seasonMultiplier = await seasonService.getSeasonMultiplier(departureTime);
+  return applyDynamicPricing(basePrice, availableSeats, totalSeats, departureTime, seasonMultiplier);
+};
+
+const formatFlights = async (rows, adults, children, infants) => Promise.all(
+  rows.map(async (r) => {
     const base        = parseFloat(r.base_price) || 0;
     const extraPrice  = parseFloat(r.extra_baggage_price) || 0;
-    const price       = applyDynamicPricing(base, r.available_seats, r.total_seats, r.departure_time);
+    const seasonInfo  = await seasonService.getSeasonInfo(r.departure_time);
+    const seasonMult  = seasonInfo ? seasonInfo.multiplier : 1.0;
+    const price       = applyDynamicPricing(base, r.available_seats, r.total_seats, r.departure_time, seasonMult);
 
     return {
       flight_id:     r.flight_id,
@@ -172,6 +182,7 @@ const formatFlights = (rows, adults, children, infants) =>
       },
       duration_minutes: r.duration_minutes,
       duration_label:   formatDuration(r.duration_minutes),
+      season_info: seasonInfo,
       seat: {
         class:                 r.seat_class,
         available_seats:       r.available_seats,
@@ -189,7 +200,8 @@ const formatFlights = (rows, adults, children, infants) =>
         total_price: calcTotalPrice(price, adults, children, infants),
       },
     };
-  });
+  })
+);
 
 // ─── Validation ────────────────────────────────────────────────────────────────
 
@@ -285,7 +297,8 @@ const searchFlights = async (params) => {
   };
 
   const outboundRows    = await queryFlights(baseParams);
-  const outboundFlights = formatFlights(outboundRows, a, c, i);
+  let outboundFlights = await formatFlights(outboundRows, a, c, i);
+  outboundFlights = await generatePriceAlertsForFlights(outboundFlights);
 
   let returnFlights = null;
   if (return_date) {
@@ -295,7 +308,8 @@ const searchFlights = async (params) => {
       arrival_code:   departure_code,
       departure_date: return_date,
     });
-    returnFlights = formatFlights(returnRows, a, c, i);
+    returnFlights = await formatFlights(returnRows, a, c, i);
+    returnFlights = await generatePriceAlertsForFlights(returnFlights);
   }
 
   return {
@@ -534,12 +548,35 @@ const getFlightById = async (flightId, params = {}) => {
     SELECT * FROM flight_seats WHERE flight_id = $1 ORDER BY base_price
   `, [flightId]);
 
+  const seats = await Promise.all(seatsResult.rows.map(async (s) => {
+    const dynamicPrice = await getSeasonAwarePrice(
+      parseFloat(s.base_price) || 0,
+      s.available_seats,
+      s.total_seats,
+      flight.departure_time
+    );
+
+    return {
+      ...s,
+      base_price: dynamicPrice,
+      total_price: calcTotalPrice(dynamicPrice, a, c, i),
+    };
+  }));
+
+  const baseSeat = seatsResult.rows[0];
+  const detailedAnalysis = await getDetailedAnalysis({
+    id: flight.id,
+    departure_time: flight.departure_time,
+    available_seats: baseSeat?.available_seats,
+    total_seats: baseSeat?.total_seats,
+    base_price: parseFloat(baseSeat?.base_price) || 0,
+  });
+
   return {
     ...flight,
-    seats: seatsResult.rows.map(s => ({
-      ...s,
-      total_price: calcTotalPrice(parseFloat(s.base_price), a, c, i),
-    })),
+    season_info: await seasonService.getSeasonInfo(flight.departure_time),
+    price_analysis: detailedAnalysis,
+    seats,
   };
 };
 
@@ -597,9 +634,10 @@ const rankCombo = (combo) => {
   };
 };
 
-const buildComboLeg = (row, adults, children, infants) => {
+const buildComboLeg = async (row, adults, children, infants) => {
   const base = parseFloat(row.base_price) || 0;
-  const price = applyDynamicPricing(base, row.available_seats, row.total_seats, row.departure_time);
+  const seasonInfo = await seasonService.getSeasonInfo(row.departure_time);
+  const price = await getSeasonAwarePrice(base, row.available_seats, row.total_seats, row.departure_time);
 
   return {
     flight_id: row.flight_id,
@@ -629,6 +667,7 @@ const buildComboLeg = (row, adults, children, infants) => {
     },
     duration_minutes: row.duration_minutes,
     duration_label: formatDuration(row.duration_minutes),
+    season_info: seasonInfo,
     seat: {
       class: row.seat_class,
       available_seats: row.available_seats,
@@ -674,11 +713,11 @@ const getFlightCombos = async (params = {}) => {
     departure_date,
   ]);
 
-  const directCombos = directRows.rows.map((row) => ({
+  const directCombos = await Promise.all(directRows.rows.map(async (row) => ({
     stops: 0,
     total_layover_minutes: 0,
-    legs: [buildComboLeg(row, a, c, i)],
-  }));
+    legs: [await buildComboLeg(row, a, c, i)],
+  })));
 
   const combos = [...directCombos];
 
@@ -708,10 +747,13 @@ const getFlightCombos = async (params = {}) => {
         const layoverMinutes = minutesBetween(leg1.arrival_time, leg2.departure_time);
         if (layoverMinutes < parseInt(min_layover_minutes) || layoverMinutes > parseInt(max_layover_minutes)) continue;
 
+        const firstLeg = await buildComboLeg(leg1, a, c, i);
+        const secondLeg = await buildComboLeg(leg2, a, c, i);
+
         combos.push({
           stops: 1,
           total_layover_minutes: layoverMinutes,
-          legs: [buildComboLeg(leg1, a, c, i), buildComboLeg(leg2, a, c, i)],
+          legs: [firstLeg, secondLeg],
         });
       }
     }
@@ -744,7 +786,7 @@ const getPriceCalendar = async (params = {}) => {
   const dateMap = {};
   for (const row of result.rows) {
     const date = new Date(row.flight_date).toISOString().slice(0, 10);
-    const dynamicPrice = applyDynamicPricing(
+    const dynamicPrice = await getSeasonAwarePrice(
       Number(row.base_price),
       row.available_seats,
       row.total_seats,
