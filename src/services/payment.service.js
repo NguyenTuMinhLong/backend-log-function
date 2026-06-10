@@ -761,6 +761,19 @@ const handlePaypalReturn = async (query = {}) => {
   }
 
   await confirmPayment(payment.payment_code, null, true);
+
+  // Nếu đây là payment phụ thu đổi ngày bay → hoàn tất approve date change request tương ứng
+  // (route /return/paypal không nhận được payment_code dạng PAY-DC- trong query nên
+  // phải xử lý tiếp ở đây sau khi confirmPayment đã capture thành công)
+  if (String(payment.payment_code || '').startsWith('PAY-DC-')) {
+    try {
+      const dateChangeService = require('./date-change.service');
+      await dateChangeService.finalizeApprovedDateChangePayment(payment.payment_code);
+    } catch (dcErr) {
+      console.error('[PayPal Return] Date change finalize error:', dcErr.message);
+    }
+  }
+
   return {
     status: 'success',
     message: 'Success',

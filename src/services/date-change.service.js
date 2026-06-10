@@ -28,7 +28,7 @@ const generateRefundCode = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let s = '';
   for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return `REF-DC-${date}-${s}`;
+  return `REF-${date}-${s}`; // varchar(20): "REF-" + 8 + "-" + 6 = 19
 };
 
 // HELPERS
@@ -530,6 +530,32 @@ const createDateChangePayment = async (requestCode, paymentMethod, userId = null
   }
 };
 
+// FINALIZE DATE CHANGE SAU KHI PAYMENT PHỤ THU ĐÃ THÀNH CÔNG
+// Dùng chung cho: webhook BANK/MOMO/PAYOS (qua confirmDateChangePayment)
+// và PayPal return (payment đã được confirm qua paymentService.handlePaypalReturn)
+// Idempotent: nếu request không còn ở 'pending_payment' thì coi như đã xử lý.
+const finalizeApprovedDateChangePayment = async (paymentCode) => {
+  const requestResult = await pool.query(QCD.SELECT_DATE_CHANGE_BY_PAYMENT_CODE, [paymentCode]);
+  if (requestResult.rows.length === 0) return null;
+  const request = requestResult.rows[0];
+
+  if (request.status !== 'pending_payment') {
+    return { already_processed: true, status: request.status, request_code: request.request_code };
+  }
+
+  // Set status='pending' trước để approveDateChange có thể chạy
+  // (approveDateChange yêu cầu status='pending', không được set 'approved' trước)
+  await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', request.request_code]);
+
+  // Execute the actual date change (release old seats, reserve new seats, update booking)
+  await approveDateChange(null, request.request_code, 'Payment confirmed');
+
+  // Mark paid_at
+  await pool.query(`UPDATE date_change_requests SET paid_at = NOW() WHERE request_code = $1`, [request.request_code]);
+
+  return { success: true, status: 'approved', request_code: request.request_code };
+};
+
 // CONFIRM DATE CHANGE PAYMENT (After payment success)
 
 const confirmDateChangePayment = async (paymentCode) => {
@@ -578,15 +604,8 @@ const confirmDateChangePayment = async (paymentCode) => {
     WHERE payment_code = $1
   `, [paymentCode]);
 
-  // 6. Set status='pending' trước để approveDateChange có thể chạy
-  // (approveDateChange yêu cầu status='pending', không được set 'approved' trước)
-  await pool.query(QCD.UPDATE_DATE_CHANGE_STATUS_SIMPLE, ['pending', request.request_code]);
-
-  // 7. Execute the actual date change (release old seats, reserve new seats, update booking)
-  await approveDateChange(null, request.request_code, 'Payment confirmed');
-
-  // 8. Mark paid_at
-  await pool.query(`UPDATE date_change_requests SET paid_at = NOW() WHERE request_code = $1`, [request.request_code]);
+  // 6-8. Hoàn tất approve date change (đặt ghế mới, cập nhật booking, gửi email...)
+  await finalizeApprovedDateChangePayment(paymentCode);
 
   return {
     success: true,
@@ -1097,6 +1116,7 @@ module.exports = {
   confirmDateChange,
   createDateChangePayment,
   confirmDateChangePayment,
+  finalizeApprovedDateChangePayment,
   getDateChangePaymentStatus,
   cancelDateChangePayment,
 

@@ -116,7 +116,7 @@ const buildPassengerRows = (passengers) =>
   `).join("");
 
 // ─── E-ticket (after payment confirmed) ──────────────────────────────────────
-const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAmount, paymentMethod, paidAt, booking, passengers }) => {
+const sendBookingConfirmedEmail = async (to, { bookingCode, contactName, finalAmount, paymentMethod, paidAt, booking, passengers = [] }) => {
   try {
     const outboundHtml = buildFlightSection("outbound", booking);
     const returnHtml   = buildFlightSection("return", booking);
