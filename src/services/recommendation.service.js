@@ -29,7 +29,8 @@ const BADGE = {
 
 const DOW_NAMES = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
 
-// Helper: chuyển UTC timestamp → giờ VN (UTC+7)
+// Helper: chuyển giờ UTC trong timestamp string → giờ Việt Nam (UTC+7)
+// departure_time được pg driver trả về dạng ISO UTC string
 const getLocalHour = (utcString) => {
   const d = new Date(utcString);
   return (d.getUTCHours() + 7) % 24;
@@ -288,7 +289,7 @@ const getRecommendations = async ({
       badges.push({ label: "Đầu tháng", color: "teal" });
 
     if (preferredDOW !== null) {
-      const dowFlight = getLocalDOW(f.departure_time);
+      const dowFlight = new Date(f.departure_time).getDay();
       if (dowFlight === preferredDOW) {
         badges.push({ label: `Thứ ${DOW_NAMES[preferredDOW]} bạn hay đi`, color: "orange" });
       }

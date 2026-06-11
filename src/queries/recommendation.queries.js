@@ -210,8 +210,9 @@ const SELECT_FLIGHTS_BY_USER_PATTERN = (
 ) => {
   const dowCondition   = preferredDOWs.length > 0
     ? `((EXTRACT(DOW FROM f.departure_time) + 6) % 7) = ANY($${4}::int[])` : "TRUE";
+  // preferredHours là giờ local VN (14) → UTC hour = 7 → convert UTC→VN: +7 % 24
   const hourCondition = preferredHours.length > 0
-    ? `EXTRACT(HOUR FROM f.departure_time AT TIME ZONE 'Asia/Ho_Chi_Minh')::INT = ANY($${5}::int[])` : "TRUE";
+    ? `((EXTRACT(HOUR FROM f.departure_time) + 7) % 24) = ANY($${5}::int[])` : "TRUE";
   const paramCount = 7; // total positional params: $1..$7
 
   return `
@@ -445,7 +446,7 @@ const SELECT_BOOKING_HISTORY_PREFERENCES = `
     dep.code                                      AS dep_code,
     arr.code                                      AS arr_code,
     (dep.code || '→' || arr.code)                AS route_key,
-    AVG(EXTRACT(HOUR FROM f.departure_time AT TIME ZONE 'Asia/Ho_Chi_Minh'))::INT AS avg_dep_hour,
+    AVG(EXTRACT(HOUR FROM f.departure_time))::INT AS avg_dep_hour,
     MODE() WITHIN GROUP (
       ORDER BY EXTRACT(DAY FROM f.departure_time)::INT
     )                                             AS preferred_day,
@@ -539,8 +540,8 @@ const SELECT_SCORED_FLIGHTS = (
       + CASE WHEN $5::int[] <> ARRAY[]::int[] AND EXTRACT(DAY FROM f.departure_time)::INT = ANY($5::int[]) THEN 40 ELSE 0 END
       -- PostgreSQL DOW: 0=Sun,...,6=Sat → chuyển về JS convention: 0=Mon,...,6=Sun
       + CASE WHEN $7::int[] <> ARRAY[]::int[] AND ((EXTRACT(DOW FROM f.departure_time) + 6) % 7) = ANY($7::int[]) THEN 35 ELSE 0 END
-      -- Giờ theo múi giờ Việt Nam (UTC+7)
-      + CASE WHEN $8::int[] <> ARRAY[]::int[] AND EXTRACT(HOUR FROM f.departure_time AT TIME ZONE 'Asia/Ho_Chi_Minh')::INT = ANY($8::int[]) THEN 30 ELSE 0 END
+      -- Giờ so sánh: preferredHours lưu theo giờ local VN → convert UTC hour về local VN
+      + CASE WHEN $8::int[] <> ARRAY[]::int[] AND ((EXTRACT(HOUR FROM f.departure_time) + 7) % 24) = ANY($8::int[]) THEN 30 ELSE 0 END
       + CASE WHEN ABS(fs.base_price - $4) <= 1000000 THEN 20 ELSE 0 END
     ) AS score
   FROM flights f
