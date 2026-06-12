@@ -440,8 +440,8 @@ const getRecommendations = async ({
 
       if (dates.length > 0) {
         const flightsResult = await pool.query(
-          Q.SELECT_FLIGHTS_BY_DAY_PATTERN(preferredRoutes, preferredDestinations),
-          [dates, limit, preferredRoutes, preferredDestinations],
+          Q.SELECT_FLIGHTS_BY_DAY_PATTERN(preferredRoutes, preferredDestinations, preferredDepartures),
+          [dates, limit, preferredDepartures, preferredDestinations, preferredRoutes],
         );
         dayPatternFlights = flightsResult.rows.map((r) => {
           const f = formatFlight(r);
@@ -478,8 +478,8 @@ const getRecommendations = async ({
   try {
     const { start, end } = monthRange;
     const result = await pool.query(
-      Q.SELECT_FLIGHTS_FOR_TIME_GROUPING(preferredRoutes, preferredDestinations),
-      [start, end, limit, preferredRoutes, preferredDestinations],
+      Q.SELECT_FLIGHTS_FOR_TIME_GROUPING(preferredRoutes, preferredDestinations, preferredDepartures),
+      [start, end, limit, preferredRoutes, preferredDestinations, preferredDepartures],
     );
 
     if (result.rows.length > 0) {

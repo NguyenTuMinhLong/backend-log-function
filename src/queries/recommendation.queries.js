@@ -54,15 +54,25 @@ const SELECT_DAYS_IN_MONTH = `
 // LUỒNG 1: Chuyến bay vào ngày trùng topDayOfWeek trong tháng
 // preferredRoutes: mảng route_key dạng 'SGN→HAN'
 // preferredDestinations: mảng arr_code
+// preferredDepartures: mảng dep_code
 // ─────────────────────────────────────────────
 const SELECT_FLIGHTS_BY_DAY_PATTERN = (
   preferredRoutes = [],
   preferredDestinations = [],
+  preferredDepartures = [],
 ) => {
-  const routeCondition =
-    preferredRoutes.length > 0
-      ? `AND ((dep.code || '→' || arr.code) = ANY($${3}::text[]) OR arr.code = ANY($${4}::text[]))`
-      : `AND (cardinality($${3}::text[]) = 0 OR arr.code = ANY($${4}::text[]))`;
+  // dep ∈ preferredDepartures AND arr ∈ preferredDestinations (AND route khớp nếu có)
+  const depDestCondition =
+    preferredDepartures.length > 0 && preferredDestinations.length > 0
+      ? `dep.code = ANY($${3}::text[]) AND arr.code = ANY($${4}::text[])`
+      : (preferredDestinations.length > 0
+        ? `arr.code = ANY($${3}::text[])` : "");
+
+  const routeCondition = preferredRoutes.length > 0
+    ? `(dep.code || '→' || arr.code) = ANY($${5}::text[])` : "";
+
+  const conditions = [depDestCondition, routeCondition].filter(Boolean).join(" AND ");
+  const whereExtra = conditions ? ` AND ${conditions}` : "";
 
   return `
   SELECT
@@ -107,7 +117,7 @@ const SELECT_FLIGHTS_BY_DAY_PATTERN = (
     AND f.is_active = TRUE
     AND fs.available_seats > 0
     AND DATE(f.departure_time) = ANY($1::date[])
-    ${routeCondition}
+    ${whereExtra}
     AND f.departure_time > NOW()
   ORDER BY f.departure_time
   LIMIT $2
@@ -118,11 +128,19 @@ const SELECT_FLIGHTS_BY_DAY_PATTERN = (
 // LUỒNG 2: Tất cả chuyến bay trong khoảng tháng, lọc theo preferred routes
 // preferredRoutes: mảng route_key dạng 'SGN→HAN'
 // ─────────────────────────────────────────────
-const SELECT_FLIGHTS_FOR_TIME_GROUPING = (preferredRoutes = []) => {
+const SELECT_FLIGHTS_FOR_TIME_GROUPING = (preferredRoutes = [], preferredDestinations = [], preferredDepartures = []) => {
   const routeCondition =
     preferredRoutes.length > 0
-      ? `AND ((dep.code || '→' || arr.code) = ANY($${4}::text[]) OR arr.code = ANY($${5}::text[]))`
-      : "";
+      ? `(dep.code || '→' || arr.code) = ANY($${4}::text[])` : "";
+
+  const depDestCondition =
+    preferredDepartures.length > 0 && preferredDestinations.length > 0
+      ? `dep.code = ANY($${5}::text[]) AND arr.code = ANY($${6}::text[])`
+      : (preferredDestinations.length > 0
+        ? `arr.code = ANY($${5}::text[])` : "");
+
+  const conditions = [routeCondition, depDestCondition].filter(Boolean).join(" AND ");
+  const whereExtra = conditions ? ` AND ${conditions}` : "";
 
   return `
   SELECT
@@ -166,7 +184,7 @@ const SELECT_FLIGHTS_FOR_TIME_GROUPING = (preferredRoutes = []) => {
     AND f.is_active = TRUE
     AND fs.available_seats > 0
     AND f.departure_time BETWEEN $1::TIMESTAMP AND $2::TIMESTAMP
-    ${routeCondition}
+    ${whereExtra}
   ORDER BY f.departure_time
   LIMIT $3
 `;
