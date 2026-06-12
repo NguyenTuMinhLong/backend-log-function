@@ -85,7 +85,9 @@ setInterval(async () => {
   }
 }, 60 * 1000);
 
-// A-12: Mỗi 5 phút tự động sinh chuyến bay cho tất cả hãng (auto-flight config)
+// A-12: Tự động sinh chuyến bay cho tất cả hãng (auto-flight config)
+// Mỗi 30 phút — 5 phút quá dày, query existingRes quét hàng chục nghìn
+// dòng flights mỗi lần chạy gây egress Supabase tăng vọt khi route_limit lớn.
 let isAutoFlighting = false;
 setInterval(async () => {
   if (isAutoFlighting) return;
@@ -97,7 +99,7 @@ setInterval(async () => {
   } finally {
     isAutoFlighting = false;
   }
-}, 5 * 60 * 1000); // mỗi 5 phút
+}, 30 * 60 * 1000); // mỗi 30 phút
 
 // AD-04: Mỗi 24 giờ tự động sinh chuyến bay từ lịch bay định kỳ (flight_schedules)
 let isGeneratingFlights = false;
