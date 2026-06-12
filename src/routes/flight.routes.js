@@ -16,7 +16,7 @@ router.get("/by-airline/:code",     flightController.getFlightsByAirline);
 router.get("/price-analysis",  flightController.getPriceAnalysis);
 router.get("/:id/seat-map",    flightController.getSeatMap);
 router.get("/:id/position",    flightController.getFlightPosition);
-router.get("/:id/price-analysis", flightController.getFlightPriceAnalysis);
+router.get("/:id/price-analysis", flightController.getFlightPriceAnalysis); // Flight-specific price analysis
 router.get("/:id",             flightController.getFlightById);
 
 module.exports = router;

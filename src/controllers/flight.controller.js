@@ -193,6 +193,12 @@ const getFlightPosition = async (req, res) => {
 };
 
 /**
+ * ==========================================================
+ * PRICE ALERT CONTROLLERS
+ * ==========================================================
+ */
+
+/**
  * GET /api/flights/price-analysis?departure_date=2026-06-15&base_price=1000000&available_seats=50&total_seats=180
  * Phân tích giá dựa trên params (không cần flight ID)
  */
@@ -200,6 +206,7 @@ const getPriceAnalysis = async (req, res) => {
   try {
     const { departure_date, base_price, available_seats, total_seats } = req.query;
 
+    // Validation
     if (!departure_date) {
       return res.status(400).json({ error: "departure_date là bắt buộc" });
     }
@@ -209,6 +216,7 @@ const getPriceAnalysis = async (req, res) => {
 
     const { getDetailedAnalysis } = require('../services/price-alert.service');
 
+    // Tạo flight object giả lập để phân tích
     const mockFlight = {
       id: null,
       departure_time: departure_date,
@@ -242,6 +250,7 @@ const getFlightPriceAnalysis = async (req, res) => {
       return res.status(400).json({ error: "Flight ID không hợp lệ" });
     }
 
+    // Lấy flight từ DB
     const flight = await flightService.getFlightById(Number(id), {
       adults: adults || 1,
       children: children || 0,
@@ -272,6 +281,7 @@ module.exports = {
   getSeatMap,
   getFlightRecommendations,
   getFlightPosition,
+  // Price analysis exports
   getPriceAnalysis,
   getFlightPriceAnalysis,
   browseFlights: async (req, res) => {

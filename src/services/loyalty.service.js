@@ -3,39 +3,29 @@ const crypto = require('crypto');
 const queries = require('../queries/loyalty.queries');
 
 /*
-=========================================================
-SERVICE: LOYALTY / MEMBERSHIP BUSINESS LOGIC
-=========================================================
+============================================================
+LOYALTY SERVICE - Hệ thống tích điểm & Membership
+============================================================
 
-POINTS SYSTEM — 3 cột, mỗi cột 1 vai trò riêng:
+Hệ thống điểm 3 cột:
+- lifetime_points: Chỉ cộng, không bao giờ giảm (lịch sử)
+- tier_points: Cộng khi earn, trừ khi cancel/refund (dùng xét tier)
+- current_points: Cộng khi earn, trừ khi redeem/cancel/refund (để tiêu)
 
-  lifetime_points   chỉ cộng, không bao giờ giảm
-                    → lịch sử vĩnh viễn, dùng cho báo cáo
-                    → KHÔNG dùng để xét tier
+Tiers: Bronze → Silver → Gold → Platinum
 
-  tier_points       cộng khi earn, trừ khi cancel/refund
-                    → dùng để xét tier + cronjob penalty
-                    → KHÔNG trừ khi user redeem
-
-  current_points    cộng khi earn, trừ khi redeem/cancel/refund
-                    → điểm user có thể tiêu
-                    → KHÔNG ảnh hưởng tier
-
-ACTION             lifetime    tier      current
-────────────────────────────────────────────────
+Action             lifetime    tier      current
+──────────────────────────────────────────────
 Earn (booking)     + pts       + pts     + pts
 Redeem reward      —           —         - pts
-Cancel / refund    —           - pts     - pts  → check downgrade
+Cancel / refund     —           - pts     - pts  → check downgrade
 Cron annual reset  —           - 20%     —      → check downgrade
-
-=========================================================
+============================================================
 */
 
 
-// =========================================================
-// TIER CONFIG
-// Sửa mốc điểm tại đây — đồng bộ với loyalty.cron.js
-// =========================================================
+// Tier config - sửa mốc điểm tại đây
+// Đồng bộ với loyalty.cron.js
 const TIERS = [
   { name: 'Bronze',   min_points: 0,     multiplier: 1.0  },
   { name: 'Silver',   min_points: 5000,  multiplier: 1.25 },
@@ -43,7 +33,7 @@ const TIERS = [
   { name: 'Platinum', min_points: 50000, multiplier: 1.75 },
 ];
 
-// Tier phù hợp nhất theo tier_points
+// Xác định tier phù hợp theo tier_points
 const resolveTier = (tierPoints) => {
   let resolved = TIERS[0];
   for (const t of TIERS) {
@@ -52,8 +42,7 @@ const resolveTier = (tierPoints) => {
   return resolved;
 };
 
-// Next tier + progress bar
-// progress: 0–99 khi chưa max tier, 100 khi đã Platinum
+// Tính next tier + progress bar (0-99, 100 = max tier)
 const calcNextTierAndProgress = (currentTierName, tierPoints) => {
   const idx = TIERS.findIndex(t => t.name === currentTierName);
   const isMax = idx === TIERS.length - 1;
@@ -79,9 +68,7 @@ const calcNextTierAndProgress = (currentTierName, tierPoints) => {
 };
 
 
-// =========================================================
-// BENEFITS — song ngữ, fallback sang DB nếu tier không khớp
-// =========================================================
+// Benefits theo tier (song ngữ)
 const TIER_BENEFITS = {
   Member: {
     vi: ["Tích điểm không giới hạn", "Ưu đãi 5% cho chuyến bay tiếp theo", "Truy cập ưu tiên vào khuyến mãi"],
@@ -101,9 +88,7 @@ const TIER_BENEFITS = {
   },
 };
 
-// =========================================================
-// GET MEMBERSHIP INFO
-// =========================================================
+// ─── Lấy thông tin membership ────────────────
 exports.getMembershipInfo = async (userId, lang = 'vi') => {
 
   let result = await db.query(queries.GET_USER_LOYALTY, [userId]);
@@ -165,16 +150,8 @@ exports.getMembershipInfo = async (userId, lang = 'vi') => {
 };
 
 
-// =========================================================
-// EARN POINTS — sau khi booking confirmed
-// =========================================================
-// Flow:
-//   1. Lấy multiplier từ tier hiện tại
-//   2. Tính điểm = floor(price / 10000) × multiplier
-//   3. Cộng cả 3 cột trong 1 query
-//   4. Ghi transaction
-//   5. Check upgrade tier
-// =========================================================
+// ─── Tích điểm sau booking ──────────────────
+// Flow: Lấy multiplier → Tính điểm → Cộng 3 cột → Ghi transaction → Check upgrade tier
 exports.earnPointsAfterBooking = async (userId, bookingId, totalPrice) => {
 
   // Lấy multiplier trực tiếp — nhẹ hơn gọi getMembershipInfo
@@ -229,18 +206,8 @@ exports.earnPointsAfterBooking = async (userId, bookingId, totalPrice) => {
 };
 
 
-// =========================================================
-// REVOKE POINTS — khi cancel hoặc refund booking
-// =========================================================
-// Flow:
-//   1. Tìm điểm đã earn từ booking này trong loyalty_transactions
-//   2. Trừ tier_points + current_points (KHÔNG trừ lifetime)
-//   3. Không để âm — trừ tối đa đến 0
-//   4. Ghi transaction type 'revoke'
-//   5. Check downgrade tier → notify nếu tụt hạng
-//
-// Gọi từ: booking.service khi status → 'cancelled' hoặc 'refunded'
-// =========================================================
+// ─── Trừ điểm khi hủy booking ─────────────────
+// Flow: Tìm điểm đã earn → Trừ tier_points + current_points → Ghi transaction → Check downgrade
 exports.revokePointsOnCancel = async (userId, bookingId) => {
 
   // Lấy điểm đã earn từ booking này
@@ -306,13 +273,7 @@ exports.revokePointsOnCancel = async (userId, bookingId) => {
 };
 
 
-// =========================================================
-// REVOKE POINTS FOR REFUND (FULL hoặc PARTIAL)
-// =========================================================
-// Được gọi từ refund.service khi refund hoàn thành
-// - Full refund: revoke toàn bộ điểm đã earn từ booking
-// - Partial refund: revoke theo tỷ lệ % refund
-// =========================================================
+// ─── Trừ điểm khi refund (full/partial) ────
 exports.revokePointsForRefund = async (bookingId, userId, refundType = 'full', refundPercent = 100) => {
   // Lấy điểm đã earn từ booking này
   const txResult = await db.query(`
@@ -381,19 +342,9 @@ exports.revokePointsForRefund = async (bookingId, userId, refundType = 'full', r
   return { pointsRevoked: safeRevokeTier };
 };
 
-// =========================================================
-// REDEEM REWARD
-// =========================================================
-// Flow:
-//   1. Lock row (SELECT FOR UPDATE) → tránh race condition
-//   2. Kiểm tra reward tồn tại
-//   3. Kiểm tra đủ current_points từ locked row
-//   4. Sinh voucher code
-//   5. Trừ current_points, RETURNING để lấy số chính xác
-//   6. Ghi transaction
-//
-// lifetime_points và tier_points KHÔNG đổi → không tụt tier
-// =========================================================
+// ─── Đổi điểm lấy reward ──────────────────
+// Flow: Lock row → Kiểm tra reward → Kiểm tra đủ điểm → Sinh voucher → Trừ current_points → Ghi transaction
+// Chỉ trừ current_points, không ảnh hưởng tier
 exports.redeemReward = async (userId, rewardId) => {
 
   const client = await db.connect();
@@ -488,18 +439,14 @@ exports.redeemReward = async (userId, rewardId) => {
 };
 
 
-// =========================================================
-// GET AVAILABLE REWARDS
-// =========================================================
+// ─── Lấy danh sách rewards ───────────────
 exports.getAvailableRewards = async () => {
   const result = await db.query(queries.GET_AVAILABLE_REWARDS);
   return result.rows;
 };
 
 
-// =========================================================
-// CHECK ALREADY EARNED — idempotent check
-// =========================================================
+// ─── Kiểm tra đã tích điểm chưa ─────────
 exports.checkAlreadyEarned = async (userId, bookingId) => {
   const result = await db.query(`
     SELECT id
@@ -513,9 +460,7 @@ exports.checkAlreadyEarned = async (userId, bookingId) => {
 };
 
 
-// =========================================================
-// TRANSACTION HISTORY
-// =========================================================
+// ─── Lịch sử giao dịch ───────────────────
 exports.getTransactionHistory = async (userId, limit = 20, offset = 0) => {
   const result = await db.query(queries.GET_LOYALTY_HISTORY, [
     userId,
@@ -535,9 +480,7 @@ exports.getTransactionCount = async (userId) => {
 };
 
 
-// =========================================================
-// TRIGGER ANNUAL RESET (admin manual trigger)
-// =========================================================
+// ─── Trigger annual reset (admin) ──────────
 exports.triggerAnnualReset = async () => {
   const { runAnnualReset } = require('../scripts/Loyalty.cron');
   await runAnnualReset();
@@ -550,14 +493,11 @@ exports.triggerAnnualReset = async () => {
 };
 
 
-// =========================================================
-// SYNC TIER — dùng chung sau mọi thay đổi điểm
-// =========================================================
+// ─── Sync tier sau thay đổi điểm ──────────
 // direction:
 //   'upgrade'   → chỉ lên tier, không xuống  (sau earn)
 //   'downgrade' → chỉ xuống tier, không lên  (sau cancel/refund/cron)
 //   'both'      → sync tuyệt đối              (dùng khi cần force sync)
-// =========================================================
 const syncTierAfterChange = async (userId, direction = 'both') => {
 
   const result = await db.query(`
@@ -645,11 +585,8 @@ const syncTierAfterChange = async (userId, direction = 'both') => {
 // Export để cron job gọi sau khi penalty tier_points
 exports.syncTierAfterChange = syncTierAfterChange;
 
-// =========================================================
-// RECALCULATE ALL TIERS — sync tier_id cho toàn bộ user
-// dựa trên tier_points hiện tại
-// Dùng khi: admin chạy thủ công, sau khi có bug fix
-// =========================================================
+// ─── Recalculate all tiers ─────────────────
+// Sync tier_id cho toàn bộ user dựa trên tier_points hiện tại
 exports.recalculateAllTiers = async () => {
   const client = await db.connect();
   try {
@@ -690,9 +627,7 @@ exports.recalculateAllTiers = async () => {
   }
 };
 
-// =========================================================
-// TEST HELPERS — TẠO BOOKING GIẢ ĐỂ TEST
-// =========================================================
+// ─── Test helpers: Tạo booking giả để test ──
 exports.createFakeBooking = async (userId, totalPrice) => {
   const bookingId = Math.floor(Date.now() / 1000);
   const bookingCode = String(bookingId).slice(-8);

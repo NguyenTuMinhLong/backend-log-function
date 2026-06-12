@@ -1,13 +1,22 @@
-"use strict";
+/*
+============================================================
+ANCILLARY SERVICE - Dịch vụ bổ sung (meal, baggage, insurance...)
+============================================================
 
-const pool = require("../config/db");
-const Q    = require("../queries/ancillary.queries");
+Các loại dịch vụ:
+- meal: Bữa ăn
+- baggage: Hành lý thêm
+- insurance: Bảo hiểm
+- lounge: Phòng chờ
+- wifi: Wifi trên máy bay
+============================================================
+*/
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// Helpers
 
 const VALID_TYPES = ["meal", "baggage", "insurance", "lounge", "wifi"];
 
-// Group ancillaries theo passenger để trả về cho FE dễ dùng
+// Nhóm ancillaries theo passenger
 const groupByPassenger = (rows) => {
   const map = {};
   for (const r of rows) {
@@ -40,10 +49,7 @@ const groupByPassenger = (rows) => {
 
 // ─── Exported Functions ───────────────────────────────────────────────────────
 
-/**
- * Lấy danh sách dịch vụ bổ sung có thể chọn
- * SB-04 Step 2: Hệ thống load danh sách dịch vụ
- */
+// Lấy danh sách dịch vụ có thể chọn
 const getAncillaryOptions = async (type = null) => {
   if (type && !VALID_TYPES.includes(type)) {
     throw new Error(`type phải là một trong: ${VALID_TYPES.join(", ")}`);
@@ -71,9 +77,7 @@ const getAncillaryOptions = async (type = null) => {
   };
 };
 
-/**
- * Lấy danh sách ancillaries đã chọn của 1 booking
- */
+// Lấy ancillaries đã chọn của 1 booking
 const getBookingAncillaries = async (bookingId) => {
   const rows        = await pool.query(Q.GET_ANCILLARIES_BY_BOOKING, [bookingId]);
   const totalResult = await pool.query(Q.GET_ANCILLARY_TOTAL, [bookingId]);
@@ -85,11 +89,7 @@ const getBookingAncillaries = async (bookingId) => {
   };
 };
 
-/**
- * Thêm dịch vụ bổ sung cho 1 hành khách
- * SB-04 Step 3: User chọn dịch vụ
- * SB-04 Step 4: Hệ thống tính lại tổng tiền
- */
+// Thêm dịch vụ cho 1 hành khách
 const addAncillary = async (bookingId, data) => {
   const {
     passenger_id,

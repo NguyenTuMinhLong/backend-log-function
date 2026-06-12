@@ -1,9 +1,31 @@
 'use strict';
 
 /*
-=========================================================
-REFUND SERVICE - Business Logic
-=========================================================
+============================================================
+REFUND SERVICE - Hoàn tiền booking
+============================================================
+
+Các chức năng chính:
+- Request: User yêu cầu hoàn tiền
+- Approve: Admin duyệt yêu cầu
+- Process: Gọi payment gateway để hoàn tiền
+- Reject: Admin từ chối yêu cầu
+
+OTP System:
+- Yêu cầu xác thực OTP cho hóa đơn >= threshold (mặc định 1M VND)
+- OTP được gửi qua email
+- Lưu trong memory (không persist)
+
+Auto-Approve:
+- Refund < 1M VND → auto approve
+- Refund >= 1M VND → cần admin duyệt
+
+Refund Policies:
+- > 72h trước giờ bay: hoàn 100%
+- 24-72h: hoàn 80%
+- 12-24h: hoàn 50%
+- < 12h: không hoàn
+============================================================
 */
 
 const pool = require('../config/db');
@@ -29,9 +51,7 @@ const { refundPayPalCapture } = require('../providers/paypal.provider');
 const { getPayosClient } = require('../providers/payos.provider');
 const config = require('../config/payment.config');
 
-// =========================================================
-// HELPERS
-// =========================================================
+// Helpers
 
 const generateRefundCode = () => {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -85,9 +105,7 @@ const validateRefundRequest = (booking, payment, userId) => {
   }
 };
 
-// =========================================================
-// OTP STORE (In-Memory)
-// =========================================================
+// OTP Store - lưu trong memory cho guest refunds
 
 /**
  * In-memory OTP store for guest refunds
@@ -399,9 +417,7 @@ const calculateRefundAmount = (booking, payment, policy, refundType = 'full', re
   };
 };
 
-// =========================================================
-// REQUEST REFUND (USER)
-// =========================================================
+// ─── USER REQUEST REFUND ────────────────────────────────────────
 
 const requestRefund = async (userId, bookingCode, data) => {
   const {
@@ -612,9 +628,7 @@ const getUserRefunds = async (userId, page = 1, limit = 10) => {
   };
 };
 
-// =========================================================
-// APPROVE REFUND (ADMIN)
-// =========================================================
+// ─── ADMIN APPROVE REFUND ───────────────────────────────────────
 
 const approveRefund = async (adminId, refundCode, adminNotes = null) => {
   const client = await pool.connect();
@@ -667,9 +681,7 @@ const approveRefund = async (adminId, refundCode, adminNotes = null) => {
   }
 };
 
-// =========================================================
-// REJECT REFUND (ADMIN)
-// =========================================================
+// ─── ADMIN REJECT REFUND ───────────────────────────────────────
 
 const rejectRefund = async (adminId, refundCode, reason) => {
   if (!reason || reason.trim().length < 10) {
@@ -729,9 +741,7 @@ const rejectRefund = async (adminId, refundCode, reason) => {
   }
 };
 
-// =========================================================
-// PROCESS REFUND (ADMIN) - Gọi payment gateway để hoàn tiền
-// =========================================================
+// ─── ADMIN PROCESS REFUND (gọi payment gateway) ────────────────
 
 const processRefund = async (adminId, refundCode) => {
   const client = await pool.connect();

@@ -174,7 +174,8 @@ router.get("/return/momo", async (req, res) => {
       // Handle date change payment return
       const result = await dateChangeService.confirmDateChangePayment(paymentCode);
       const params = new URLSearchParams({
-        status: result.status === 'approved' ? 'success' : 'pending',
+        status: result.status === 'pending' ? 'success' : result.status,
+        paymentStatus: result.payment_status || 'SUCCESS',
         paymentCode: paymentCode,
         requestCode: result.request_code || '',
       });
@@ -210,7 +211,8 @@ router.get("/return/payos/:status", async (req, res) => {
       // Handle date change payment return
       const result = await dateChangeService.confirmDateChangePayment(paymentCode);
       const params = new URLSearchParams({
-        status: result.status === 'approved' ? 'success' : 'pending',
+        status: result.status === 'pending' ? 'success' : result.status,
+        paymentStatus: result.payment_status || 'SUCCESS',
         paymentCode: paymentCode,
         requestCode: result.request_code || '',
       });
@@ -242,10 +244,38 @@ router.get("/return/paypal", async (req, res) => {
     const paymentCode = String(req.query.payment_code || '').trim();
     
     if (isDateChangePayment(paymentCode)) {
-      // Handle date change payment return
-      const result = await dateChangeService.confirmDateChangePayment(paymentCode);
+      const orderId = String(req.query.token || req.query.orderId || '').trim();
+      const payment = await paymentService.getPaymentByCode(paymentCode);
+      const gatewayResponse = payment?.gateway_response || {};
+      const effectiveOrderId = orderId || gatewayResponse.order_id || gatewayResponse.provider_order_code || '';
+
+      if (!effectiveOrderId) {
+        throw new Error('Missing PayPal order token for date change payment');
+      }
+
+      const capture = await paymentService.handlePaypalReturn({
+        ...req.query,
+        payment_code: paymentCode,
+        token: effectiveOrderId,
+      });
+
+      const result = await dateChangeService.confirmDateChangePayment(paymentCode, {
+        trustedPaid: true,
+        gatewayPayload: {
+          ...gatewayResponse,
+          provider: 'PAYPAL',
+          order_id: effectiveOrderId,
+          provider_order_code: effectiveOrderId,
+          capture_id: capture.capture_id || gatewayResponse.capture_id || null,
+          capture_status: 'COMPLETED',
+          approve_url: null,
+          redirect_url: null,
+          returnedAt: new Date().toISOString(),
+        },
+      });
       const params = new URLSearchParams({
-        status: result.status === 'approved' ? 'success' : 'pending',
+        status: result.status === 'pending' ? 'success' : result.status,
+        paymentStatus: result.payment_status || 'SUCCESS',
         paymentCode: paymentCode,
         requestCode: result.request_code || '',
       });

@@ -1,3 +1,17 @@
+/*
+============================================================
+CHAT SERVICE - AI Assistant & Support Chat
+============================================================
+
+Hai loại conversation:
+- ai: Chat với AI assistant
+- support: Chat với support team
+
+Message roles: user, admin, assistant, system
+Support statuses: open, pending_admin, pending_user, resolved
+============================================================
+*/
+
 const pool = require("../config/db");
 const assistantChatService = require("./admin/chat.service");
 const {

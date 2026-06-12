@@ -89,7 +89,7 @@ const getPendingDateChanges = async (req, res) => {
     const total = parseInt(countResult.rows[0].count);
 
     res.json({
-      message: 'Lấy danh sách đổi ngày bay chờ duyệt thành công',
+      message: 'Lấy danh sách đổi ngày bay chờ xử lý thành công',
       data: dataResult.rows,
       pending_count: total,
       pagination: {
