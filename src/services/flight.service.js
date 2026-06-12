@@ -3,7 +3,7 @@ const pool = require('../config/db');
 const QF = require('../queries/flight.queries');
 
 // Lấy chuyến bay đa dạng (không cần from/to cụ thể) — dùng cho Browse + homepage
-const browseFlights = async (limit = 40) => {
+const browseFlights = async (limit = 40, lang) => {
   const { rows } = await pool.query(`
     WITH ranked AS (
       SELECT
@@ -35,10 +35,10 @@ const browseFlights = async (limit = 40) => {
     ORDER BY RANDOM()
     LIMIT $1
   `, [limit]);
-  return formatFlights(rows, 1, 0, 0);
+  return formatFlights(rows, 1, 0, 0, normalizeLocale(lang));
 };
 
-const getFlightsByAirline = async (airlineCode, seatClass = 'economy') => {
+const getFlightsByAirline = async (airlineCode, seatClass = 'economy', lang) => {
   const cls = (seatClass || 'economy').toLowerCase();
   const { rows } = await pool.query(`
     SELECT
@@ -63,10 +63,10 @@ const getFlightsByAirline = async (airlineCode, seatClass = 'economy') => {
     ORDER BY f.departure_time ASC
     LIMIT 200
   `, [airlineCode.toUpperCase(), cls]);
-  return formatFlights(rows, 1, 0, 0);
+  return formatFlights(rows, 1, 0, 0, normalizeLocale(lang));
 };
 
-const recommendFlights = async ({ userId, fromAirport, toAirport, limit = 15 }) => {
+const recommendFlights = async ({ userId, fromAirport, toAirport, limit = 15, lang }) => {
   const query = `
     SELECT
       f.id              AS flight_id,
@@ -110,7 +110,7 @@ const recommendFlights = async ({ userId, fromAirport, toAirport, limit = 15 }) 
     LIMIT $1`;
 
   const { rows } = await pool.query(query, [limit, fromAirport, toAirport]);
-  return formatFlights(rows, 1, 0, 0);
+  return formatFlights(rows, 1, 0, 0, normalizeLocale(lang));
 };
 
 const formatDuration = (minutes) => {
@@ -149,6 +149,7 @@ const buildBaggageOptions = (extraBaggagePrice) => {
 const { applyDynamicPricing } = require('../utils/pricing');
 const seasonService = require('./season.service');
 const { generatePriceAlert, getDetailedAnalysis } = require('./price-alert.service');
+const { normalizeLocale } = require('../utils/locale');
 
 // Áp dụng dynamic pricing có tính thêm hệ số mùa cao điểm/ngày lễ
 const getSeasonAwarePrice = async (basePrice, availableSeats, totalSeats, departureTime) => {
@@ -156,11 +157,11 @@ const getSeasonAwarePrice = async (basePrice, availableSeats, totalSeats, depart
   return applyDynamicPricing(basePrice, availableSeats, totalSeats, departureTime, seasonMultiplier);
 };
 
-const formatFlights = async (rows, adults, children, infants) => Promise.all(
+const formatFlights = async (rows, adults, children, infants, locale = 'vi') => Promise.all(
   rows.map(async (r) => {
     const base        = parseFloat(r.base_price) || 0;
     const extraPrice  = parseFloat(r.extra_baggage_price) || 0;
-    const seasonInfo  = await seasonService.getSeasonInfo(r.departure_time);
+    const seasonInfo  = await seasonService.getSeasonInfo(r.departure_time, locale);
     const seasonMult  = seasonInfo ? seasonInfo.multiplier : 1.0;
     const price       = applyDynamicPricing(base, r.available_seats, r.total_seats, r.departure_time, seasonMult);
     const priceAlert  = await generatePriceAlert({
@@ -169,7 +170,7 @@ const formatFlights = async (rows, adults, children, infants) => Promise.all(
       base_price: base,
       available_seats: r.available_seats,
       total_seats: r.total_seats,
-    });
+    }, null, null, locale);
 
     return {
       flight_id:     r.flight_id,
@@ -292,6 +293,7 @@ const searchFlights = async (params) => {
     seat_class, return_date, sort_by,
     min_price, max_price, airline_code,
     departure_city, arrival_city,
+    lang,
   } = params;
 
   validateSearchParams({ departure_code, arrival_code, departure_date, adults, children, infants, seat_class, return_date });
@@ -299,6 +301,7 @@ const searchFlights = async (params) => {
   const a = parseInt(adults);
   const c = parseInt(children) || 0;
   const i = parseInt(infants)  || 0;
+  const locale = normalizeLocale(lang);
 
   const baseParams = {
     departure_code, arrival_code, departure_date,
@@ -308,7 +311,7 @@ const searchFlights = async (params) => {
   };
 
   const outboundRows    = await queryFlights(baseParams);
-  const outboundFlights = await formatFlights(outboundRows, a, c, i);
+  const outboundFlights = await formatFlights(outboundRows, a, c, i, locale);
 
   let returnFlights = null;
   if (return_date) {
@@ -318,7 +321,7 @@ const searchFlights = async (params) => {
       arrival_code:   departure_code,
       departure_date: return_date,
     });
-    returnFlights = await formatFlights(returnRows, a, c, i);
+    returnFlights = await formatFlights(returnRows, a, c, i, locale);
   }
 
   return {
@@ -544,10 +547,11 @@ const getAirlines = async () => {
 // ─── getFlightById ─────────────────────────────────────────────────────────────
 
 const getFlightById = async (flightId, params = {}) => {
-  const { adults = 1, children = 0, infants = 0 } = params;
+  const { adults = 1, children = 0, infants = 0, lang } = params;
   const a = parseInt(adults);
   const c = parseInt(children);
   const i = parseInt(infants);
+  const locale = normalizeLocale(lang);
 
   const result = await pool.query(QF.SELECT_FLIGHT_BY_ID, [flightId]);
   if (result.rows.length === 0) throw new Error("Không tìm thấy chuyến bay");
@@ -579,11 +583,11 @@ const getFlightById = async (flightId, params = {}) => {
     available_seats: baseSeat?.available_seats,
     total_seats: baseSeat?.total_seats,
     base_price: parseFloat(baseSeat?.base_price) || 0,
-  });
+  }, locale);
 
   return {
     ...flight,
-    season_info: await seasonService.getSeasonInfo(flight.departure_time),
+    season_info: await seasonService.getSeasonInfo(flight.departure_time, locale),
     price_analysis: detailedAnalysis,
     seats,
   };
@@ -592,10 +596,11 @@ const getFlightById = async (flightId, params = {}) => {
 // ─── getAlternativeFlights ────────────────────────────────────────────────────
 
 const getAlternativeFlights = async (flightId, params = {}) => {
-  const { seat_class = 'economy', adults = 1, children = 0, infants = 0 } = params;
+  const { seat_class = 'economy', adults = 1, children = 0, infants = 0, lang } = params;
   const a = parseInt(adults);
   const c = parseInt(children);
   const i = parseInt(infants);
+  const locale = normalizeLocale(lang);
 
   const original = await pool.query(QF.SELECT_FLIGHT_BY_ID, [flightId]);
   if (original.rows.length === 0) throw new Error("Không tìm thấy chuyến bay");
@@ -608,7 +613,7 @@ const getAlternativeFlights = async (flightId, params = {}) => {
     flightId, orig.departure_code, orig.arrival_code, seat_class, seatsNeeded, departureDate
   ]);
 
-  return formatFlights(result.rows, a, c, i);
+  return formatFlights(result.rows, a, c, i, locale);
 };
 
 // ─── getFlightCombos ───────────────────────────────────────────────────────────
@@ -643,9 +648,9 @@ const rankCombo = (combo) => {
   };
 };
 
-const buildComboLeg = async (row, adults, children, infants) => {
+const buildComboLeg = async (row, adults, children, infants, locale = 'vi') => {
   const base = parseFloat(row.base_price) || 0;
-  const seasonInfo = await seasonService.getSeasonInfo(row.departure_time);
+  const seasonInfo = await seasonService.getSeasonInfo(row.departure_time, locale);
   const price = await getSeasonAwarePrice(base, row.available_seats, row.total_seats, row.departure_time);
 
   return {
@@ -703,6 +708,7 @@ const getFlightCombos = async (params = {}) => {
     max_layover_minutes = DEFAULT_COMBO_RULES.maxLayoverMinutes,
     max_stops = DEFAULT_COMBO_RULES.maxStops,
     limit = 10,
+    lang,
   } = params;
 
   if (!departure_code || !arrival_code || !departure_date) {
@@ -713,6 +719,7 @@ const getFlightCombos = async (params = {}) => {
   const c = Math.max(0, parseInt(children) || 0);
   const i = Math.max(0, parseInt(infants) || 0);
   const cls = seat_class.toLowerCase();
+  const locale = normalizeLocale(lang);
   const seatsNeeded = a + c;
   const directRows = await pool.query(QF.SEARCH_FLIGHTS_FOR_COMBO, [
     departure_code.toUpperCase(),
@@ -725,7 +732,7 @@ const getFlightCombos = async (params = {}) => {
   const directCombos = await Promise.all(directRows.rows.map(async (row) => ({
     stops: 0,
     total_layover_minutes: 0,
-    legs: [await buildComboLeg(row, a, c, i)],
+    legs: [await buildComboLeg(row, a, c, i, locale)],
   })));
 
   const combos = [...directCombos];
@@ -756,8 +763,8 @@ const getFlightCombos = async (params = {}) => {
         const layoverMinutes = minutesBetween(leg1.arrival_time, leg2.departure_time);
         if (layoverMinutes < parseInt(min_layover_minutes) || layoverMinutes > parseInt(max_layover_minutes)) continue;
 
-        const firstLeg = await buildComboLeg(leg1, a, c, i);
-        const secondLeg = await buildComboLeg(leg2, a, c, i);
+        const firstLeg = await buildComboLeg(leg1, a, c, i, locale);
+        const secondLeg = await buildComboLeg(leg2, a, c, i, locale);
 
         combos.push({
           stops: 1,

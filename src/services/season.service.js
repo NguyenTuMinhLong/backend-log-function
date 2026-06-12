@@ -70,6 +70,10 @@ const parseBoolean = (value) => {
   return Boolean(value);
 };
 
+// Lấy text theo locale: dùng cột `${field}_en` khi locale='en' (fallback về tiếng Việt nếu rỗng)
+const pickLocalized = (row, field, locale) =>
+  (locale === 'en' && row[`${field}_en`]) ? row[`${field}_en`] : row[field];
+
 const resolveSolarHolidayDate = (rule, year) => {
   return createResolvedDateFromParts(year, Number(rule.anchor_month), Number(rule.anchor_day));
 };
@@ -140,12 +144,12 @@ const buildResolvedHolidayRuleMap = (rules, years) => {
   return ruleMap;
 };
 
-const buildHolidayInfoFromRule = (rule, departureDate) => ({
+const buildHolidayInfoFromRule = (rule, departureDate, locale = 'vi') => ({
   id: rule.id,
   rule_id: rule.id,
-  name: rule.name,
+  name: pickLocalized(rule, 'name', locale),
   multiplier: parseFloat(rule.multiplier),
-  reason: rule.reason,
+  reason: pickLocalized(rule, 'reason', locale),
   priority: Number(rule.priority || 0),
   calendar_type: rule.calendar_type,
   rule_type: rule.rule_type,
@@ -295,11 +299,11 @@ function isHoliday(date, holidays) {
   return null;
 }
 
-function getHolidayFromRule(date, resolvedRuleMap) {
+function getHolidayFromRule(date, resolvedRuleMap, locale = 'vi') {
   const targetKey = toDateKey(date);
   const resolvedRule = resolvedRuleMap.get(targetKey);
   if (!resolvedRule) return null;
-  return buildHolidayInfoFromRule(resolvedRule, date);
+  return buildHolidayInfoFromRule(resolvedRule, date, locale);
 }
 
 // Tính số ngày từ date hiện tại đến target date
@@ -389,7 +393,12 @@ async function refreshCache() {
   return getSeasonInfo(new Date().toISOString());
 }
 
-async function getSeasonInfo(departureDate) {
+const OVERRIDE_REASON_FALLBACK = {
+  vi: 'Điều chỉnh giá thủ công',
+  en: 'Manual price adjustment',
+};
+
+async function getSeasonInfo(departureDate, locale = 'vi') {
   try {
     const [override, seasons, holidays, resolvedHolidayRules] = await Promise.all([
       getOverrideForDate(departureDate),
@@ -399,19 +408,20 @@ async function getSeasonInfo(departureDate) {
     ]);
 
     if (override) {
+      const reason = pickLocalized(override, 'reason', locale) || OVERRIDE_REASON_FALLBACK[locale] || OVERRIDE_REASON_FALLBACK.vi;
       return {
         isPeak: parseFloat(override.multiplier) >= 1.20,
         isOverride: true,
         isHoliday: false,
-        name: override.reason || 'Admin Override',
+        name: pickLocalized(override, 'reason', locale) || 'Admin Override',
         multiplier: parseFloat(override.multiplier),
-        reason: override.reason || 'Điều chỉnh giá thủ công',
+        reason,
         type: 'override',
         daysUntil: daysUntil(departureDate),
       };
     }
 
-    const ruleHoliday = getHolidayFromRule(departureDate, resolvedHolidayRules);
+    const ruleHoliday = getHolidayFromRule(departureDate, resolvedHolidayRules, locale);
     if (ruleHoliday) {
       return {
         isPeak: true,
@@ -432,9 +442,9 @@ async function getSeasonInfo(departureDate) {
       return {
         isPeak: true,
         isHoliday: true,
-        name: holiday.name,
+        name: pickLocalized(holiday, 'name', locale),
         multiplier: parseFloat(holiday.multiplier),
-        reason: holiday.reason,
+        reason: pickLocalized(holiday, 'reason', locale),
         type: 'holiday',
         daysUntil: daysUntil(departureDate),
       };
@@ -468,9 +478,9 @@ async function getSeasonInfo(departureDate) {
         isPeak: matchedMultiplier >= 1.20,
         isApproaching: approaching.isApproaching && !approaching.isInside,
         isInside: approaching.isInside,
-        name: matchedSeason.name,
+        name: pickLocalized(matchedSeason, 'name', locale),
         multiplier: matchedMultiplier,
-        reason: matchedSeason.reason,
+        reason: pickLocalized(matchedSeason, 'reason', locale),
         type: 'season',
         daysUntil: daysUntil(departureDate),
         approachingInfo: approaching,

@@ -61,8 +61,22 @@ function getAlertLevel(percentChange) {
 }
 
 // Tạo message dựa trên level và season
-function generateAlertMessage(level, percentChange, seasonInfo, pricingBreakdown) {
+function generateAlertMessage(level, percentChange, seasonInfo, pricingBreakdown, locale = 'vi') {
   const roundedPercent = Math.round(percentChange);
+
+  if (locale === 'en') {
+    let message = `Price increased ${roundedPercent}%`;
+
+    if (seasonInfo) {
+      message += ` due to ${seasonInfo.reason}`;
+    } else if (pricingBreakdown.demandMult > 1.20) {
+      message += ` due to high demand`;
+    } else if (pricingBreakdown.advanceMult > 1.20) {
+      message += ` due to last-minute booking`;
+    }
+
+    return message;
+  }
 
   // Base message
   let message = `Giá tăng ${roundedPercent}%`;
@@ -79,20 +93,30 @@ function generateAlertMessage(level, percentChange, seasonInfo, pricingBreakdown
 }
 
 // Tạo recommendation dựa trên level
-function generateRecommendation(level, seasonInfo) {
+function generateRecommendation(level, seasonInfo, locale = 'vi') {
   const recommendations = {
-    high: 'Nên đặt ngay, giá có thể tăng thêm trong 24h!',
-    medium: 'Nên đặt sớm, giá có khả năng tăng trong 24h tới',
-    low: 'Giá có xu hướng tăng nhẹ, có thể đặt sớm',
-    none: null
+    vi: {
+      high: 'Nên đặt ngay, giá có thể tăng thêm trong 24h!',
+      medium: 'Nên đặt sớm, giá có khả năng tăng trong 24h tới',
+      low: 'Giá có xu hướng tăng nhẹ, có thể đặt sớm',
+      none: null,
+    },
+    en: {
+      high: 'Book now, the price may increase further within 24h!',
+      medium: 'Book soon, the price is likely to increase within the next 24h',
+      low: 'Price is trending up slightly, consider booking soon',
+      none: null,
+    },
   };
 
   // Custom message cho holiday
   if (seasonInfo?.isHoliday && level !== 'none') {
-    return `Hôm nay là ngày lễ ${seasonInfo.name}. Nên đặt ngay!`;
+    return locale === 'en'
+      ? `Today is ${seasonInfo.name} holiday. Book now!`
+      : `Hôm nay là ngày lễ ${seasonInfo.name}. Nên đặt ngay!`;
   }
 
-  return recommendations[level] || null;
+  return (recommendations[locale] || recommendations.vi)[level] || null;
 }
 
 /*============================================================
@@ -103,7 +127,7 @@ Ví dụ:
   const alert = await generatePriceAlert(flight, '2026-06-15');
   // Returns: { type: 'PRICE_INCREASE', level: 'high', percentage: 30, message: '...' }
 ============================================================*/
-async function generatePriceAlert(flight, departureDate = null, currentDate = null) {
+async function generatePriceAlert(flight, departureDate = null, currentDate = null, locale = 'vi') {
   try {
     // 1. Xác định departure date
     const depDate = departureDate || flight.departure_time || flight.departure_date;
@@ -130,7 +154,7 @@ async function generatePriceAlert(flight, departureDate = null, currentDate = nu
     const percentChange = ((currentPrice - basePrice) / basePrice) * 100;
 
     // 5. Lấy season info
-    const seasonInfo = await seasonService.getSeasonInfo(depDate);
+    const seasonInfo = await seasonService.getSeasonInfo(depDate, locale);
 
     // 6. CHỈ alert khi giá TĂNG > threshold
     if (percentChange <= ALERT_THRESHOLD_PERCENT) {
@@ -141,8 +165,8 @@ async function generatePriceAlert(flight, departureDate = null, currentDate = nu
     const level = getAlertLevel(percentChange);
 
     // 8. Generate message và recommendation
-    const message = generateAlertMessage(level, percentChange, seasonInfo, breakdown);
-    const recommendation = generateRecommendation(level, seasonInfo);
+    const message = generateAlertMessage(level, percentChange, seasonInfo, breakdown, locale);
+    const recommendation = generateRecommendation(level, seasonInfo, locale);
 
     // 9. Build alert object
     const alert = {
@@ -181,14 +205,14 @@ BATCH FUNCTION: Generate alerts cho nhiều flights
 ============================================================
 Dùng trong search results
 ============================================================*/
-async function generatePriceAlertsForFlights(flights, currentDate = null) {
+async function generatePriceAlertsForFlights(flights, currentDate = null, locale = 'vi') {
   if (!flights || flights.length === 0) {
     return [];
   }
 
   // Promise.all để query season info cho tất cả flights
   const alerts = await Promise.all(
-    flights.map(flight => generatePriceAlert(flight, null, currentDate))
+    flights.map(flight => generatePriceAlert(flight, null, currentDate, locale))
   );
 
   // Merge alerts vào flights
@@ -204,13 +228,13 @@ Dùng cho detail page
 @param {object} flight - Flight object
 @returns {Promise<object>}
 ============================================================*/
-async function getDetailedAnalysis(flight) {
+async function getDetailedAnalysis(flight, locale = 'vi') {
   const departureDate = flight.departure_time || flight.departure_date;
 
   // Get all data
   const [seasonInfo, priceAlert] = await Promise.all([
-    seasonService.getSeasonInfo(departureDate),
-    generatePriceAlert(flight)
+    seasonService.getSeasonInfo(departureDate, locale),
+    generatePriceAlert(flight, null, null, locale)
   ]);
 
   // Calculate base breakdown
@@ -239,7 +263,7 @@ async function getDetailedAnalysis(flight) {
       basePrice,
       dayOfWeek: {
         multiplier: breakdown.dayOfWeekMult,
-        label: getDayOfWeekLabel(departureDate)
+        label: getDayOfWeekLabel(departureDate, locale)
       },
       advanceBooking: {
         multiplier: breakdown.advanceMult,
@@ -273,9 +297,12 @@ function formatCurrency(amount) {
   }).format(amount);
 }
 
-function getDayOfWeekLabel(date) {
-  const days = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
-  return days[new Date(date).getDay()];
+function getDayOfWeekLabel(date, locale = 'vi') {
+  const days = {
+    vi: ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'],
+    en: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+  };
+  return (days[locale] || days.vi)[new Date(date).getDay()];
 }
 
 function getDaysUntilDeparture(date) {

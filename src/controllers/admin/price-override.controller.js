@@ -54,7 +54,7 @@ const getOverrideById = async (req, res) => {
 
 const createOverride = async (req, res) => {
   try {
-    const { date, multiplier, reason, is_active = true } = req.body;
+    const { date, multiplier, reason, reason_en, is_active = true } = req.body;
 
     if (!date || !multiplier) {
       return res.status(400).json({ error: "date và multiplier là bắt buộc" });
@@ -66,10 +66,10 @@ const createOverride = async (req, res) => {
     }
 
     const { rows } = await pool.query(
-      `INSERT INTO price_overrides (date, multiplier, reason, is_active, created_by)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO price_overrides (date, multiplier, reason, reason_en, is_active, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [date, multiplierNum, reason, is_active, req.user.id]
+      [date, multiplierNum, reason, reason_en || null, is_active, req.user.id]
     );
 
     res.status(201).json({
@@ -87,7 +87,7 @@ const createOverride = async (req, res) => {
 
 const updateOverride = async (req, res) => {
   try {
-    const { multiplier, reason, is_active } = req.body;
+    const { multiplier, reason, reason_en, is_active } = req.body;
     const fields = [];
     const values = [];
     let paramCount = 0;
@@ -105,6 +105,11 @@ const updateOverride = async (req, res) => {
       paramCount++;
       fields.push(`reason = $${paramCount}`);
       values.push(reason);
+    }
+    if (reason_en !== undefined) {
+      paramCount++;
+      fields.push(`reason_en = $${paramCount}`);
+      values.push(reason_en);
     }
     if (is_active !== undefined) {
       paramCount++;

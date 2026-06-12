@@ -1,4 +1,5 @@
 const flightService = require("../services/flight.service");
+const { normalizeLocale } = require("../utils/locale");
 
 /** GET /api/flights/search */
 const searchFlights = async (req, res) => {
@@ -39,11 +40,12 @@ const getAirlines = async (req, res) => {
  */
 const getFlightById = async (req, res) => {
   try {
-    const { adults, children, infants } = req.query;
+    const { adults, children, infants, lang } = req.query;
     const flight = await flightService.getFlightById(req.params.id, {
       adults: adults || 1,
       children: children || 0,
       infants: infants || 0,
+      lang,
     });
     res.json({ message: "Lấy thông tin chuyến bay thành công", data: flight });
   } catch (err) {
@@ -63,6 +65,7 @@ const getAlternativeFlights = async (req, res) => {
       adults = 1,
       children = 0,
       infants = 0,
+      lang,
     } = req.query;
     if (!flight_id)
       return res.status(400).json({ error: "flight_id là bắt buộc" });
@@ -72,6 +75,7 @@ const getAlternativeFlights = async (req, res) => {
       adults,
       children,
       infants,
+      lang,
     });
     res.json({ message: "Lấy chuyến bay thay thế thành công", data: result });
   } catch (err) {
@@ -144,10 +148,11 @@ const getFlightRecommendations = async (req, res) => {
     }
 
     const recommendations = await flightService.recommendFlights({
-      userId: userId,                    
+      userId: userId,
       fromAirport: from.toUpperCase(),
       toAirport: to.toUpperCase(),
-      limit: parseInt(limit) || 10
+      limit: parseInt(limit) || 10,
+      lang: req.query.lang,
     });
 
     res.json({ 
@@ -225,7 +230,7 @@ const getPriceAnalysis = async (req, res) => {
       total_seats: parseInt(total_seats) || 1,
     };
 
-    const analysis = await getDetailedAnalysis(mockFlight);
+    const analysis = await getDetailedAnalysis(mockFlight, normalizeLocale(req.query.lang));
 
     res.json({
       message: "Phân tích giá thành công",
@@ -244,7 +249,7 @@ const getPriceAnalysis = async (req, res) => {
 const getFlightPriceAnalysis = async (req, res) => {
   try {
     const { id } = req.params;
-    const { adults, children, infants } = req.query;
+    const { adults, children, infants, lang } = req.query;
 
     if (!id || isNaN(Number(id))) {
       return res.status(400).json({ error: "Flight ID không hợp lệ" });
@@ -255,6 +260,7 @@ const getFlightPriceAnalysis = async (req, res) => {
       adults: adults || 1,
       children: children || 0,
       infants: infants || 0,
+      lang,
     });
 
     res.json({
@@ -287,7 +293,7 @@ module.exports = {
   browseFlights: async (req, res) => {
     try {
       const limit = parseInt(req.query.limit) || 40;
-      const data  = await flightService.browseFlights(limit);
+      const data  = await flightService.browseFlights(limit, req.query.lang);
       res.json({ data });
     } catch (err) {
       console.error('[Flight Browse]', err);
@@ -299,7 +305,7 @@ module.exports = {
       const { code } = req.params;
       const { seat_class = 'economy' } = req.query;
       if (!code) return res.status(400).json({ error: 'Thiếu airline code' });
-      const data = await flightService.getFlightsByAirline(code, seat_class);
+      const data = await flightService.getFlightsByAirline(code, seat_class, req.query.lang);
       res.json({ data });
     } catch (err) {
       console.error('[Airline Flights]', err);
