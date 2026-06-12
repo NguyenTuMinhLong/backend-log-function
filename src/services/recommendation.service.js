@@ -19,6 +19,66 @@
 const pool = require("../config/db");
 const Q = require("../queries/recommendation.queries");
 
+// ── Cache constants ────────────────────────────────────────────────────────────
+const CACHE_TTL_MINUTES = 10;
+
+const CACHE_QUERIES = {
+  FIND: `
+    SELECT payload, expires_at
+    FROM recommendation_cache
+    WHERE cache_key = $1
+      AND expires_at > NOW()
+      AND (user_id = $2::bigint OR session_id = $3)
+    LIMIT 1
+  `,
+  UPSERT: `
+    INSERT INTO recommendation_cache
+      (user_id, session_id, cache_key, payload, expires_at)
+    VALUES ($1::bigint, $2, $3, $4, NOW() + INTERVAL '${CACHE_TTL_MINUTES} minutes')
+    ON CONFLICT DO NOTHING
+  `,
+};
+
+const buildCacheKey = ({ fromAirport, toAirport, filter }) => {
+  return `rec_${fromAirport || "any"}_${toAirport || "any"}_${filter || "default"}`;
+};
+
+// ── Cache helpers ──────────────────────────────────────────────────────────────
+const getCached = async (userId, sessionId, cacheKey) => {
+  if (!cacheKey) return null;
+  try {
+    const result = await pool.query(CACHE_QUERIES.FIND, [
+      cacheKey,
+      userId || null,
+      sessionId || null,
+    ]);
+    if (result.rows.length > 0) {
+      console.log(`[Recommendation Cache] HIT — key: ${cacheKey}`);
+      return result.rows[0].payload;
+    }
+    console.log(`[Recommendation Cache] MISS — key: ${cacheKey}`);
+    return null;
+  } catch (err) {
+    console.error("[Recommendation Cache] lookup error:", err.message);
+    return null;
+  }
+};
+
+const setCached = async (userId, sessionId, cacheKey, payload) => {
+  if (!cacheKey) return;
+  try {
+    await pool.query(CACHE_QUERIES.UPSERT, [
+      userId || null,
+      sessionId || null,
+      cacheKey,
+      JSON.stringify(payload),
+    ]);
+    console.log(`[Recommendation Cache] WRITTEN — key: ${cacheKey}, TTL: ${CACHE_TTL_MINUTES}m`);
+  } catch (err) {
+    console.error("[Recommendation Cache] write error:", err.message);
+  }
+};
+
 const BADGE = {
   DAY_PATTERN:      { label: "📅 Ngày bạn hay đặt",  color: "blue" },
   TIME_PROXIMITY:   { label: "⏰ Nhiều chuyến gần giờ", color: "purple" },
@@ -151,6 +211,10 @@ const getRecommendations = async ({
   const currentYear  = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
   const monthRange   = getMonthRange(currentYear, currentMonth);
+
+  const cacheKey = buildCacheKey({ fromAirport, toAirport, filter });
+  const cached   = await getCached(userId, sessionId, cacheKey);
+  if (cached) return cached;
 
   console.log("[Recommendation] Start — userId:", userId,
     "from:", fromAirport, "→", toAirport,
@@ -626,6 +690,9 @@ const getRecommendations = async ({
       source: hasHistory ? "personalized" : "popular",
     },
   };
+
+  setCached(userId, sessionId, cacheKey, result).catch(() => {});
+  return result;
 };
 
 module.exports = { getRecommendations };
