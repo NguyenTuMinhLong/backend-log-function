@@ -28,7 +28,7 @@ const browseFlights = async (limit = 40) => {
       JOIN flight_seats fs  ON fs.flight_id = f.id AND fs.class = 'economy'
       WHERE f.status = 'scheduled'
         AND f.is_active = true
-        AND f.departure_time > NOW()
+        AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
         AND fs.available_seats > 0
     )
     SELECT * FROM ranked WHERE rn = 1
@@ -57,7 +57,7 @@ const getFlightsByAirline = async (airlineCode, seatClass = 'economy') => {
     JOIN flight_seats fs  ON fs.flight_id = f.id AND fs.class = $2
     WHERE f.status = 'scheduled'
       AND f.is_active = true
-      AND f.departure_time > NOW()
+      AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
       AND fs.available_seats > 0
       AND al.code = $1
     ORDER BY f.departure_time ASC
@@ -103,7 +103,7 @@ const recommendFlights = async ({ userId, fromAirport, toAirport, limit = 15 }) 
     LEFT JOIN flight_seats fs ON fs.flight_id = f.id AND fs.class = 'economy'
     WHERE f.status = 'scheduled'
       AND f.is_active = true
-      AND f.departure_time > NOW()
+      AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
       AND dep.code = $2
       AND arr.code = $3
     ORDER BY f.departure_time ASC
@@ -265,7 +265,7 @@ const queryFlights = async ({
   conditions.push(`fs.available_seats >= $${idx++}`);    values.push(seatsNeeded);
   conditions.push(`f.status = 'scheduled'`);
   conditions.push(`f.is_active = TRUE`);
-  conditions.push(`f.departure_time > NOW()`);
+  conditions.push(`f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')`);
 
   if (min_price !== undefined && min_price !== "") { conditions.push(`fs.base_price >= $${idx++}`); values.push(parseFloat(min_price)); }
   if (max_price !== undefined && max_price !== "") { conditions.push(`fs.base_price <= $${idx++}`); values.push(parseFloat(max_price)); }

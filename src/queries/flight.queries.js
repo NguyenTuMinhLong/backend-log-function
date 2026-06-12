@@ -242,7 +242,7 @@ const SEARCH_FLIGHTS_BASE = `
   JOIN flight_seats fs ON fs.flight_id = f.id
   WHERE f.status = 'scheduled'
     AND f.is_active = true
-    AND f.departure_time > NOW()
+    AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
     AND dep.code = $1
     AND arr.code = $2
     AND fs.class = $3
@@ -286,7 +286,7 @@ const SEARCH_FLIGHTS_FOR_COMBO = `
   JOIN flight_seats fs ON fs.flight_id = f.id
   WHERE f.status = 'scheduled'
     AND f.is_active = true
-    AND f.departure_time > NOW()
+    AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
     AND dep.code = $1
     AND arr.code = $2
     AND fs.class = $3
@@ -332,7 +332,7 @@ const SEARCH_FLIGHTS_FOR_CONNECTING = `
   JOIN flight_seats fs ON fs.flight_id = f.id
   WHERE f.status = 'scheduled'
     AND f.is_active = true
-    AND f.departure_time > NOW()
+    AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
     AND dep.code = $1
     AND fs.class = $2
     AND fs.available_seats >= $3
@@ -367,7 +367,7 @@ const SEARCH_ALTERNATIVE_FLIGHTS = `
   JOIN flight_seats fs ON fs.flight_id = f.id
   WHERE f.status = 'scheduled'
     AND f.is_active = true
-    AND f.departure_time > NOW()
+    AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
     AND f.id != $1
     AND dep.code = $2
     AND arr.code = $3
@@ -441,7 +441,7 @@ const GET_HISTORY_RECOMMENDATIONS_GENERAL = `
   WHERE f.id != ALL($1)
     AND f.status = 'scheduled'
     AND f.is_active = true
-    AND f.departure_time > NOW()
+    AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
   ORDER BY f.departure_time ASC
   LIMIT $2
 `;
@@ -462,7 +462,7 @@ const GET_HISTORY_RECOMMENDATIONS_ROUTE = `
     AND f.id != ALL($3)
     AND f.status = 'scheduled'
     AND f.is_active = true
-    AND f.departure_time > NOW()
+    AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
   ORDER BY f.departure_time ASC
   LIMIT $4
 `;
@@ -481,7 +481,7 @@ const GET_POPULAR_FLIGHTS_GENERAL = `
   LEFT JOIN bookings b ON b.outbound_flight_id = f.id
   WHERE f.status = 'scheduled'
     AND f.is_active = true
-    AND f.departure_time > NOW()
+    AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
 `;
 
 const GET_POPULAR_FLIGHTS_ROUTE = `
@@ -500,7 +500,7 @@ const GET_POPULAR_FLIGHTS_ROUTE = `
     AND arr.code = $2
     AND f.status = 'scheduled'
     AND f.is_active = true
-    AND f.departure_time > NOW()
+    AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
 `;
 
 // ── Booking: Seat info ────────────────────────────────────────────────────────
