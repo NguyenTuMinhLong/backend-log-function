@@ -265,6 +265,7 @@ const queryFlights = async ({
   conditions.push(`fs.available_seats >= $${idx++}`);    values.push(seatsNeeded);
   conditions.push(`f.status = 'scheduled'`);
   conditions.push(`f.is_active = TRUE`);
+  conditions.push(`f.departure_time > NOW()`);
 
   if (min_price !== undefined && min_price !== "") { conditions.push(`fs.base_price >= $${idx++}`); values.push(parseFloat(min_price)); }
   if (max_price !== undefined && max_price !== "") { conditions.push(`fs.base_price <= $${idx++}`); values.push(parseFloat(max_price)); }
