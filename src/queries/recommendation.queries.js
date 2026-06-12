@@ -272,7 +272,12 @@ const SELECT_FLIGHTS_BY_USER_PATTERN = (
 // ─────────────────────────────────────────────
 // FALLBACK: Top popular flights
 // ─────────────────────────────────────────────
-const SELECT_TOP_POPULAR_FLIGHTS = (start, end, limit) => `
+const SELECT_TOP_POPULAR_FLIGHTS = (start, end, limit, preferredDestinations = []) => {
+  const destFilter = preferredDestinations.length > 0
+    ? `AND arr.code = ANY($${4}::text[])`
+    : "";
+
+  return `
   SELECT
     f.id,
     f.flight_number,
@@ -318,6 +323,7 @@ const SELECT_TOP_POPULAR_FLIGHTS = (start, end, limit) => `
     AND f.is_active = TRUE
     AND fs.available_seats > 0
     AND f.departure_time BETWEEN $1::TIMESTAMP AND $2::TIMESTAMP
+    ${destFilter}
   GROUP BY f.id, f.flight_number, f.departure_time, f.arrival_time,
            f.duration_minutes, f.status, al.id, al.code, al.name,
            al.logo_url, al.logo_dark, al.logo_light,
@@ -329,6 +335,7 @@ const SELECT_TOP_POPULAR_FLIGHTS = (start, end, limit) => `
   ORDER BY booking_count DESC, f.departure_time ASC
   LIMIT $3
 `;
+};
 
 // ─────────────────────────────────────────────
 // FALLBACK: Top searched routes

@@ -403,8 +403,8 @@ const getRecommendations = async ({
     try {
       const { start, end } = monthRange;
       const popularResult = await pool.query(
-        Q.SELECT_TOP_POPULAR_FLIGHTS(start, end, limit),
-        [start, end, limit],
+        Q.SELECT_TOP_POPULAR_FLIGHTS(start, end, limit, preferredDestinations),
+        [start, end, limit, preferredDestinations],
       );
       if (popularResult.rows.length > 0) {
         scoredFlights = popularResult.rows.map((r) => {
@@ -684,8 +684,8 @@ const getRecommendations = async ({
     try {
       const { start, end } = monthRange;
       const popularResult = await pool.query(
-        Q.SELECT_TOP_POPULAR_FLIGHTS(start, end, limit),
-        [start, end, limit],
+        Q.SELECT_TOP_POPULAR_FLIGHTS(start, end, limit, preferredDestinations),
+        [start, end, limit, preferredDestinations],
       );
       if (popularResult.rows.length > 0) {
         const popularGroupId = allGroups.length + 1;
