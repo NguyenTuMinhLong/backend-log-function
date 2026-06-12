@@ -221,78 +221,96 @@ const getRecommendations = async ({
     "filter:", filter, "limit:", limit);
 
   // ── Bước 1: Phân tích user preferences từ lịch sử ──────────────────────────
-  let hasHistory            = false;
-  let preferredHours        = null;
-  let avgSpending           = null;
-  let preferredDay          = 0;
-  let preferredDOW          = null;   // day-of-week ưa thích (0=Sun, 1=Mon, ..., 6=Sat)
+  let hasSearchHistory   = false;
+  let hasBookingHistory  = false;
+  let hasHistory         = false;
+  let preferredHours     = null;
+  let avgSpending        = null;
+  let preferredDay       = 0;
+  let preferredDOW       = null;
   let preferredDestinations = [];
-  let preferredDepartures   = [];
-  let preferredRoutes       = [];   // Fix (a): route cụ thể dep→arr
+  let preferredDepartures = [];
+  let preferredRoutes     = [];
 
   // 1a. Lịch sử tìm kiếm (user hoặc guest session)
   if (userId || sessionId) {
     const isUser = !!userId;
+    const safeUserId = isUser ? parseInt(userId) : null;
+    console.log(`[Recommendation] Step 1a — isUser: ${isUser}, safeUserId: ${safeUserId}, sessionId: ${sessionId}`);
+
     const searchResult = await pool.query(
       isUser ? Q.SELECT_SEARCH_HISTORY_BY_USER : Q.SELECT_SEARCH_HISTORY_BY_SESSION,
-      isUser ? [parseInt(userId)] : [sessionId],
-    ).catch(() => ({ rows: [] }));
+      isUser ? [safeUserId] : [sessionId],
+    ).catch((err) => {
+      console.error("[Recommendation] Step 1a search history query ERROR:", err.message);
+      return { rows: [] };
+    });
 
     if (searchResult.rows.length > 0) {
-      hasHistory            = true;
-      preferredDestinations  = searchResult.rows.map((r) => r.arrival_code);
-      preferredDepartures   = searchResult.rows.map((r) => r.departure_code);
-      avgSpending           = parseFloat(searchResult.rows[0].avg_min_price) || null;
+      hasSearchHistory        = true;
+      hasHistory              = true;
+      preferredDestinations   = searchResult.rows.map((r) => r.arrival_code);
+      preferredDepartures     = searchResult.rows.map((r) => r.departure_code);
+      avgSpending             = parseFloat(searchResult.rows[0].avg_min_price) || null;
     }
     console.log("[Recommendation] Step 1a — searchHistory rows:", searchResult.rows.length,
       "→ preferredDestinations:", preferredDestinations, "preferredDepartures:", preferredDepartures);
 
     // 1b. Lịch sử booking — lấy sở thích giờ, ngày, điểm đến
     if (userId) {
-      const bookingResult = await pool.query(
-        Q.SELECT_BOOKING_HISTORY_PREFERENCES,
-        [userId],
-      ).catch((err) => {
-        console.error("[Recommendation] Step 1b query error:", err.message);
-        return { rows: [] };
-      });
-      console.log("[Recommendation] Step 1b — bookingHistory rows:", bookingResult.rows.length,
-        bookingResult.rows.length > 0
-          ? bookingResult.rows.map(r => ({ route: r.route_key, hour: r.avg_dep_hour, day: r.preferred_day }))
-          : "(no data)");
+      const safeBookingUserId = parseInt(userId);
+      if (isNaN(safeBookingUserId)) {
+        console.warn("[Recommendation] Step 1b — userId is invalid, skipping booking history:", userId);
+      } else {
+        const bookingResult = await pool.query(
+          Q.SELECT_BOOKING_HISTORY_PREFERENCES,
+          [safeBookingUserId],
+        ).catch((err) => {
+          console.error("[Recommendation] Step 1b booking history query ERROR:", err.message);
+          return { rows: [] };
+        });
+        console.log("[Recommendation] Step 1b — bookingHistory rows:", bookingResult.rows.length,
+          bookingResult.rows.length > 0
+            ? bookingResult.rows.map(r => ({ route: r.route_key, hour: r.avg_dep_hour, day: r.preferred_day }))
+            : "(no data)");
 
-      if (bookingResult.rows.length > 0) {
-        hasHistory     = true;
-        preferredHours = parseFloat(bookingResult.rows[0].avg_dep_hour) || null;
-        avgSpending    = parseFloat(bookingResult.rows[0].avg_price) || avgSpending;
-        preferredDay   = parseFloat(bookingResult.rows[0].preferred_day) || 0;
-        const rawDOW   = parseFloat(bookingResult.rows[0].preferred_dow) || null;
-        preferredDOW  = (rawDOW !== null && !isNaN(rawDOW)) ? Math.round(rawDOW) : null;
+        if (bookingResult.rows.length > 0) {
+          hasBookingHistory = true;
+          hasHistory        = true;
+          preferredHours    = parseFloat(bookingResult.rows[0].avg_dep_hour) || null;
+          avgSpending       = parseFloat(bookingResult.rows[0].avg_price) || avgSpending;
+          preferredDay      = parseFloat(bookingResult.rows[0].preferred_day) || 0;
+          const rawDOW      = parseFloat(bookingResult.rows[0].preferred_dow) || null;
+          preferredDOW     = (rawDOW !== null && !isNaN(rawDOW)) ? Math.round(rawDOW) : null;
 
-        for (const r of bookingResult.rows) {
-          // Fix (a): thu thập route cụ thể (dep→arr), không chỉ arrival riêng lẻ
-          if (!preferredDestinations.includes(r.arr_code)) {
-            preferredDestinations.push(r.arr_code);
+          for (const r of bookingResult.rows) {
+            if (!preferredDestinations.includes(r.arr_code)) {
+              preferredDestinations.push(r.arr_code);
+            }
+            if (!preferredDepartures.includes(r.dep_code)) {
+              preferredDepartures.push(r.dep_code);
+            }
           }
-          if (!preferredDepartures.includes(r.dep_code)) {
-            preferredDepartures.push(r.dep_code);
-          }
+          preferredRoutes = bookingResult.rows.map(r => r.route_key);
         }
-        // Lưu danh sách route cụ thể để dùng trong scoring
-        preferredRoutes = bookingResult.rows.map(r => r.route_key);
       }
     }
   }
 
-  // 1c. Fallback TopBuy khi không có lịch sử
-  if (!hasHistory) {
+  // 1c. Fallback TopBuy khi preferredDestinations hoàn toàn trống
+  // ⚠️ KHÔNG ghi đè nếu đã có preferredDestinations từ search history
+  if (preferredDestinations.length === 0) {
     const topBuy = await pool.query(Q.SELECT_TOP_BUY_DESTINATIONS)
       .catch(() => ({ rows: [] }));
     preferredDestinations = topBuy.rows.map((r) => r.arr_code);
-    console.log("[Recommendation] Step 1c — topBuy fallback:", preferredDestinations);
+    console.log("[Recommendation] Step 1c — topBuy fallback (no history):", preferredDestinations);
+  } else {
+    console.log("[Recommendation] Step 1c — SKIP topBuy, preferredDestinations:", preferredDestinations);
   }
 
   console.log("[Recommendation] Step 1 — hasHistory:", hasHistory,
+    "hasSearchHistory:", hasSearchHistory,
+    "hasBookingHistory:", hasBookingHistory,
     "preferredRoutes:", preferredRoutes,
     "preferredHours:", preferredHours,
     "preferredDay:", preferredDay,
@@ -692,14 +710,16 @@ const getRecommendations = async ({
   }
 
   // 4h. Top source và top group
-  let topSource = hasHistory ? "personalized" : "popular";
+  let topSource = hasBookingHistory || hasSearchHistory
+    ? (hasBookingHistory ? "personalized" : "search_based")
+    : "popular";
   const topGroup = allGroups[0] || null;
 
   console.log("[Recommendation] Done — finalFlights:", finalFlights.length,
     "topSource:", topSource,
     "topGroup:", topGroup ? `${topGroup.route} (${topGroup.recommendation_type})` : "none");
 
-  return {
+  const result = {
     groups: allGroups.slice(0, 30),
     flights: finalFlights,
     meta: {
@@ -708,6 +728,8 @@ const getRecommendations = async ({
       limit,
       has_history:        hasHistory,
       top_source:         topSource,
+      has_search_history: hasSearchHistory,
+      has_booking_history: hasBookingHistory,
       filter_applied:     filter || "default",
       user_preferences: hasHistory ? {
         preferred_destinations: preferredDestinations,
@@ -722,7 +744,9 @@ const getRecommendations = async ({
           end:   monthRange.end.split("T")[0],
         },
       } : null,
-      source: hasHistory ? "personalized" : "popular",
+      source: hasHistory
+        ? (hasBookingHistory ? "personalized" : "search_based")
+        : "popular",
     },
   };
 
