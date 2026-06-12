@@ -496,8 +496,9 @@ const SELECT_SCORED_FLIGHTS = (
   toAirport = null,
   preferredRoutes = [],
 ) => {
-  const depCondition = fromAirport ? `AND dep.code = '${fromAirport}'` : "";
-  const arrCondition = toAirport   ? `AND arr.code = '${toAirport}'`   : "";
+  // Parameterized to prevent SQL injection (was: template literals)
+  const depCondition = fromAirport ? `AND dep.code = $9` : "";
+  const arrCondition = toAirport   ? `AND arr.code = $10` : "";
 
   return `
   SELECT

@@ -314,10 +314,12 @@ const getRecommendations = async ({
     preferredRoutes,
     preferredDOW !== null ? [preferredDOW] : [],
     preferredHours !== null ? [preferredHours] : [],
+    fromAirport || null,
+    toAirport   || null,
   ]).catch((err) => {
     console.error("[Recommendation] Step 2 query error:", err.message);
     console.error("[Recommendation] Step 2 query text:", scoredQuery.substring(0, 200));
-    console.error("[Recommendation] Step 2 params:", limit, preferredDestinations, preferredDepartures, avgSpending, preferredDay, preferredRoutes, preferredDOW, preferredHours);
+    console.error("[Recommendation] Step 2 params:", limit, preferredDestinations, preferredDepartures, avgSpending, preferredDay, preferredRoutes, preferredDOW, preferredHours, fromAirport, toAirport);
     return { rows: [] };
   });
 
@@ -375,6 +377,39 @@ const getRecommendations = async ({
   // Gán _tier cho scoredFlights trước khi gom nhóm
   const TIER_FLIGHT = hasHistory ? 0 : 3; // user_history=0 hoặc popular=3
   scoredFlights.forEach((f) => { f._tier = TIER_FLIGHT; });
+
+  // ── Bước 2b: Fallback sớm khi không tìm được flights theo preferences ───
+  // Nếu scoredFlights rỗng mà có preferredDestinations → chuyến bay khớp preferences không tồn tại
+  // → Lấy top popular flights để đảm bảo luôn có kết quả
+  if (scoredFlights.length === 0 && preferredDestinations.length > 0) {
+    try {
+      const { start, end } = monthRange;
+      const popularResult = await pool.query(
+        Q.SELECT_TOP_POPULAR_FLIGHTS(start, end, limit),
+        [start, end, limit],
+      );
+      if (popularResult.rows.length > 0) {
+        scoredFlights = popularResult.rows.map((r) => {
+          const f = formatFlight(r);
+          return {
+            ...f,
+            score:               0,
+            badges:              [{ label: "Tuyến phổ biến", color: "orange" }],
+            recommendation_type: "popular",
+            badge:               BADGE.POPULAR,
+            is_recommended:      false,
+            recommendation_reason: "popular",
+            filter_applied:      filter || "default",
+            _tier:               3,
+          };
+        });
+        scoredFlights.forEach((f) => { f._tier = 3; });
+        console.log("[Recommendation] Step 2b — used popular fallback (no scored flights), rows:", scoredFlights.length);
+      }
+    } catch (err) {
+      console.error("[Recommendation] Step 2b fallback error:", err.message);
+    }
+  }
 
   // ── Bước 3: Recommendation groups (time proximity, day pattern) ──────────────
   // 3a. Day pattern
