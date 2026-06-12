@@ -196,6 +196,7 @@ const formatFlights = async (rows, adults, children, infants) => Promise.all(
         available_seats:       r.available_seats,
         total_seats:           r.total_seats,
         base_price:            price,
+        original_price:        base,
         baggage_included_kg:   r.baggage_included_kg,
         carry_on_kg:           r.carry_on_kg,
         extra_baggage_price:   extraPrice,
@@ -205,7 +206,8 @@ const formatFlights = async (rows, adults, children, infants) => Promise.all(
           child_price:  Math.round(price * 0.75),
           infant_price: Math.round(price * 0.10),
         },
-        total_price: calcTotalPrice(price, adults, children, infants),
+        total_price:          calcTotalPrice(price, adults, children, infants),
+        original_total_price: calcTotalPrice(base, adults, children, infants),
       },
     };
   })
