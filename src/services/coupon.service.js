@@ -9,6 +9,9 @@ Các chức năng:
 ============================================================
 */
 
+const pool = require("../config/db");
+const Q = require("../queries/coupon.queries");
+
 const sanitizeCoupon = (row) => ({
   id:                   row.id,
   airline_id:           row.airline_id,
