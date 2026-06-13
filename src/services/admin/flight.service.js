@@ -1,4 +1,5 @@
-const pool = require("../../config/db");
+const pool               = require("../../config/db");
+const flightNotifService = require("../flight-notification.service");
 const QA = require("../../queries/airline.queries");
 const QAP = require("../../queries/airport.queries");
 const QF = require("../../queries/flight.queries");
@@ -7,7 +8,15 @@ const QS = require("../../queries/schedule.queries");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const VALID_STATUSES = ["scheduled", "delayed", "boarding", "departed", "arrived", "cancelled", "completed"];
+const VALID_STATUSES = [
+  "scheduled",
+  "delayed",
+  "boarding",
+  "departed",   
+  "arrived",
+  "cancelled",
+  "completed",
+];
 const VALID_CLASSES = ["economy", "business", "first"];
 
 const validateFlightInput = (data, isUpdate = false) => {
@@ -312,6 +321,7 @@ const updateFlight = async (flightId, data) => {
     const existing = await client.query(QF.FIND_FLIGHT_BY_ID, [flightId]);
     if (existing.rows.length === 0)
       throw new Error("Không tìm thấy chuyến bay");
+    const oldFlight = existing.rows[0];
 
     const fields = [];
     const values = [];
@@ -387,6 +397,7 @@ const updateFlight = async (flightId, data) => {
       );
     }
 
+    const oldSeatBaggage = {};
     if (seats && seats.length > 0) {
       for (const s of seats) {
         const existingSeat = await client.query(QF.FIND_FLIGHT_SEAT, [
@@ -395,6 +406,7 @@ const updateFlight = async (flightId, data) => {
         ]);
 
         if (existingSeat.rows.length > 0) {
+          oldSeatBaggage[s.class] = existingSeat.rows[0];
           const seatFields = [];
           const seatValues = [];
           let sidx = 1;
@@ -469,46 +481,46 @@ const updateFlight = async (flightId, data) => {
 
     await client.query("COMMIT");
 
-    // ── Gửi email thông báo sau COMMIT ──
-    const shouldNotify = departure_time || (gate !== undefined && gate !== null);
-    if (shouldNotify) {
-      try {
-        const { sendFlightStatusEmail } = require("../../utils/mailer");
-        const affectedBookings = await pool.query(
-          `SELECT b.contact_email, b.contact_name, b.booking_code
-           FROM bookings b
-           WHERE b.outbound_flight_id = $1
-             AND b.status IN ('confirmed', 'pending')`,
-          [flightId]
-        );
-
-        const fd = flightAfter;
-        for (const booking of affectedBookings.rows) {
-          if (!booking.contact_email) continue;
-
-          // Tạo message mô tả thay đổi
-          let changeMsg = '';
-          if (departure_time) changeMsg += `Giờ khởi hành mới: ${new Date(departure_time).toLocaleString('vi-VN', { timeZone: 'UTC' })}. `;
-          if (gate) changeMsg += `Cổng khởi hành mới: ${gate}. `;
-
-          sendFlightStatusEmail(booking.contact_email, {
-            contactName:    booking.contact_name || 'Hành khách',
-            bookingCode:    booking.booking_code,
-            flightNumber:   fd?.flight_number,
-            statusLabel:    departure_time ? 'Thay đổi giờ bay' : 'Thay đổi cổng khởi hành',
-            reason:         changeMsg.trim(),
-            departureTime:  departure_time || fd?.departure_time,
-            originCode:     fd?.departure_code,
-            destCode:       fd?.arrival_code,
-          }).catch(() => {});
-        }
-      } catch (notifyErr) {
-        console.error('[updateFlight notify]', notifyErr.message);
+    // Email notifications nếu có thay đổi quan trọng (fire-and-forget)
+    try {
+      if (data.gate !== undefined || data.terminal !== undefined) {
+        flightNotifService.notifyGateChange(
+          flightId, flightAfter.flight_number,
+          data.gate, oldFlight.gate || null,
+          data.terminal, data.reason || null
+        ).catch(e => console.error("[UpdateFlight] gate:", e.message));
       }
+
+      if (data.departure_time !== undefined || data.arrival_time !== undefined) {
+        flightNotifService.notifyTimeChange(
+          flightId, flightAfter.flight_number,
+          oldFlight.departure_time || null,
+          flightAfter.departure_time,
+          flightAfter.arrival_time,
+          data.reason || null
+        ).catch(e => console.error("[UpdateFlight] time:", e.message));
+      }
+
+      if (data.seats && data.seats.some(s =>
+        s.baggage_included_kg !== undefined || s.carry_on_kg !== undefined
+      )) {
+        flightNotifService.notifyBaggageChange(
+          flightId, flightAfter.flight_number,
+          data.seats.map(s => ({
+            class:           s.class,
+            old_baggage_kg:  oldSeatBaggage[s.class]?.baggage_included_kg ?? null,
+            new_baggage_kg:  s.baggage_included_kg,
+            new_carry_on_kg: s.carry_on_kg,
+          })),
+          data.reason || null
+        ).catch(e => console.error("[UpdateFlight] baggage:", e.message));
+      }
+    } catch (notifErr) {
+      console.error("[UpdateFlight] Notify error:", notifErr.message);
     }
 
     return {
-      message: "Cập nhật chuyến bay thành công",
+      message:   "Cập nhật chuyến bay thành công",
       flight_id: parseInt(flightId),
     };
   } catch (err) {
@@ -522,7 +534,7 @@ const updateFlight = async (flightId, data) => {
 /**
  * Chuyển trạng thái chuyến bay
  */
-const updateFlightStatus = async (flightId, status, reason = "") => {
+const updateFlightStatus = async (flightId, status, reason = "", extraData = {}) => {
   if (!VALID_STATUSES.includes(status)) {
     throw new Error(`status phải là: ${VALID_STATUSES.join(", ")}`);
   }
@@ -542,10 +554,10 @@ const updateFlightStatus = async (flightId, status, reason = "") => {
   // 3. Payload thông báo
   const statusLabels = {
     scheduled: "Đúng giờ",
-    delayed:   "Bị trễ",
-    boarding:  "Đang lên máy bay",
-    departed:  "Đã khởi hành",
-    arrived:   "Đã hạ cánh",
+    delayed: "Bị trễ",
+    boarding: "Đang lên máy bay",
+    departed: "Đã khởi hành",
+    arrived: "Đã hạ cánh",
     cancelled: "Đã hủy",
     completed: "Đã hoàn thành",
   };
@@ -598,10 +610,10 @@ const updateFlightStatus = async (flightId, status, reason = "") => {
 
       const statusLabels = {
         scheduled: "Đúng giờ",
-        delayed:   "Bị trễ",
-        boarding:  "Đang lên máy bay",
-        departed:  "Đã khởi hành",
-        arrived:   "Đã hạ cánh",
+        delayed: "Bị trễ",
+        boarding: "Đang lên máy bay",
+        departed: "Đã khởi hành",
+        arrived: "Đã hạ cánh",
         cancelled: "Đã hủy",
         completed: "Đã hoàn thành",
       };
@@ -615,18 +627,18 @@ const updateFlightStatus = async (flightId, status, reason = "") => {
 
         // Fire-and-forget — không block response
         sendFlightStatusEmail(booking.contact_email, {
-          contactName:   booking.contact_name,
-          bookingCode:   booking.booking_code,
-          flightNumber:  flight.flight_number,
-          airlineName:   fd.airline_name || "",
-          depCode:       fd.departure_code || "",
-          depCity:       fd.departure_city || "",
-          arrCode:       fd.arrival_code || "",
-          arrCity:       fd.arrival_city || "",
+          contactName: booking.contact_name,
+          bookingCode: booking.booking_code,
+          flightNumber: flight.flight_number,
+          airlineName: fd.airline_name || "",
+          depCode: fd.departure_code || "",
+          depCity: fd.departure_city || "",
+          arrCode: fd.arrival_code || "",
+          arrCity: fd.arrival_city || "",
           departureTime: fd.departure_time || flight.departure_time,
-          newStatus:     status,
-          statusLabel:   statusLabels[status] || status,
-          reason:        reason || "",
+          newStatus: status,
+          statusLabel: statusLabels[status] || status,
+          reason: reason || "",
         }).catch((e) => console.error("[AD-05 Email]", e.message));
       }
     } catch (emailErr) {
@@ -634,13 +646,27 @@ const updateFlightStatus = async (flightId, status, reason = "") => {
     }
   }
 
+    // Email notification (delayed/cancelled/boarding)
+  const emailResult = await flightNotifService.notifyStatusChange(
+    flightId, flight.flight_number, status,
+    {
+      delay_minutes:      extraData.delay_minutes      || null,
+      new_departure_time: extraData.new_departure_time || null,
+      gate:               extraData.gate               || null,
+      terminal:           extraData.terminal           || null,
+      boarding_time:      extraData.boarding_time      || null,
+      reason,
+    }
+  );
+
   return {
-    message: `Đã chuyển trạng thái chuyến bay thành "${status}"`,
-    flight_id: flight.id,
-    flight_number: flight.flight_number,
-    status: flight.status,
+    message:           `Đã chuyển trạng thái chuyến bay thành "${status}"`,
+    flight_id:         flight.id,
+    flight_number:     flight.flight_number,
+    status:            flight.status,
     affected_bookings: affectedBookings.rows.length,
-    notified_users: affectedBookings.rows.filter((b) => b.user_id).length,
+    notified_users:    affectedBookings.rows.filter((b) => b.user_id).length,
+    emails_sent:       emailResult.sent,
   };
 };
 
@@ -886,7 +912,15 @@ const toggleAirlineStatus = async (airlineId) => {
 // ══════════════════════════════════════════════════════
 
 const getBookings = async (params) => {
-  const { page = 1, limit = 10, status, trip_type, search, from_date, to_date } = params;
+  const {
+    page = 1,
+    limit = 10,
+    status,
+    trip_type,
+    search,
+    from_date,
+    to_date,
+  } = params;
   const offset = (parseInt(page) - 1) * parseInt(limit);
   const conditions = [];
   const values = [];
@@ -908,7 +942,9 @@ const getBookings = async (params) => {
     values.push(`%${search}%`);
   }
   if (from_date && to_date) {
-    conditions.push(`(b.created_at AT TIME ZONE '+07')::date BETWEEN $${idx} AND $${idx + 1}`);
+    conditions.push(
+      `(b.created_at AT TIME ZONE '+07')::date BETWEEN $${idx} AND $${idx + 1}`,
+    );
     idx += 2;
     values.push(from_date, to_date);
   }
@@ -974,7 +1010,7 @@ const getStatistics = async (params) => {
 
   if (from_date && to_date) {
     dateValues.push(from_date, to_date);
-    dateFilter  = `AND (created_at  AT TIME ZONE '+07')::date BETWEEN $1::date AND $2::date`;
+    dateFilter = `AND (created_at  AT TIME ZONE '+07')::date BETWEEN $1::date AND $2::date`;
     bDateFilter = `AND (b.created_at AT TIME ZONE '+07')::date BETWEEN $1::date AND $2::date`;
   }
 

@@ -194,11 +194,8 @@ const createBooking = async (data, userId = null) => {
       returnSeat = await checkAndGetSeatInfo(client, return_flight_id, return_seat_class, seatsNeeded);
     }
 
-    const outboundPrice = applyDemand(parseFloat(outboundSeat.base_price), outboundSeat.available_seats, outboundSeat.total_seats, outboundSeat.departure_time);
-    const returnPrice   = returnSeat ? applyDemand(parseFloat(returnSeat.base_price), returnSeat.available_seats, returnSeat.total_seats, returnSeat.departure_time) : 0;
-
-    const outboundTotal = calcTotalPrice(outboundPrice, a, c, i);
-    const returnTotal   = returnSeat ? calcTotalPrice(returnPrice, a, c, i) : 0;
+    const outboundTotal = calcTotalPrice(parseFloat(outboundSeat.base_price), a, c, i);
+    const returnTotal   = returnSeat ? calcTotalPrice(parseFloat(returnSeat.base_price), a, c, i) : 0;
 
     let baggageTotal = 0;
     const outboundPassengers = passengers.filter((p) => (p.flight_type || "outbound") === "outbound");
@@ -219,13 +216,8 @@ const createBooking = async (data, userId = null) => {
       baggageTotal += p._baggage_price;
     }
 
-    const seatExtraFee = parseFloat(data.seat_extra_fee) || 0;
-    const ancillaryFee = (data.ancillary_options || []).reduce(
-      (sum, opt) => sum + (Number(opt.unit_price || 0) * Number(opt.quantity || 1)), 0
-    );
-    // Lưu 1 giá duy nhất: tất cả gộp vào total_price
-    const totalPrice   = outboundTotal + returnTotal + baggageTotal + seatExtraFee + ancillaryFee;
-    const basePrice    = outboundPrice;
+    const totalPrice = outboundTotal + returnTotal + baggageTotal;
+    const basePrice  = parseFloat(outboundSeat.base_price);
 
     let bookingCode;
     let isUnique = false;
@@ -572,6 +564,136 @@ const cancelBooking = async (userId, bookingCode, reason = null) => {
 // Chạy định kỳ để hủy các booking ở trạng thái "pending"
 // đã quá thời gian giữ chỗ (30 phút) mà chưa thanh toán
 const expireHeldBookings = async () => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Tìm booking pending đã hết thời gian giữ ghế
+    const expired = await client.query(
+      `SELECT * FROM bookings
+       WHERE status = 'pending'
+         AND held_until < NOW()
+       FOR UPDATE SKIP LOCKED`
+    );
+
+    for (const booking of expired.rows) {
+      const seatsNeeded = booking.total_adults + booking.total_children;
+
+      // Hoàn ghế chuyến đi
+      await client.query(
+        `UPDATE flight_seats
+         SET available_seats = available_seats + $1, updated_at = NOW()
+         WHERE flight_id = $2 AND class = $3`,
+        [seatsNeeded, booking.outbound_flight_id, booking.outbound_seat_class]
+      );
+
+      // Hoàn ghế chuyến về (nếu khứ hồi)
+      if (booking.return_flight_id) {
+        await client.query(
+          `UPDATE flight_seats
+           SET available_seats = available_seats + $1, updated_at = NOW()
+           WHERE flight_id = $2 AND class = $3`,
+          [seatsNeeded, booking.return_flight_id, booking.return_seat_class]
+        );
+      }
+
+      // Đánh dấu booking là expired
+      await client.query(
+        `UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1`,
+        [booking.id]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    if (expired.rows.length > 0) {
+      console.log(`[Auto-expire] Đã hủy ${expired.rows.length} booking hết hạn`);
+    }
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("[Auto-expire] Lỗi:", err.message);
+  } finally {
+    client.release();
+  }
 };
 
-module.exports = { createBooking, getBookingDetail, getMyBookings, cancelBooking, expireHeldBookings };
+
+/**
+ * CẤP 2 — Auto-complete chuyến bay đã bay + hủy booking của chuyến cancelled
+ * Chạy mỗi phút qua cron trong app.js
+ */
+const autoCompleteFlights = async () => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1. Chuyển tất cả chuyến bay đã khởi hành sang "completed"
+    //    Buffer 3 tiếng — khớp với cấp 3 ở search query
+    const completedResult = await client.query(`
+      UPDATE flights
+      SET    status     = 'completed',
+             updated_at = NOW()
+      WHERE  departure_time < NOW() - INTERVAL '3 hours'
+        AND  status NOT IN ('cancelled', 'completed')
+      RETURNING id, flight_number
+    `);
+      // chỉ check chuyến bay //////// WARNING:
+    if (completedResult.rows.length > 0) {
+      console.log(
+        `[AutoComplete] Đã hoàn thành ${completedResult.rows.length} chuyến bay:`,
+        completedResult.rows.map(r => r.flight_number).join(", ")
+      );
+
+      // 2. Tự động expire các booking "pending" của chuyến đã completed
+      //    (user giữ ghế nhưng chưa thanh toán, chuyến đã bay → hủy luôn)
+      for (const flight of completedResult.rows) {
+        const expiredBookings = await client.query(`
+          SELECT id, total_adults, total_children,
+                 outbound_flight_id, outbound_seat_class,
+                 return_flight_id,   return_seat_class
+          FROM bookings
+          WHERE (outbound_flight_id = $1 OR return_flight_id = $1)
+            AND status = 'pending'
+        `, [flight.id]);
+
+        for (const booking of expiredBookings.rows) {
+          const seats = booking.total_adults + booking.total_children;
+
+          // Hoàn ghế chuyến đi
+          await client.query(`
+            UPDATE flight_seats
+            SET available_seats = available_seats + $1, updated_at = NOW()
+            WHERE flight_id = $2 AND class = $3
+          `, [seats, booking.outbound_flight_id, booking.outbound_seat_class]);
+
+          // Hoàn ghế chuyến về (nếu có)
+          if (booking.return_flight_id) {
+            await client.query(`
+              UPDATE flight_seats
+              SET available_seats = available_seats + $1, updated_at = NOW()
+              WHERE flight_id = $2 AND class = $3
+            `, [seats, booking.return_flight_id, booking.return_seat_class]);
+          }
+
+          // Đánh dấu booking là expired
+          await client.query(`
+            UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1
+          `, [booking.id]);
+        }
+
+        if (expiredBookings.rows.length > 0) {
+          console.log(`[AutoComplete] Đã expire ${expiredBookings.rows.length} booking pending của chuyến ${flight.flight_number}`);
+        }
+      }
+    }
+
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("[AutoComplete] Lỗi:", err.message);
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = { createBooking, getBookingDetail, getMyBookings, cancelBooking, expireHeldBookings, autoCompleteFlights };

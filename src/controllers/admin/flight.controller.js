@@ -50,13 +50,27 @@ const updateFlight = async (req, res) => {
  */
 const updateFlightStatus = async (req, res) => {
   try {
-    const { status, reason = "" } = req.body;
-    if (!status) return res.status(400).json({ error: "status là bắt buộc" });
+    const {
+      status,
+      reason = "",
+      delay_minutes,
+      new_departure_time,
+      gate,
+      terminal,
+      boarding_time,
+    } = req.body;
 
     const result = await adminFlightService.updateFlightStatus(
       req.params.id,
       status,
-      reason,  // Lý do delay/cancel → gửi kèm trong socket + email
+      reason,
+      {
+        delay_minutes,
+        new_departure_time,
+        gate,
+        terminal,
+        boarding_time,
+      },
     );
     res.json({ message: result.message, data: result });
   } catch (err) {
@@ -69,7 +83,7 @@ const updateFlightStatus = async (req, res) => {
  * Ẩn/hiện chuyến bay (soft delete)
  */
 const toggleFlightVisibility = async (req, res) => {
-   try {
+  try {
     const result = await adminFlightService.toggleFlightVisibility(
       req.params.id,
     );
@@ -99,7 +113,7 @@ const getBookings = async (req, res) => {
 const getBookingDetailAdmin = async (req, res) => {
   try {
     const result = await adminFlightService.getBookingDetailAdmin(
-           req.params.id,
+      req.params.id,
     );
     res.json({ message: "Lấy chi tiết booking thành công", data: result });
   } catch (err) {
@@ -160,7 +174,9 @@ const getSchedules = async (req, res) => {
 const createSchedule = async (req, res) => {
   try {
     const result = await adminFlightService.createSchedule(req.body);
-    res.status(201).json({ message: "Tạo lịch bay định kỳ thành công", data: result });
+    res
+      .status(201)
+      .json({ message: "Tạo lịch bay định kỳ thành công", data: result });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -174,11 +190,13 @@ const updateScheduleStatus = async (req, res) => {
   try {
     const { is_active } = req.body;
     if (is_active === undefined) {
-      return res.status(400).json({ error: "is_active là bắt buộc (true/false)" });
+      return res
+        .status(400)
+        .json({ error: "is_active là bắt buộc (true/false)" });
     }
     const result = await adminFlightService.updateScheduleStatus(
       req.params.id,
-      Boolean(is_active)
+      Boolean(is_active),
     );
     res.json({ message: result.message, data: result });
   } catch (err) {

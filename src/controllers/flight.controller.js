@@ -1,10 +1,17 @@
 const flightService = require("../services/flight.service");
 const { normalizeLocale } = require("../utils/locale");
+const recommendationService = require("../services/recommendation.service");
 
 /** GET /api/flights/search */
 const searchFlights = async (req, res) => {
+  console.log("REQ.USER =", req.user);
+
   try {
-    const result = await flightService.searchFlights(req.query);
+    const result = await flightService.searchFlights({
+      ...req.query,
+      userId: req.user?.id || null,
+      sessionId: req.headers["x-session-id"] || null,
+    });
     res.json({ message: "Tìm kiếm chuyến bay thành công", data: result });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -127,37 +134,32 @@ const getSeatMap = async (req, res) => {
 
 /**
  * GET /api/bookings/recommendations
- * 
- * Controller chính xử lý request 
- * 
+ *
+ * Controller chính xử lý request
+ *
  * - Trả về dữ liệu sạch, dễ render 3 card (HAN + SGN, giá, nút Chọn vé)
  */
 const getFlightRecommendations = async (req, res) => {
   try {
-    // Lấy tham số từ query string (?from=SGN&to=HAN&limit=10)
-    const { from, to, limit = 10 } = req.query;
+    // Lấy tham số từ query string (?from=SGN&to=HAN&limit=10&filter=cheapest)
+    const { from, to, limit = 10, filter = null } = req.query;
 
-    // === LẤY USER ID (hỗ trợ cả đăng nhập JWT lẫn test qua query) ===
     const userId = req.user?.id || req.query.userId || null;
+    const sessionId =
+      req.headers["x-session-id"] || req.query.session_id || null;
 
-    // Validation
-    if (!from || !to) {
-      return res.status(400).json({ 
-        error: "Thiếu tham số 'from' hoặc 'to' (mã sân bay)" 
-      });
-    }
-
-    const recommendations = await flightService.recommendFlights({
-      userId: userId,
-      fromAirport: from.toUpperCase(),
-      toAirport: to.toUpperCase(),
-      limit: parseInt(limit) || 10,
-      lang: req.query.lang,
+    const recommendations = await recommendationService.getRecommendations({
+      userId,
+      sessionId,
+      fromAirport: from   ? from.toUpperCase() : null,
+      toAirport:   to     ? to.toUpperCase()   : null,
+      limit:       parseInt(limit) || 10,
+      filter:      filter || null,
     });
 
-    res.json({ 
-      message: "Lấy gợi ý chuyến bay thành công", 
-      data: recommendations 
+    res.json({
+      message: "Lấy gợi ý chuyến bay thành công",
+      data: recommendations,
     });
   } catch (err) {
     // Log lỗi chi tiết để debug
@@ -167,11 +169,10 @@ const getFlightRecommendations = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Lỗi server khi lấy gợi ý chuyến bay. Vui lòng thử lại sau.",
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined,
+      error: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
   }
 };
-
 
 /**
  * GET /api/flights/:id/position

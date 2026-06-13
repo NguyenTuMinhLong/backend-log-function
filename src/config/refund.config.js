@@ -171,6 +171,13 @@ const NOTIFICATIONS = {
 
     // Airline cancellation
     sendFlightCancelledNotifications: true,
+
+    // Flight notifications
+    sendFlightStatusChangeNotifications: true,
+    sendFlightDelayNotifications: true,
+    sendFlightGateChangeNotifications: true,
+    sendFlightTimeChangeNotifications: true,
+    sendFlightBaggageChangeNotifications: true,
   },
 
   // Admin dashboard notification

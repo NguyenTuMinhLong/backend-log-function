@@ -19,18 +19,12 @@ function loadAdminFlightService(poolMock) {
   return require(servicePath);
 }
 
-test("createFlight: tu dong reset sequence va retry khi flights_pkey bi trung", async () => {
+test("createFlight: trả lỗi duplicate key khi flights_pkey bị trùng", async () => {
   let connectCalls = 0;
   let insertCalls = 0;
-  let resyncCalls = 0;
 
   const poolMock = {
     query: async (sql) => {
-      if (String(sql).includes("pg_get_serial_sequence")) {
-        resyncCalls += 1;
-        return { rows: [{ setval: 101 }] };
-      }
-
       throw new Error(`Unexpected pool.query: ${sql}`);
     },
     connect: async () => {
@@ -54,17 +48,10 @@ test("createFlight: tu dong reset sequence va retry khi flights_pkey bi trung", 
 
           if (normalized.startsWith("INSERT INTO flights")) {
             insertCalls += 1;
-
-            if (insertCalls === 1) {
-              const err = new Error('duplicate key value violates unique constraint "flights_pkey"');
-              err.code = "23505";
-              err.constraint = "flights_pkey";
-              throw err;
-            }
-
-            return {
-              rows: [{ id: 101, flight_number: "VN889", status: "scheduled" }],
-            };
+            const err = new Error('duplicate key value violates unique constraint "flights_pkey"');
+            err.code = "23505";
+            err.constraint = "flights_pkey";
+            throw err;
           }
 
           if (normalized.startsWith("INSERT INTO flight_seats")) {
@@ -80,32 +67,30 @@ test("createFlight: tu dong reset sequence va retry khi flights_pkey bi trung", 
 
   const adminFlightService = loadAdminFlightService(poolMock);
 
-  const result = await adminFlightService.createFlight({
-    flight_number: "VN889",
-    airline_id: 1,
-    departure_airport_id: 10,
-    arrival_airport_id: 11,
-    departure_time: "2026-04-21T19:13:00.000Z",
-    arrival_time: "2026-04-21T20:13:00.000Z",
-    duration_minutes: 60,
-    seats: [
-      { class: "economy", total_seats: 50, base_price: 1000000, extra_baggage_options: { 0: 0, 5: 50000, 10: 90000, 20: 160000 } },
-      { class: "business", total_seats: 20, base_price: 2000000, extra_baggage_options: { 0: 0, 5: 70000, 10: 130000, 20: 240000 } },
-      { class: "first", total_seats: 10, base_price: 3000000, extra_baggage_options: { 0: 0, 5: 90000, 10: 170000, 20: 320000 } },
-    ],
-  });
+  await assert.rejects(
+    () =>
+      adminFlightService.createFlight({
+        flight_number: "VN889",
+        airline_id: 1,
+        departure_airport_id: 10,
+        arrival_airport_id: 11,
+        departure_time: "2026-04-21T19:13:00.000Z",
+        arrival_time: "2026-04-21T20:13:00.000Z",
+        duration_minutes: 60,
+        seats: [
+          { class: "economy", total_seats: 50, base_price: 1000000, extra_baggage_options: { 0: 0, 5: 50000, 10: 90000, 20: 160000 } },
+          { class: "business", total_seats: 20, base_price: 2000000, extra_baggage_options: { 0: 0, 5: 70000, 10: 130000, 20: 240000 } },
+          { class: "first", total_seats: 10, base_price: 3000000, extra_baggage_options: { 0: 0, 5: 90000, 10: 170000, 20: 320000 } },
+        ],
+      }),
+    /duplicate key value violates unique constraint "flights_pkey"/
+  );
 
-  assert.equal(connectCalls, 2);
-  assert.equal(insertCalls, 2);
-  assert.equal(resyncCalls, 1);
-  assert.deepEqual(result, {
-    flight_id: 101,
-    flight_number: "VN889",
-    status: "scheduled",
-  });
+  assert.equal(connectCalls, 1);
+  assert.equal(insertCalls, 1);
 });
 
-test("createFlight: seat moi khong nhap gia hanh ly them thi mac dinh bang 0", async () => {
+test("createFlight: seat moi khong nhap gia hanh ly them thi dùng mặc định theo hạng ghế", async () => {
   const insertedSeatValues = [];
 
   const poolMock = {
@@ -190,11 +175,5 @@ test("createFlight: seat moi khong nhap gia hanh ly them thi mac dinh bang 0", a
   assert.equal(economySeatValues[4], 1200000);
   assert.equal(economySeatValues[5], 23);
   assert.equal(economySeatValues[6], 7);
-  assert.equal(economySeatValues[7], 0);
-  assert.deepEqual(JSON.parse(economySeatValues[8]), {
-    0: 0,
-    5: 0,
-    10: 0,
-    20: 0,
-  });
+  assert.equal(economySeatValues[7], 250000);
 });

@@ -1,6 +1,7 @@
 // src/services/flight.service.js
 const pool = require('../config/db');
 const QF = require('../queries/flight.queries');
+const RQ = require('../queries/recommendation.queries');
 
 // Lấy chuyến bay đa dạng (không cần from/to cụ thể) — dùng cho Browse + homepage
 const browseFlights = async (limit = 40, lang) => {
@@ -66,51 +67,42 @@ const getFlightsByAirline = async (airlineCode, seatClass = 'economy', lang) => 
   return formatFlights(rows, 1, 0, 0, normalizeLocale(lang));
 };
 
-const recommendFlights = async ({ userId, fromAirport, toAirport, limit = 15, lang }) => {
-  const query = `
-    SELECT
-      f.id              AS flight_id,
-      f.flight_number,
-      f.departure_time,
-      f.arrival_time,
-      f.duration_minutes,
-      f.status,
-      al.id             AS airline_id,
-      al.code           AS airline_code,
-      al.name           AS airline_name,
-      al.logo_url       AS airline_logo,
-      al.logo_dark      AS airline_logo_dark,
-      al.logo_light     AS airline_logo_light,
-      dep.id            AS departure_airport_id,
-      dep.code          AS departure_code,
-      dep.city          AS departure_city,
-      dep.name          AS departure_airport_name,
-      arr.id            AS arrival_airport_id,
-      arr.code          AS arrival_code,
-      arr.city          AS arrival_city,
-      arr.name          AS arrival_airport_name,
-      fs.class          AS seat_class,
-      fs.total_seats,
-      fs.available_seats,
-      fs.base_price,
-      fs.baggage_included_kg,
-      fs.carry_on_kg,
-      fs.extra_baggage_price
-    FROM flights f
-    JOIN airlines     al  ON al.id  = f.airline_id
-    JOIN airports     dep ON dep.id = f.departure_airport_id
-    JOIN airports     arr ON arr.id = f.arrival_airport_id
-    LEFT JOIN flight_seats fs ON fs.flight_id = f.id AND fs.class = 'economy'
-    WHERE f.status = 'scheduled'
-      AND f.is_active = true
-      AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
-      AND dep.code = $2
-      AND arr.code = $3
-    ORDER BY f.departure_time ASC
-    LIMIT $1`;
-
-  const { rows } = await pool.query(query, [limit, fromAirport, toAirport]);
-  return formatFlights(rows, 1, 0, 0, normalizeLocale(lang));
+/**
+ * Lưu lịch sử tìm kiếm (fire-and-forget, không block search)
+ */
+const saveSearchHistory = async ({
+  userId,
+  sessionId,
+  departureCode,
+  arrivalCode,
+  departureDate,
+  returnDate,
+  seatClass,
+  adults,
+  children,
+  infants,
+  resultsCount,
+  minPriceFound,
+}) => {
+  try {
+    await pool.query(RQ.INSERT_SEARCH_HISTORY, [
+      userId || null,
+      sessionId || null,
+      departureCode,
+      arrivalCode,
+      departureDate,
+      returnDate || null,
+      seatClass,
+      adults,
+      children,
+      infants,
+      resultsCount || 0,
+      minPriceFound || null,
+    ]);
+  } catch (err) {
+    // Không để lỗi log làm hỏng search
+    console.error("[SearchHistory] Lỗi lưu lịch sử:", err.message);
+  }
 };
 
 const formatDuration = (minutes) => {
@@ -323,6 +315,35 @@ const searchFlights = async (params) => {
     });
     returnFlights = await formatFlights(returnRows, a, c, i, locale);
   }
+
+  // Fire-and-forget lưu lịch sử tìm kiếm
+  saveSearchHistory({
+    userId: params.userId || null,
+    sessionId: params.sessionId || null,
+
+    departureCode: departure_code,
+    arrivalCode: arrival_code,
+
+    departureDate: departure_date,
+    returnDate: return_date || null,
+
+    seatClass: seat_class,
+
+    adults: a,
+    children: c,
+    infants: i,
+
+    resultsCount: outboundFlights.length,
+
+    minPriceFound:
+      outboundFlights.length > 0
+        ? Math.min(
+            ...outboundFlights.map((f) => Number(f.seat?.base_price || 0)),
+          )
+        : null,
+  }).catch((err) => {
+    console.error("[SearchHistory]", err.message);
+  });
 
   return {
     outbound_flights: outboundFlights,
@@ -818,7 +839,7 @@ const getPriceCalendar = async (params = {}) => {
 module.exports = {
   browseFlights,
   getFlightsByAirline,
-  recommendFlights,
+  saveSearchHistory,
   searchFlights,
   getAirports,
   getAirlines,

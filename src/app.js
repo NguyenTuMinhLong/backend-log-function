@@ -15,8 +15,7 @@ const refundRoutes = require('./routes/refund.routes');
 const dateChangeRoutes = require('./routes/date-change.routes');
 const seatRoutes = require('./routes/seat.routes');
 const checkinRoutes = require('./routes/checkin.routes');
-
-const { expireHeldBookings }   = require("./services/booking.service");
+const { expireHeldBookings, autoCompleteFlights } = require("./services/booking.service");
 const { autoGenerateFlights }  = require("./services/admin/flight.service");
 const { checkAndAlertSLABreach } = require("./services/notification.service");
 const { runBatch: autoFlightBatch } = require("./services/admin/auto-flight.service");
@@ -80,9 +79,10 @@ setInterval(async () => {
   }
 
   isExpiringHeldBookings = true;
-  
+
   try {
     await expireHeldBookings();
+    await autoCompleteFlights();
   } catch (err) {
     console.error("[Auto-expire] Unhandled error:", err.message);
   } finally {

@@ -1,3 +1,5 @@
+"use strict";
+
 /*
 ============================================================
 ANCILLARY SERVICE - Dịch vụ bổ sung (meal, baggage, insurance...)
@@ -11,6 +13,9 @@ Các loại dịch vụ:
 - wifi: Wifi trên máy bay
 ============================================================
 */
+
+const pool = require("../config/db");
+const Q    = require("../queries/ancillary.queries");
 
 // Helpers
 
