@@ -118,7 +118,7 @@ const SELECT_FLIGHTS_BY_DAY_PATTERN = (
     AND fs.available_seats > 0
     AND DATE(f.departure_time) = ANY($1::date[])
     ${whereExtra}
-    AND f.departure_time > NOW()
+    AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
   ORDER BY f.departure_time
   LIMIT $2
 `;
@@ -184,6 +184,7 @@ const SELECT_FLIGHTS_FOR_TIME_GROUPING = (preferredRoutes = [], preferredDestina
     AND f.is_active = TRUE
     AND fs.available_seats > 0
     AND f.departure_time BETWEEN $1::TIMESTAMP AND $2::TIMESTAMP
+    AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
     ${whereExtra}
   ORDER BY f.departure_time
   LIMIT $3
@@ -282,6 +283,7 @@ const SELECT_FLIGHTS_BY_USER_PATTERN = (
     AND f.is_active = TRUE
     AND fs.available_seats > 0
     AND f.departure_time BETWEEN $${6}::TIMESTAMP AND $${7}::TIMESTAMP
+    AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
   ORDER BY score DESC, f.departure_time ASC
   LIMIT $${paramCount}
 `;
@@ -341,6 +343,7 @@ const SELECT_TOP_POPULAR_FLIGHTS = (start, end, limit, preferredDestinations = [
     AND f.is_active = TRUE
     AND fs.available_seats > 0
     AND f.departure_time BETWEEN $1::TIMESTAMP AND $2::TIMESTAMP
+    AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
     ${destFilter}
   GROUP BY f.id, f.flight_number, f.departure_time, f.arrival_time,
            f.duration_minutes, f.status, al.id, al.code, al.name,
@@ -579,7 +582,7 @@ const SELECT_SCORED_FLIGHTS = (
   WHERE f.status = 'scheduled'
     AND f.is_active = TRUE
     AND fs.available_seats > 0
-    AND f.departure_time > NOW()
+    AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
     ${depCondition}
     ${arrCondition}
     ${extraFilter}
