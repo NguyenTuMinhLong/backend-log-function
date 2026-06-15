@@ -177,14 +177,6 @@ const createBooking = async (data, userId = null) => {
       if (emailCheck.rows.length > 0) {
         throw new Error('Email này đã được đăng ký. Vui lòng đăng nhập hoặc dùng email khác.');
       }
-      if (contact_phone) {
-        const phoneCheck = await client.query(
-          `SELECT id FROM users WHERE phone = $1`, [contact_phone.replace(/\s/g,'')]
-        );
-        if (phoneCheck.rows.length > 0) {
-          throw new Error('Số điện thoại này đã được đăng ký. Vui lòng đăng nhập hoặc dùng số khác.');
-        }
-      }
     }
 
     const outboundSeat = await checkAndGetSeatInfo(client, outbound_flight_id, outbound_seat_class, seatsNeeded);
