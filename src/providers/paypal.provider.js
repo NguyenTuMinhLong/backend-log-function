@@ -216,6 +216,13 @@ const createPayPalOrder = async (payment) => {
           },
         },
       ],
+      application_context: {
+        brand_name: config.paypal.brandName,
+        shipping_preference: 'NO_SHIPPING',
+        user_action: 'PAY_NOW',
+        return_url: returnUrl,
+        cancel_url: cancelUrl,
+      },
     },
   }).catch(async (err) => {
     console.error('[PayPal Debug] createOrder failed', {
