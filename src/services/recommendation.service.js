@@ -323,8 +323,12 @@ const getRecommendations = async ({
 
   const scoredQuery = Q.SELECT_SCORED_FLIGHTS(extraOrder, extraFilter, fromAirport, toAirport, preferredRoutes);
 
+  // User chưa có lịch sử (hasHistory=false) → lấy nhiều ứng viên hơn để đa dạng hoá
+  // tuyến ở bước dưới, tránh tình trạng toàn bộ gợi ý đều cùng 1 tuyến (vd SGN→HAN).
+  const queryLimit = hasHistory ? limit : limit * 5;
+
   const scoredResult = await pool.query(scoredQuery, [
-    limit,
+    queryLimit,
     preferredDestinations.length > 0 ? preferredDestinations : [""],
     preferredDepartures.length > 0 ? preferredDepartures : [""],
     avgSpending || 0,
@@ -345,7 +349,7 @@ const getRecommendations = async ({
     "preferredDOW:", preferredDOW,
     "preferredRoutes:", preferredRoutes);
 
-  const scoredFlights = scoredResult.rows.map((r, i) => {
+  let scoredFlights = scoredResult.rows.map((r, i) => {
     const f = formatFlight(r);
     const score = parseInt(r.score, 10) || 0;
     const hour  = getLocalHour(f.departure_time);
@@ -391,6 +395,29 @@ const getRecommendations = async ({
   });
 
   console.log("[Recommendation] Step 2 — scoredFlights:", scoredFlights.length);
+
+  // ── Bước 2a: Đa dạng hoá tuyến cho user chưa có lịch sử ─────────────────────
+  // Không để 1 tuyến (vd SGN→HAN) chiếm hết danh sách gợi ý — lấy round-robin
+  // mỗi tuyến 1 chuyến trước, dư slot mới lấy chuyến thứ 2 của từng tuyến...
+  if (!hasHistory && scoredFlights.length > limit) {
+    const byRoute = new Map();
+    scoredFlights.forEach((f) => {
+      const key = `${f.departure.code}→${f.arrival.code}`;
+      if (!byRoute.has(key)) byRoute.set(key, []);
+      byRoute.get(key).push(f);
+    });
+    const routeGroups = Array.from(byRoute.values());
+    const diversified = [];
+    for (let i = 0; diversified.length < limit && routeGroups.some((g) => g[i]); i++) {
+      for (const g of routeGroups) {
+        if (g[i]) diversified.push(g[i]);
+        if (diversified.length >= limit) break;
+      }
+    }
+    console.log("[Recommendation] Step 2a — diversified routes:", byRoute.size,
+      "→ scoredFlights:", scoredFlights.length, "→", diversified.length);
+    scoredFlights = diversified;
+  }
 
   // Gán _tier cho scoredFlights trước khi gom nhóm
   const TIER_FLIGHT = hasHistory ? 0 : 3; // user_history=0 hoặc popular=3

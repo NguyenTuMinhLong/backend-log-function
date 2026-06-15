@@ -525,8 +525,10 @@ const SELECT_SCORED_FLIGHTS = (
   preferredRoutes = [],
 ) => {
   // Parameterized to prevent SQL injection (was: template literals)
-  const depCondition = fromAirport ? `AND dep.code = $9` : "";
-  const arrCondition = toAirport   ? `AND arr.code = $10` : "";
+  // Luôn tham chiếu $9/$10 (kể cả khi null) để khớp số lượng params truyền vào,
+  // tránh lỗi "bind message supplies N parameters, but prepared statement requires M"
+  const depCondition = `AND ($9::text  IS NULL OR dep.code = $9)`;
+  const arrCondition = `AND ($10::text IS NULL OR arr.code = $10)`;
 
   return `
   SELECT
