@@ -5,10 +5,18 @@
  * Được dùng bởi: payment.service.js
  */
 
+// total_price trả về = b.total_price (vé + hành lý) + tổng ancillary đã chọn
+// (bảo hiểm, phòng chờ, wifi, suất ăn...) để khớp với "Tổng tiền" hiển thị
+// cho khách (grand_total trong getBookingDetail) — dùng cho voucher min_order,
+// tính discount và amount thanh toán thực tế.
 const SELECT_BOOKING_FOR_PAYMENT = (lockRow) =>
   `SELECT
      b.id, b.booking_code, b.user_id,
-     b.total_price, b.status, b.held_until, b.contact_email,
+     b.total_price + COALESCE((
+       SELECT SUM(ba.total_price) FROM booking_ancillaries ba
+       WHERE ba.booking_id = b.id AND ba.status != 'cancelled'
+     ), 0) AS total_price,
+     b.status, b.held_until, b.contact_email,
      f.airline_id AS outbound_airline_id
    FROM bookings b
    JOIN flights f ON f.id = b.outbound_flight_id

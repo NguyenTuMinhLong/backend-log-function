@@ -172,7 +172,7 @@ const getBookingForPayment = async (client, bookingCode, userId, lockRow = false
     throw new Error("Bạn không có quyền thao tác với booking này");
   }
 
-  // total_price đã bao gồm tất cả (vé + hành lý + seat fee + ancillary)
+  // total_price đã bao gồm vé + hành lý + ancillary (xem SELECT_BOOKING_FOR_PAYMENT)
   return booking;
 };
 
