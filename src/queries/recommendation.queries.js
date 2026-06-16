@@ -52,8 +52,29 @@ const SELECT_DAYS_IN_MONTH = `
 
 // ─────────────────────────────────────────────
 // LUỒNG 1: Chuyến bay vào ngày trùng topDayOfWeek trong tháng
+// preferredRoutes: mảng route_key dạng 'SGN→HAN'
+// preferredDestinations: mảng arr_code
+// preferredDepartures: mảng dep_code
 // ─────────────────────────────────────────────
-const SELECT_FLIGHTS_BY_DAY_PATTERN = `
+const SELECT_FLIGHTS_BY_DAY_PATTERN = (
+  preferredRoutes = [],
+  preferredDestinations = [],
+  preferredDepartures = [],
+) => {
+  // dep ∈ preferredDepartures AND arr ∈ preferredDestinations (AND route khớp nếu có)
+  const depDestCondition =
+    preferredDepartures.length > 0 && preferredDestinations.length > 0
+      ? `dep.code = ANY($${3}::text[]) AND arr.code = ANY($${4}::text[])`
+      : (preferredDestinations.length > 0
+        ? `arr.code = ANY($${3}::text[])` : "");
+
+  const routeCondition = preferredRoutes.length > 0
+    ? `(dep.code || '→' || arr.code) = ANY($${5}::text[])` : "";
+
+  const conditions = [depDestCondition, routeCondition].filter(Boolean).join(" AND ");
+  const whereExtra = conditions ? ` AND ${conditions}` : "";
+
+  return `
   SELECT
     f.id,
     f.flight_number,
@@ -96,15 +117,32 @@ const SELECT_FLIGHTS_BY_DAY_PATTERN = `
     AND f.is_active = TRUE
     AND fs.available_seats > 0
     AND DATE(f.departure_time) = ANY($1::date[])
+    ${whereExtra}
     AND f.departure_time > NOW()
   ORDER BY f.departure_time
   LIMIT $2
 `;
+};
 
 // ─────────────────────────────────────────────
-// LUỒNG 2: Tất cả chuyến bay trong khoảng tháng
+// LUỒNG 2: Tất cả chuyến bay trong khoảng tháng, lọc theo preferred routes
+// preferredRoutes: mảng route_key dạng 'SGN→HAN'
 // ─────────────────────────────────────────────
-const SELECT_FLIGHTS_FOR_TIME_GROUPING = `
+const SELECT_FLIGHTS_FOR_TIME_GROUPING = (preferredRoutes = [], preferredDestinations = [], preferredDepartures = []) => {
+  const routeCondition =
+    preferredRoutes.length > 0
+      ? `(dep.code || '→' || arr.code) = ANY($${4}::text[])` : "";
+
+  const depDestCondition =
+    preferredDepartures.length > 0 && preferredDestinations.length > 0
+      ? `dep.code = ANY($${5}::text[]) AND arr.code = ANY($${6}::text[])`
+      : (preferredDestinations.length > 0
+        ? `arr.code = ANY($${5}::text[])` : "");
+
+  const conditions = [routeCondition, depDestCondition].filter(Boolean).join(" AND ");
+  const whereExtra = conditions ? ` AND ${conditions}` : "";
+
+  return `
   SELECT
     f.id,
     f.flight_number,
@@ -146,9 +184,11 @@ const SELECT_FLIGHTS_FOR_TIME_GROUPING = `
     AND f.is_active = TRUE
     AND fs.available_seats > 0
     AND f.departure_time BETWEEN $1::TIMESTAMP AND $2::TIMESTAMP
+    ${whereExtra}
   ORDER BY f.departure_time
   LIMIT $3
 `;
+};
 
 // ─────────────────────────────────────────────
 // LUỒNG 3: Pattern địa điểm + ngày + giờ từ lịch sử booking
@@ -174,9 +214,26 @@ const SELECT_USER_HISTORY_PATTERN = `
 
 // ─────────────────────────────────────────────
 // LUỒNG 3: Chuyến bay phù hợp pattern cá nhân
-// score = địa điểm*5 + ngày*3 + giờ*2
+// score = địa điểm×5 + ngày×3 + giờ×2 (theo spec)
+// preferredDOWs: mảng int[], preferredHours: mảng int[]
 // ─────────────────────────────────────────────
-const SELECT_FLIGHTS_BY_USER_PATTERN = `
+const SELECT_FLIGHTS_BY_USER_PATTERN = (
+  preferredDestinations,
+  preferredDepartures,
+  preferredDOWs   = [],
+  preferredHours  = [],
+  start,
+  end,
+  limit,
+) => {
+  const dowCondition   = preferredDOWs.length > 0
+    ? `((EXTRACT(DOW FROM f.departure_time) + 6) % 7) = ANY($${4}::int[])` : "TRUE";
+  // preferredHours là giờ local VN (14) → UTC hour = 7 → convert UTC→VN: +7 % 24
+  const hourCondition = preferredHours.length > 0
+    ? `((EXTRACT(HOUR FROM f.departure_time) + 7) % 24) = ANY($${5}::int[])` : "TRUE";
+  const paramCount = 7; // total positional params: $1..$7
+
+  return `
   SELECT
     f.id,
     f.flight_number,
@@ -210,9 +267,9 @@ const SELECT_FLIGHTS_BY_USER_PATTERN = `
     h.multiplier        AS holiday_multiplier,
 
     (
-      CASE WHEN arr.code = ANY($2) AND dep.code = ANY($3) THEN 5 ELSE 0 END
-      + CASE WHEN EXTRACT(DOW FROM f.departure_time) = ANY($4::int[]) THEN 3 ELSE 0 END
-      + CASE WHEN EXTRACT(HOUR FROM f.departure_time)::INT = ANY($5::int[]) THEN 2 ELSE 0 END
+      CASE WHEN arr.code = ANY($${1}) AND dep.code = ANY($${2}) THEN 5 ELSE 0 END
+      + CASE WHEN ${dowCondition} THEN 3 ELSE 0 END
+      + CASE WHEN ${hourCondition} THEN 2 ELSE 0 END
     ) AS score
 
   FROM flights f
@@ -224,15 +281,21 @@ const SELECT_FLIGHTS_BY_USER_PATTERN = `
   WHERE f.status = 'scheduled'
     AND f.is_active = TRUE
     AND fs.available_seats > 0
-    AND f.departure_time BETWEEN $6::TIMESTAMP AND $7::TIMESTAMP
+    AND f.departure_time BETWEEN $${6}::TIMESTAMP AND $${7}::TIMESTAMP
   ORDER BY score DESC, f.departure_time ASC
-  LIMIT $8
+  LIMIT $${paramCount}
 `;
+};
 
 // ─────────────────────────────────────────────
 // FALLBACK: Top popular flights
 // ─────────────────────────────────────────────
-const SELECT_TOP_POPULAR_FLIGHTS = `
+const SELECT_TOP_POPULAR_FLIGHTS = (start, end, limit, preferredDestinations = []) => {
+  const destFilter = preferredDestinations.length > 0
+    ? `AND arr.code = ANY($${4}::text[])`
+    : "";
+
+  return `
   SELECT
     f.id,
     f.flight_number,
@@ -278,6 +341,7 @@ const SELECT_TOP_POPULAR_FLIGHTS = `
     AND f.is_active = TRUE
     AND fs.available_seats > 0
     AND f.departure_time BETWEEN $1::TIMESTAMP AND $2::TIMESTAMP
+    ${destFilter}
   GROUP BY f.id, f.flight_number, f.departure_time, f.arrival_time,
            f.duration_minutes, f.status, al.id, al.code, al.name,
            al.logo_url, al.logo_dark, al.logo_light,
@@ -289,6 +353,7 @@ const SELECT_TOP_POPULAR_FLIGHTS = `
   ORDER BY booking_count DESC, f.departure_time ASC
   LIMIT $3
 `;
+};
 
 // ─────────────────────────────────────────────
 // FALLBACK: Top searched routes
@@ -406,7 +471,7 @@ const SELECT_BOOKING_HISTORY_PREFERENCES = `
     dep.code                                      AS dep_code,
     arr.code                                      AS arr_code,
     (dep.code || '→' || arr.code)                AS route_key,
-    AVG(EXTRACT(HOUR FROM f.departure_time))     AS avg_dep_hour,
+    AVG(EXTRACT(HOUR FROM f.departure_time))::INT AS avg_dep_hour,
     MODE() WITHIN GROUP (
       ORDER BY EXTRACT(DAY FROM f.departure_time)::INT
     )                                             AS preferred_day,
@@ -456,8 +521,9 @@ const SELECT_SCORED_FLIGHTS = (
   toAirport = null,
   preferredRoutes = [],
 ) => {
-  const depCondition = fromAirport ? `AND dep.code = '${fromAirport}'` : "";
-  const arrCondition = toAirport   ? `AND arr.code = '${toAirport}'`   : "";
+  // Parameterized to prevent SQL injection (was: template literals)
+  const depCondition = fromAirport ? `AND dep.code = $9` : "";
+  const arrCondition = toAirport   ? `AND arr.code = $10` : "";
 
   return `
   SELECT
@@ -493,14 +559,16 @@ const SELECT_SCORED_FLIGHTS = (
     h.multiplier        AS holiday_multiplier,
     (
       -- Fix (c): Route cụ thể khớp hoàn toàn dep+arr → +60 điểm cao nhất
-      CASE WHEN (dep.code || '→' || arr.code) = ANY($7::text[]) THEN 60 ELSE 0 END
+      CASE WHEN (dep.code || '→' || arr.code) = ANY($6::text[]) THEN 60 ELSE 0 END
       -- Chỉ điểm đến khớp khi không có route cụ thể khớp (tránh trùng)
-      + CASE WHEN arr.code = ANY($2) AND (dep.code || '→' || arr.code) != ALL(COALESCE($7::text[], ARRAY[]::text[])) THEN 50 ELSE 0 END
-      + CASE WHEN ABS(EXTRACT(HOUR FROM f.departure_time) - $3::NUMERIC) <= 2 THEN 30 ELSE 0 END
+      + CASE WHEN arr.code = ANY($2) AND (dep.code || '→' || arr.code) != ALL(COALESCE($6::text[], ARRAY[]::text[])) THEN 50 ELSE 0 END
+      + CASE WHEN dep.code = ANY($3) THEN 20 ELSE 0 END
+      + CASE WHEN $5::int[] <> ARRAY[]::int[] AND EXTRACT(DAY FROM f.departure_time)::INT = ANY($5::int[]) THEN 40 ELSE 0 END
+      -- PostgreSQL DOW: 0=Sun,...,6=Sat → chuyển về JS convention: 0=Mon,...,6=Sun
+      + CASE WHEN $7::int[] <> ARRAY[]::int[] AND ((EXTRACT(DOW FROM f.departure_time) + 6) % 7) = ANY($7::int[]) THEN 35 ELSE 0 END
+      -- Giờ so sánh: preferredHours lưu theo giờ local VN → convert UTC hour về local VN
+      + CASE WHEN $8::int[] <> ARRAY[]::int[] AND ((EXTRACT(HOUR FROM f.departure_time) + 7) % 24) = ANY($8::int[]) THEN 30 ELSE 0 END
       + CASE WHEN ABS(fs.base_price - $4) <= 1000000 THEN 20 ELSE 0 END
-      + CASE WHEN EXTRACT(DAY FROM f.departure_time) = $5::INT THEN 40 ELSE 0 END
-      + CASE WHEN dep.code = ANY($6) THEN 20 ELSE 0 END
-      + CASE WHEN EXTRACT(DOW FROM f.departure_time)::INT = $8 THEN 35 ELSE 0 END
     ) AS score
   FROM flights f
   JOIN airlines  al  ON al.id  = f.airline_id
