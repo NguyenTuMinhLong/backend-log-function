@@ -185,7 +185,7 @@ const SELECT_BOOKINGS_ADMIN = (dk, gioiHan, viTri) =>
      GROUP BY booking_id
    ) anc ON anc.booking_id = b.id
    ${dk}
-   ORDER BY b.created_at DESC
+   ORDER BY b.id DESC
    LIMIT $${gioiHan} OFFSET $${viTri}`;
 
 const SELECT_BOOKING_DETAIL_ADMIN =

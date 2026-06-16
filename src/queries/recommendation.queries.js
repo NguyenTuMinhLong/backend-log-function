@@ -28,7 +28,7 @@ const SELECT_TOP_DAY_OF_WEEK = `
   FROM bookings b
   JOIN flights f ON f.id = b.outbound_flight_id
   WHERE b.user_id = $1
-    AND b.status IN ('confirmed', 'completed')
+    AND b.status IN ('pending', 'confirmed', 'completed')
   GROUP BY day_of_week
   ORDER BY trip_count DESC
   LIMIT 1
@@ -489,7 +489,7 @@ const SELECT_BOOKING_HISTORY_PREFERENCES = `
   JOIN airports dep      ON dep.id = f.departure_airport_id
   LEFT JOIN flight_seats fs ON fs.flight_id = f.id AND fs.class = 'economy'
   WHERE b.user_id = $1
-    AND b.status IN ('confirmed', 'completed')
+    AND b.status IN ('pending', 'confirmed', 'completed')
   GROUP BY dep.code, arr.code
   ORDER BY trip_count DESC
   LIMIT 10
