@@ -14,6 +14,7 @@ const { sendRefundOTPEmail, sendBookingConfirmedEmail } = require('../utils/mail
 const { OTP_CONFIG } = require('../config/refund.config');
 const { buildPaymentInstruction } = require('../utils/formatters');
 const paymentConfig = require('../config/payment.config');
+const { applyDynamicPricingWithSeason } = require('../utils/pricing');
 
 // Import providers
 const { createPayosPaymentInstruction } = require('../providers/payos.provider');
@@ -334,7 +335,11 @@ const requestDateChange = async (userId, bookingCode, data) => {
     }
 
     const seatsNeeded = toPassengerCount(booking, passenger_ids);
-    const newFlightPrice = parseFloat(newFlight.base_price);
+    // newFlight.base_price là giá thô flight_seats — phải áp dynamic pricing (mùa/ngày/nhu cầu)
+    // giống lúc tạo booking, nếu không phụ phí/hoàn tiền đổi ngày sẽ tính sai
+    const newFlightPrice = await applyDynamicPricingWithSeason(
+      parseFloat(newFlight.base_price), newFlight.available_seats, newFlight.total_seats, newFlight.departure_time,
+    );
     const newTotalPrice = newFlightPrice * seatsNeeded;
     const oldPrice = parseFloat(legContext.basePrice) * seatsNeeded;
     const priceDifference = newTotalPrice - oldPrice;
