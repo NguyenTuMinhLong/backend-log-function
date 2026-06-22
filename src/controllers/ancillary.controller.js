@@ -9,8 +9,8 @@ const ancillaryService = require("../services/ancillary.service");
  */
 const getAncillaryOptions = async (req, res) => {
   try {
-    const { type } = req.query;
-    const result = await ancillaryService.getAncillaryOptions(type || null);
+    const { type, lang } = req.query;
+    const result = await ancillaryService.getAncillaryOptions(type || null, lang);
     res.json({
       message: "Lấy danh sách dịch vụ bổ sung thành công",
       data:    result,
@@ -27,7 +27,7 @@ const getAncillaryOptions = async (req, res) => {
 const getBookingAncillaries = async (req, res) => {
   try {
     const booking = await getBookingByCode(req.params.bookingCode);
-    const result  = await ancillaryService.getBookingAncillaries(booking.id);
+    const result  = await ancillaryService.getBookingAncillaries(booking.id, req.query.lang);
     res.json({
       message: "Lấy danh sách dịch vụ bổ sung thành công",
       data:    result,

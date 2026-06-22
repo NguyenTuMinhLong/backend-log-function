@@ -16,13 +16,45 @@ Các loại dịch vụ:
 
 const pool = require("../config/db");
 const Q    = require("../queries/ancillary.queries");
+const { normalizeLocale } = require("../utils/locale");
 
 // Helpers
 
 const VALID_TYPES = ["meal", "baggage", "insurance", "lounge", "wifi"];
 
+// Bản dịch song ngữ cho danh mục dịch vụ bổ sung (giống cách TIER_BENEFITS làm ở loyalty.service.js)
+// — không cần thêm cột DB, chỉ map theo tên tiếng Việt đang lưu trong ancillary_options.
+// Nếu admin thêm dịch vụ mới chưa có trong map, sẽ fallback về tên gốc (xem translate() dưới).
+const ANCILLARY_TRANSLATIONS = {
+  "Suất ăn tiêu chuẩn": { name: "Standard Meal",      description: "Full in-flight meal" },
+  "Suất ăn chay":       { name: "Vegetarian Meal",    description: "Vegetarian / plant-based meal" },
+  "Suất ăn Halal":      { name: "Halal Meal",         description: "Halal-certified meal" },
+  "Suất ăn trẻ em":     { name: "Kids Meal",          description: "Meal suitable for children" },
+
+  "Hành lý thêm 5kg":   { name: "Extra Baggage 5kg",  description: "Add 5kg checked baggage" },
+  "Hành lý thêm 10kg":  { name: "Extra Baggage 10kg", description: "Add 10kg checked baggage" },
+  "Hành lý thêm 20kg":  { name: "Extra Baggage 20kg", description: "Add 20kg checked baggage" },
+  "Hành lý thêm 32kg":  { name: "Extra Baggage 32kg", description: "Add 32kg checked baggage" },
+
+  "Bảo hiểm cơ bản":    { name: "Basic Insurance",        description: "Basic passenger & baggage insurance" },
+  "Bảo hiểm toàn diện": { name: "Comprehensive Insurance", description: "Medical, delay/cancellation & baggage insurance" },
+
+  "Phòng chờ sân bay":  { name: "Airport Lounge",     description: "VIP lounge access at departure airport" },
+
+  "Wifi cơ bản":        { name: "Basic Wifi",          description: "200MB - for chat & email" },
+  "Wifi nâng cao":      { name: "Premium Wifi",        description: "1GB - streaming & work" },
+  "Wifi không giới hạn":{ name: "Unlimited Wifi",      description: "Unlimited data for the whole flight" },
+};
+
+// Dịch tên/mô tả sang EN nếu có trong map, không thì giữ nguyên (an toàn với dịch vụ admin tự thêm)
+const translate = (name, description, locale) => {
+  if (locale !== "en") return { name, description };
+  const t = ANCILLARY_TRANSLATIONS[name];
+  return { name: t?.name || name, description: t?.description || description };
+};
+
 // Nhóm ancillaries theo passenger
-const groupByPassenger = (rows) => {
+const groupByPassenger = (rows, locale) => {
   const map = {};
   for (const r of rows) {
     const key = `${r.passenger_id}_${r.flight_type}`;
@@ -35,12 +67,13 @@ const groupByPassenger = (rows) => {
         services:       [],
       };
     }
+    const { name, description } = translate(r.service_name, r.service_description, locale);
     map[key].services.push({
       ancillary_id:        r.id,
       option_id:           r.option_id,
       service_type:        r.service_type,
-      service_name:        r.service_name,
-      service_description: r.service_description,
+      service_name:        name,
+      service_description: description,
       unit:                r.unit,
       meta:                r.meta,
       quantity:            r.quantity,
@@ -55,10 +88,11 @@ const groupByPassenger = (rows) => {
 // ─── Exported Functions ───────────────────────────────────────────────────────
 
 // Lấy danh sách dịch vụ có thể chọn
-const getAncillaryOptions = async (type = null) => {
+const getAncillaryOptions = async (type = null, lang = "vi") => {
   if (type && !VALID_TYPES.includes(type)) {
     throw new Error(`type phải là một trong: ${VALID_TYPES.join(", ")}`);
   }
+  const locale = normalizeLocale(lang);
 
   const result = await pool.query(Q.GET_ANCILLARY_OPTIONS, [type || null]);
 
@@ -66,10 +100,11 @@ const getAncillaryOptions = async (type = null) => {
   const grouped = {};
   for (const row of result.rows) {
     if (!grouped[row.type]) grouped[row.type] = [];
+    const { name, description } = translate(row.name, row.description, locale);
     grouped[row.type].push({
       id:          row.id,
-      name:        row.name,
-      description: row.description,
+      name,
+      description,
       price:       parseFloat(row.price),
       unit:        row.unit,
       meta:        row.meta,
@@ -83,14 +118,15 @@ const getAncillaryOptions = async (type = null) => {
 };
 
 // Lấy ancillaries đã chọn của 1 booking
-const getBookingAncillaries = async (bookingId) => {
+const getBookingAncillaries = async (bookingId, lang = "vi") => {
+  const locale       = normalizeLocale(lang);
   const rows        = await pool.query(Q.GET_ANCILLARIES_BY_BOOKING, [bookingId]);
   const totalResult = await pool.query(Q.GET_ANCILLARY_TOTAL, [bookingId]);
 
   return {
     booking_id:      parseInt(bookingId),
     ancillary_total: parseFloat(totalResult.rows[0].ancillary_total),
-    by_passenger:    groupByPassenger(rows.rows),
+    by_passenger:    groupByPassenger(rows.rows, locale),
   };
 };
 

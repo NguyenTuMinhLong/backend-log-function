@@ -357,7 +357,7 @@ const createBooking = async (data, userId = null) => {
 };
 
 // ─── Xem chi tiết 1 booking ────────────────────────────────────
-const getBookingDetail = async (bookingCode, userId = null) => {
+const getBookingDetail = async (bookingCode, userId = null, lang = "vi") => {
   const result = await pool.query(QB.SELECT_BOOKING_DETAIL, [bookingCode]);
   if (result.rows.length === 0) throw new Error("Không tìm thấy booking");
 
@@ -372,7 +372,7 @@ const getBookingDetail = async (bookingCode, userId = null) => {
   try {
     const [payResult, ancResult] = await Promise.all([
       pool.query(QB.SELECT_BOOKING_PAYMENT_INFO, [b.id]),
-      ancillaryService.getBookingAncillaries(b.id),
+      ancillaryService.getBookingAncillaries(b.id, lang),
     ]);
     if (payResult.rows.length > 0) paymentInfo = payResult.rows[0];
     ancillaryTotal = ancResult.ancillary_total;
