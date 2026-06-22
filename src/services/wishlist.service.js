@@ -4,6 +4,20 @@ const pool = require("../config/db");
 const Q    = require("../queries/wishlist.queries");
 const { applyDynamicPricingWithSeason } = require("../utils/pricing");
 
+// Cùng công thức với flight.service.js/recommendation.service.js — phải build
+// lại ở đây vì wishlist.queries trả riêng fs.extra_baggage_price, không có sẵn
+// mảng option.
+const buildBaggageOptions = (extraBaggagePrice) => {
+  const pricePerKg = parseFloat(extraBaggagePrice) || 0;
+  return [
+    { kg: 0,  label: "No extra", price_per_person: 0 },
+    { kg: 5,  label: "+5 kg",     price_per_person: 5  * pricePerKg },
+    { kg: 10, label: "+10 kg",    price_per_person: 10 * pricePerKg },
+    { kg: 15, label: "+15 kg",    price_per_person: 15 * pricePerKg },
+    { kg: 20, label: "+20 kg",    price_per_person: 20 * pricePerKg },
+  ];
+};
+
 // Giá hiển thị phải qua applyDynamicPricingWithSeason (mùa/ngày/nhu cầu) giống
 // flight.service.js — không dùng fs.base_price thô, nếu không "giá hiện tại" ở
 // wishlist sẽ thấp hơn giá thật và còn bị mang theo sai khi bấm Select để đặt vé.
@@ -12,6 +26,7 @@ const formatItem = async (row) => {
   const price = rawBase !== null
     ? await applyDynamicPricingWithSeason(rawBase, row.available_seats, row.total_seats, row.departure_time)
     : null;
+  const extraPrice = parseFloat(row.extra_baggage_price) || 0;
 
   return {
     id:         row.id,
@@ -35,6 +50,14 @@ const formatItem = async (row) => {
       arrival:         { code: row.arr_code, city: row.arr_city },
       base_price:      price,
       available_seats: row.available_seats ? parseInt(row.available_seats) : null,
+      seat: {
+        class:                  row.seat_class,
+        total_price:            price,
+        baggage_included_kg:    row.baggage_included_kg,
+        carry_on_kg:            row.carry_on_kg,
+        extra_baggage_price:    extraPrice,
+        extra_baggage_options:  buildBaggageOptions(extraPrice),
+      },
     },
   };
 };
