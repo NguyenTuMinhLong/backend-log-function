@@ -58,7 +58,7 @@ const calcTotalPrice = (basePrice, adults, children, infants) => {
   return Math.round(adultTotal + childTotal + infantTotal);
 };
 
-const { applyDynamicPricing: applyDemand } = require('../utils/pricing');
+const { applyDynamicPricingWithSeason } = require('../utils/pricing');
 
 // Validate thông tin booking từ client
 // Kiểm tra các trường bắt buộc, số lượng hành khách, thông tin passenger
@@ -186,8 +186,20 @@ const createBooking = async (data, userId = null) => {
       returnSeat = await checkAndGetSeatInfo(client, return_flight_id, return_seat_class, seatsNeeded);
     }
 
-    const outboundTotal = calcTotalPrice(parseFloat(outboundSeat.base_price), a, c, i);
-    const returnTotal   = returnSeat ? calcTotalPrice(parseFloat(returnSeat.base_price), a, c, i) : 0;
+    // Áp dynamic pricing (mùa/ngày/nhu cầu) như lúc search/hiển thị giá,
+    // nếu không total_price lưu trong booking sẽ lệch hẳn so với giá khách đã thấy
+    const outboundPrice = await applyDynamicPricingWithSeason(
+      parseFloat(outboundSeat.base_price), outboundSeat.available_seats, outboundSeat.total_seats, outboundSeat.departure_time
+    );
+    const returnPrice = returnSeat
+      ? await applyDynamicPricingWithSeason(
+          parseFloat(returnSeat.base_price), returnSeat.available_seats, returnSeat.total_seats, returnSeat.departure_time
+        )
+      : 0;
+
+    const outboundTotal = calcTotalPrice(outboundPrice, a, c, i);
+    const returnTotal   = returnSeat ? calcTotalPrice(returnPrice, a, c, i) : 0;
+    const seatExtraFee  = Number(data.seat_extra_fee) || 0;
 
     let baggageTotal = 0;
     const outboundPassengers = passengers.filter((p) => (p.flight_type || "outbound") === "outbound");
@@ -208,8 +220,8 @@ const createBooking = async (data, userId = null) => {
       baggageTotal += p._baggage_price;
     }
 
-    const totalPrice = outboundTotal + returnTotal + baggageTotal;
-    const basePrice  = parseFloat(outboundSeat.base_price);
+    const totalPrice = outboundTotal + returnTotal + baggageTotal + seatExtraFee;
+    const basePrice  = outboundPrice;
 
     let bookingCode;
     let isUnique = false;
@@ -326,11 +338,12 @@ const createBooking = async (data, userId = null) => {
         extra_baggage_total:  baggageTotal,
       },
       price: {
-        base_price:     basePrice,
-        outbound_total: outboundTotal,
-        return_total:   returnTotal,
-        baggage_total:  baggageTotal,
-        total_price:    totalPrice,
+        base_price:      basePrice,
+        outbound_total:  outboundTotal,
+        return_total:    returnTotal,
+        baggage_total:   baggageTotal,
+        seat_extra_fee:  seatExtraFee,
+        total_price:     totalPrice,
       },
       message: `Đặt vé thành công! Vui lòng thanh toán trong 30 phút (trước ${heldUntil.toLocaleString("vi-VN")})`,
     };
