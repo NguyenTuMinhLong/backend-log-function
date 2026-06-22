@@ -138,7 +138,7 @@ const buildBaggageOptions = (extraBaggagePrice) => {
 // ── Dynamic pricing helpers (applied at search time) ──────────────────────────
 
 // Weekend premium: Fri/Sat/Sun cost more
-const { applyDynamicPricing } = require('../utils/pricing');
+const { applyDynamicPricing, applyDynamicPricingWithSeason } = require('../utils/pricing');
 const seasonService = require('./season.service');
 const { generatePriceAlert, getDetailedAnalysis } = require('./price-alert.service');
 const { normalizeLocale } = require('../utils/locale');
@@ -443,7 +443,7 @@ const getSeatMap = async (flightId, params = {}) => {
 
   // ── 3. Tạo sơ đồ ghế cho từng class ──────────────────────────────────────
   let currentRow = 1;
-  const classMaps = classInfoResult.rows.map((ci) => {
+  const classMaps = await Promise.all(classInfoResult.rows.map(async (ci) => {
     const layout    = buildSeatLayout(ci.class, ci.total_seats, currentRow);
     currentRow      = layout.lastRow + 2; // Khoảng cách 1 hàng trống giữa các class
 
@@ -457,16 +457,23 @@ const getSeatMap = async (flightId, params = {}) => {
       })),
     }));
 
+    // base_price phải tính theo dynamic pricing (mùa/ngày/nhu cầu) như formatFlights,
+    // nếu không sẽ lệch với seat.total_price hiển thị ở các bước trước đó
+    const rawBase = parseFloat(ci.base_price) || 0;
+    const seasonAwarePrice = await applyDynamicPricingWithSeason(
+      rawBase, ci.available_seats, ci.total_seats, flightMeta.departure_time
+    );
+
     return {
       class:           ci.class,
       total_seats:     ci.total_seats,
       available_seats: ci.available_seats,
-      base_price:      parseFloat(ci.base_price) || 0,
+      base_price:      seasonAwarePrice,
       columns:         layout.columns,
       seats_per_row:   layout.seatsPerRow,
       rows:            seatRows,
     };
-  });
+  }));
 
   return {
     flight_id:      parseInt(flightId),
