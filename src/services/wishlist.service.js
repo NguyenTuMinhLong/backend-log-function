@@ -2,31 +2,65 @@
 
 const pool = require("../config/db");
 const Q    = require("../queries/wishlist.queries");
+const { applyDynamicPricingWithSeason } = require("../utils/pricing");
 
-const formatItem = (row) => ({
-  id:         row.id,
-  seat_class: row.seat_class,
-  added_at:   row.created_at,
-  flight: {
-    id:               row.flight_id,
-    flight_number:    row.flight_number,
-    departure_time:   row.departure_time,
-    arrival_time:     row.arrival_time,
-    duration_minutes: row.duration_minutes,
-    status:           row.flight_status,
-    airline: {
-      code:     row.airline_code,
-      name:     row.airline_name,
-      logo_url:   row.logo_url,
-      logo_dark:  row.logo_dark,
-      logo_light: row.logo_light,
+// Cùng công thức với flight.service.js/recommendation.service.js — phải build
+// lại ở đây vì wishlist.queries trả riêng fs.extra_baggage_price, không có sẵn
+// mảng option.
+const buildBaggageOptions = (extraBaggagePrice) => {
+  const pricePerKg = parseFloat(extraBaggagePrice) || 0;
+  return [
+    { kg: 0,  label: "No extra", price_per_person: 0 },
+    { kg: 5,  label: "+5 kg",     price_per_person: 5  * pricePerKg },
+    { kg: 10, label: "+10 kg",    price_per_person: 10 * pricePerKg },
+    { kg: 15, label: "+15 kg",    price_per_person: 15 * pricePerKg },
+    { kg: 20, label: "+20 kg",    price_per_person: 20 * pricePerKg },
+  ];
+};
+
+// Giá hiển thị phải qua applyDynamicPricingWithSeason (mùa/ngày/nhu cầu) giống
+// flight.service.js — không dùng fs.base_price thô, nếu không "giá hiện tại" ở
+// wishlist sẽ thấp hơn giá thật và còn bị mang theo sai khi bấm Select để đặt vé.
+const formatItem = async (row) => {
+  const rawBase = row.base_price ? parseFloat(row.base_price) : null;
+  const price = rawBase !== null
+    ? await applyDynamicPricingWithSeason(rawBase, row.available_seats, row.total_seats, row.departure_time)
+    : null;
+  const extraPrice = parseFloat(row.extra_baggage_price) || 0;
+
+  return {
+    id:         row.id,
+    seat_class: row.seat_class,
+    added_at:   row.created_at,
+    flight: {
+      id:               row.flight_id,
+      flight_number:    row.flight_number,
+      departure_time:   row.departure_time,
+      arrival_time:     row.arrival_time,
+      duration_minutes: row.duration_minutes,
+      status:           row.flight_status,
+      airline: {
+        code:     row.airline_code,
+        name:     row.airline_name,
+        logo_url:   row.logo_url,
+        logo_dark:  row.logo_dark,
+        logo_light: row.logo_light,
+      },
+      departure:       { code: row.dep_code, city: row.dep_city },
+      arrival:         { code: row.arr_code, city: row.arr_city },
+      base_price:      price,
+      available_seats: row.available_seats ? parseInt(row.available_seats) : null,
+      seat: {
+        class:                  row.seat_class,
+        total_price:            price,
+        baggage_included_kg:    row.baggage_included_kg,
+        carry_on_kg:            row.carry_on_kg,
+        extra_baggage_price:    extraPrice,
+        extra_baggage_options:  buildBaggageOptions(extraPrice),
+      },
     },
-    departure:       { code: row.dep_code, city: row.dep_city },
-    arrival:         { code: row.arr_code, city: row.arr_city },
-    base_price:      row.base_price      ? parseFloat(row.base_price)    : null,
-    available_seats: row.available_seats ? parseInt(row.available_seats) : null,
-  },
-});
+  };
+};
 
 // Thêm chuyến bay vào wishlist (chỉ user đã login)
 const addToWishlist = async (userId, flightId, seatClass = "economy") => {
@@ -70,7 +104,7 @@ const getWishlist = async (userId) => {
 
   return {
     total: result.rows.length,
-    items: result.rows.map(formatItem),
+    items: await Promise.all(result.rows.map(formatItem)),
   };
 };
 

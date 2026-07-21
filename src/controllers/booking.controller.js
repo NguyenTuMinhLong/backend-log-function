@@ -30,6 +30,7 @@ const getBookingDetail = async (req, res) => {
     const result = await bookingService.getBookingDetail(
       req.params.bookingCode.toUpperCase(),
       userId,
+      req.query.lang,
     );
 
     res.json({

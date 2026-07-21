@@ -89,9 +89,22 @@ const isValidLayover = (minutes) => {
          minutes <= QC.MAX_LAYOVER_HOURS * 60;
 };
 
+// Cùng công thức với flight.service.js/recommendation.service.js
+const buildBaggageOptions = (extraBaggagePrice) => {
+  const pricePerKg = parseFloat(extraBaggagePrice) || 0;
+  return [
+    { kg: 0,  label: "No extra", price_per_person: 0 },
+    { kg: 5,  label: "+5 kg",     price_per_person: 5  * pricePerKg },
+    { kg: 10, label: "+10 kg",    price_per_person: 10 * pricePerKg },
+    { kg: 15, label: "+15 kg",    price_per_person: 15 * pricePerKg },
+    { kg: 20, label: "+20 kg",    price_per_person: 20 * pricePerKg },
+  ];
+};
+
 // Format 1 flight row → 1 leg object (with season pricing)
 const formatLeg = async (row, adults, children, infants) => {
   const basePrice = parseFloat(row.base_price) || 0;
+  const extraPrice = parseFloat(row.extra_baggage_price) || 0;
   const seasonInfo = await seasonService.getSeasonInfo(row.departure_time);
   const seasonMult = seasonInfo ? seasonInfo.multiplier : 1.0;
   const dynamicPrice = applyDynamicPricing(
@@ -132,6 +145,10 @@ const formatLeg = async (row, adults, children, infants) => {
       available_seats: row.available_seats,
       base_price: dynamicPrice,
       total_price: calcTotalPrice(dynamicPrice, adults, children, infants),
+      baggage_included_kg: row.baggage_included_kg,
+      carry_on_kg: row.carry_on_kg,
+      extra_baggage_price: extraPrice,
+      extra_baggage_options: buildBaggageOptions(extraPrice),
     },
   };
 };

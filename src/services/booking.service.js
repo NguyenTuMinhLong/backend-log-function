@@ -35,6 +35,7 @@ const QB = require("../queries/booking.queries");
 const QF = require("../queries/flight.queries");
 const QP = require("../queries/payment.queries");
 const QAnc = require("../queries/ancillary.queries");
+const ancillaryService = require("./ancillary.service");
 const QB2 = { SELECT_MY_BOOKINGS: QB.SELECT_MY_BOOKINGS };
 
 // Loyalty service - tích điểm khi booking thành công
@@ -58,7 +59,7 @@ const calcTotalPrice = (basePrice, adults, children, infants) => {
   return Math.round(adultTotal + childTotal + infantTotal);
 };
 
-const { applyDynamicPricing: applyDemand } = require('../utils/pricing');
+const { applyDynamicPricingWithSeason } = require('../utils/pricing');
 
 // Validate thông tin booking từ client
 // Kiểm tra các trường bắt buộc, số lượng hành khách, thông tin passenger
@@ -186,8 +187,20 @@ const createBooking = async (data, userId = null) => {
       returnSeat = await checkAndGetSeatInfo(client, return_flight_id, return_seat_class, seatsNeeded);
     }
 
-    const outboundTotal = calcTotalPrice(parseFloat(outboundSeat.base_price), a, c, i);
-    const returnTotal   = returnSeat ? calcTotalPrice(parseFloat(returnSeat.base_price), a, c, i) : 0;
+    // Áp dynamic pricing (mùa/ngày/nhu cầu) như lúc search/hiển thị giá,
+    // nếu không total_price lưu trong booking sẽ lệch hẳn so với giá khách đã thấy
+    const outboundPrice = await applyDynamicPricingWithSeason(
+      parseFloat(outboundSeat.base_price), outboundSeat.available_seats, outboundSeat.total_seats, outboundSeat.departure_time
+    );
+    const returnPrice = returnSeat
+      ? await applyDynamicPricingWithSeason(
+          parseFloat(returnSeat.base_price), returnSeat.available_seats, returnSeat.total_seats, returnSeat.departure_time
+        )
+      : 0;
+
+    const outboundTotal = calcTotalPrice(outboundPrice, a, c, i);
+    const returnTotal   = returnSeat ? calcTotalPrice(returnPrice, a, c, i) : 0;
+    const seatExtraFee  = Number(data.seat_extra_fee) || 0;
 
     let baggageTotal = 0;
     const outboundPassengers = passengers.filter((p) => (p.flight_type || "outbound") === "outbound");
@@ -208,8 +221,8 @@ const createBooking = async (data, userId = null) => {
       baggageTotal += p._baggage_price;
     }
 
-    const totalPrice = outboundTotal + returnTotal + baggageTotal;
-    const basePrice  = parseFloat(outboundSeat.base_price);
+    const totalPrice = outboundTotal + returnTotal + baggageTotal + seatExtraFee;
+    const basePrice  = outboundPrice;
 
     let bookingCode;
     let isUnique = false;
@@ -326,11 +339,12 @@ const createBooking = async (data, userId = null) => {
         extra_baggage_total:  baggageTotal,
       },
       price: {
-        base_price:     basePrice,
-        outbound_total: outboundTotal,
-        return_total:   returnTotal,
-        baggage_total:  baggageTotal,
-        total_price:    totalPrice,
+        base_price:      basePrice,
+        outbound_total:  outboundTotal,
+        return_total:    returnTotal,
+        baggage_total:   baggageTotal,
+        seat_extra_fee:  seatExtraFee,
+        total_price:     totalPrice,
       },
       message: `Đặt vé thành công! Vui lòng thanh toán trong 30 phút (trước ${heldUntil.toLocaleString("vi-VN")})`,
     };
@@ -343,7 +357,7 @@ const createBooking = async (data, userId = null) => {
 };
 
 // ─── Xem chi tiết 1 booking ────────────────────────────────────
-const getBookingDetail = async (bookingCode, userId = null) => {
+const getBookingDetail = async (bookingCode, userId = null, lang = "vi") => {
   const result = await pool.query(QB.SELECT_BOOKING_DETAIL, [bookingCode]);
   if (result.rows.length === 0) throw new Error("Không tìm thấy booking");
 
@@ -354,18 +368,34 @@ const getBookingDetail = async (bookingCode, userId = null) => {
 
   let paymentInfo = null;
   let ancillaryTotal = 0;
+  let ancillaryItems = [];
   try {
     const [payResult, ancResult] = await Promise.all([
       pool.query(QB.SELECT_BOOKING_PAYMENT_INFO, [b.id]),
-      pool.query(QAnc.GET_ANCILLARY_TOTAL, [b.id]),
+      ancillaryService.getBookingAncillaries(b.id, lang),
     ]);
     if (payResult.rows.length > 0) paymentInfo = payResult.rows[0];
-    ancillaryTotal = parseFloat(ancResult.rows[0]?.ancillary_total || 0);
+    ancillaryTotal = ancResult.ancillary_total;
+    ancillaryItems = (ancResult.by_passenger || []).flatMap((pax) =>
+      (pax.services || []).map((svc) => ({
+        name:       svc.service_name,
+        passenger:  pax.passenger_name,
+        quantity:   svc.quantity,
+        unit_price: svc.unit_price,
+        subtotal:   svc.total_price,
+      }))
+    );
   } catch (_) {}
 
   const totalPrice  = parseFloat(b.total_price);
   const basePrice   = parseFloat(b.base_price);
-  const baggageTotal = Math.max(totalPrice - basePrice, 0);
+  // Tiền vé thực tế tính theo tỉ lệ người lớn/trẻ em/em bé (giống lúc tạo booking),
+  // không nhân basePrice đơn giản theo số khách vì trẻ em/em bé chỉ tính 75%/10%
+  const ticketTotal = calcTotalPrice(basePrice, b.total_adults, b.total_children, b.total_infants);
+  // Hành lý ký gửi cộng thêm — lấy từ giá thực lưu theo từng hành khách, không suy ra bằng phép trừ
+  const baggageTotal = passResult.rows.reduce((sum, p) => sum + (parseFloat(p.baggage_price) || 0), 0);
+  // Phần còn lại (nếu có) là phụ phí chọn vị trí ghế đã cộng vào total_price lúc tạo booking
+  const seatExtraFee = Math.max(totalPrice - ticketTotal - baggageTotal, 0);
   const discountAmt = paymentInfo ? parseFloat(paymentInfo.discount_amount || 0) : 0;
   const grandTotal  = totalPrice + ancillaryTotal;
 
@@ -424,9 +454,12 @@ const getBookingDetail = async (bookingCode, userId = null) => {
     },
     price: {
       base_price:      basePrice,
+      ticket_total:    ticketTotal,
       total_price:     totalPrice,
       baggage_total:   baggageTotal,
+      seat_extra_fee:  seatExtraFee,
       ancillary_total: ancillaryTotal,
+      ancillary_items: ancillaryItems,
       grand_total:     grandTotal,
       final_amount:    finalAmount,
       discount_amount: discountAmt,

@@ -1,6 +1,7 @@
 "use strict";
 
 const pool = require("../config/db");
+const { applyDynamicPricingWithSeason } = require("../utils/pricing");
 
 /**
  * FLIGHT BRANDS — Gợi ý kết hợp hãng tối ưu cho khứ hồi
@@ -37,7 +38,7 @@ const queryFlightsByRoute = async (depCode, arrCode, date, seatClass, passengers
       al.logo_url, al.logo_dark, al.logo_light,
       dep.code AS dep_code, dep.city AS dep_city, dep.name AS dep_name,
       arr.code AS arr_code, arr.city AS arr_city, arr.name AS arr_name,
-      fs.base_price, fs.available_seats, fs.baggage_included_kg,
+      fs.base_price, fs.available_seats, fs.total_seats, fs.baggage_included_kg,
       fs.carry_on_kg, fs.extra_baggage_price
     FROM flights f
     JOIN airlines     al  ON al.id  = f.airline_id
@@ -65,9 +66,12 @@ const calcTotal = (basePrice, adults, children, infants) =>
 
 /**
  * Format 1 chuyến bay
+ * Giá phải qua applyDynamicPricingWithSeason (mùa/ngày/nhu cầu) giống flight.service.js,
+ * không dùng base_price thô — nếu không giá brand-combination sẽ lệch với giá tìm kiếm chính.
  */
-const formatFlight = (r, passengers) => {
-  const base  = parseFloat(r.base_price);
+const formatFlight = async (r, passengers) => {
+  const raw   = parseFloat(r.base_price);
+  const base  = await applyDynamicPricingWithSeason(raw, r.available_seats, r.total_seats, r.departure_time);
   const total = calcTotal(base, passengers.adults, passengers.children, passengers.infants);
   return {
     flight_id:     r.id,
@@ -132,8 +136,8 @@ const getBrandCombinations = async ({
   if (returnRows.length   === 0) throw new Error("Không tìm thấy chuyến về phù hợp");
 
   // 2. Format flights
-  const outboundFlights = outboundRows.map(r => formatFlight(r, pax));
-  const returnFlights   = returnRows.map(r   => formatFlight(r, pax));
+  const outboundFlights = await Promise.all(outboundRows.map(r => formatFlight(r, pax)));
+  const returnFlights   = await Promise.all(returnRows.map(r   => formatFlight(r, pax)));
 
   // 3. Ghép tất cả cặp (outbound × return) và chấm điểm
   const combinations = [];

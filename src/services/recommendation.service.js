@@ -18,6 +18,7 @@
 
 const pool = require("../config/db");
 const Q = require("../queries/recommendation.queries");
+const { applyDynamicPricingWithSeason } = require("../utils/pricing");
 
 // ── Cache constants ────────────────────────────────────────────────────────────
 const CACHE_TTL_MINUTES = 10;
@@ -131,12 +132,18 @@ const buildBaggageOptions = (extraBaggagePrice) => {
  * formatFlight — dùng chung cho cả scored flights và recommendation flights
  * Khi có r.score → dùng format scoring (from SELECT_SCORED_FLIGHTS)
  * Khi không có r.score → dùng format recommendation (from SELECT_*_FLIGHTS)
+ *
+ * Giá phải tính qua applyDynamicPricingWithSeason (mùa/ngày/nhu cầu) — giống
+ * flight.service.js/formatFlights — chứ không chỉ nhân r.holiday_multiplier,
+ * nếu không giá ở Recommendations/RecommendationBar sẽ lệch với giá ở trang tìm kiếm.
  */
-const formatFlight = (r, adults = 1, children = 0, infants = 0) => {
+const formatFlight = async (r, adults = 1, children = 0, infants = 0) => {
   const base = parseFloat(r.base_price) || 0;
-  const multiplier = parseFloat(r.holiday_multiplier) || 1;
   const extraPrice = parseFloat(r.extra_baggage_price) || 0;
-  const adjusted = base * multiplier;
+  const adjusted = await applyDynamicPricingWithSeason(
+    base, r.available_seats, r.total_seats, r.departure_time,
+  );
+  const multiplier = base > 0 ? adjusted / base : 1;
 
   return {
     // Trường dùng chung
@@ -349,8 +356,8 @@ const getRecommendations = async ({
     "preferredDOW:", preferredDOW,
     "preferredRoutes:", preferredRoutes);
 
-  let scoredFlights = scoredResult.rows.map((r, i) => {
-    const f = formatFlight(r);
+  let scoredFlights = await Promise.all(scoredResult.rows.map(async (r, i) => {
+    const f = await formatFlight(r);
     const score = parseInt(r.score, 10) || 0;
     const hour  = getLocalHour(f.departure_time);
     const day   = getLocalDay(f.departure_time);
@@ -392,7 +399,7 @@ const getRecommendations = async ({
       recommendation_reason: hasHistory ? "personalized" : "top_buy",
       filter_applied:        filter || "default",
     };
-  });
+  }));
 
   console.log("[Recommendation] Step 2 — scoredFlights:", scoredFlights.length);
 
@@ -434,8 +441,8 @@ const getRecommendations = async ({
         [start, end, limit, preferredDestinations],
       );
       if (popularResult.rows.length > 0) {
-        scoredFlights = popularResult.rows.map((r) => {
-          const f = formatFlight(r);
+        scoredFlights = await Promise.all(popularResult.rows.map(async (r) => {
+          const f = await formatFlight(r);
           return {
             ...f,
             score:               0,
@@ -447,7 +454,7 @@ const getRecommendations = async ({
             filter_applied:      filter || "default",
             _tier:               3,
           };
-        });
+        }));
         scoredFlights.forEach((f) => { f._tier = 3; });
         console.log("[Recommendation] Step 2b — used popular fallback (no scored flights), rows:", scoredFlights.length);
       }
@@ -470,8 +477,8 @@ const getRecommendations = async ({
           Q.SELECT_FLIGHTS_BY_DAY_PATTERN(preferredRoutes, preferredDestinations, preferredDepartures),
           [dates, limit, preferredDepartures, preferredDestinations, preferredRoutes],
         );
-        dayPatternFlights = flightsResult.rows.map((r) => {
-          const f = formatFlight(r);
+        dayPatternFlights = await Promise.all(flightsResult.rows.map(async (r) => {
+          const f = await formatFlight(r);
           // Tính score động: địa điểm×5 + ngày×3 + giờ×2 (theo spec Luồng 3)
           const destScore   = preferredDestinations.includes(f.arrival.code) ? 5 : 0;
           const dayScore    = 3; // Luồng 1: ngày trùng preferredDay luôn = 3
@@ -493,7 +500,7 @@ const getRecommendations = async ({
             note: `Ngày ${preferredDay} hàng tháng`,
             _tier: 1,
           };
-        });
+        }));
       }
     } catch (err) {
       console.error("[Recommendation] Step 3a error:", err.message);
@@ -510,7 +517,7 @@ const getRecommendations = async ({
     );
 
     if (result.rows.length > 0) {
-      const formatted = result.rows.map((r) => formatFlight(r));
+      const formatted = await Promise.all(result.rows.map((r) => formatFlight(r)));
       const routeGroups = {};
 
       formatted.forEach((f) => {
@@ -589,8 +596,8 @@ const getRecommendations = async ({
       );
 
       if (patternResult.rows.length > 0) {
-        userPatternFlights = patternResult.rows.map((r) => {
-          const f = formatFlight(r);
+        userPatternFlights = await Promise.all(patternResult.rows.map(async (r) => {
+          const f = await formatFlight(r);
           return {
             ...f,
             score:   parseInt(r.score, 10) || 0,
@@ -600,7 +607,7 @@ const getRecommendations = async ({
             note:    "Phù hợp sở thích cá nhân",
             _tier:   0,
           };
-        });
+        }));
       }
       console.log("[Recommendation] Step 3c — userPatternFlights:", userPatternFlights.length);
     } catch (err) {
@@ -716,8 +723,8 @@ const getRecommendations = async ({
       );
       if (popularResult.rows.length > 0) {
         const popularGroupId = allGroups.length + 1;
-        finalFlights = popularResult.rows.map((r) => {
-          const f = formatFlight(r);
+        finalFlights = await Promise.all(popularResult.rows.map(async (r) => {
+          const f = await formatFlight(r);
           return {
             ...f,
             score:               0,
@@ -728,7 +735,7 @@ const getRecommendations = async ({
             group_count:         popularResult.rows.length,
             _tier:               3,
           };
-        });
+        }));
         console.log("[Recommendation] Step 4g — used popular fallback, rows:", finalFlights.length);
       }
     } catch (err) {

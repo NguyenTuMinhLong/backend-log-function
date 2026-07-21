@@ -35,7 +35,8 @@ const SELECT_WISHLIST_BY_USER =
      al.code AS airline_code, al.name AS airline_name, al.logo_url, al.logo_dark, al.logo_light,
      dep.code AS dep_code, dep.city AS dep_city,
      arr.code AS arr_code, arr.city AS arr_city,
-     fs.base_price, fs.available_seats
+     fs.base_price, fs.available_seats, fs.total_seats,
+     fs.baggage_included_kg, fs.carry_on_kg, fs.extra_baggage_price
    FROM wishlists w
    JOIN flights      f   ON f.id   = w.flight_id
    JOIN airlines     al  ON al.id  = f.airline_id
