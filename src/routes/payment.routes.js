@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const paymentService = require("../services/payment.service");
+const paymentController = require("../controllers/payment.controller");
 const dateChangeService = require("../services/date-change.service");
 const { authenticate, authenticateOptional } = require("../middlewares/auth.middleware");
 
@@ -70,23 +71,10 @@ router.post("/:paymentCode/cancel", authenticateOptional, async (req, res) => {
   }
 });
 
-// GET /api/payments/my — lịch sử thanh toán của user
-router.get("/my", authenticate, async (req, res) => {
-  try {
-    const pool = require("../config/db");
-    const result = await pool.query(
-      `SELECT p.*, b.booking_code 
-       FROM payments p 
-       JOIN bookings b ON b.id = p.booking_id 
-       WHERE b.user_id = $1 
-       ORDER BY p.created_at DESC`,
-      [req.user.id]
-    );
-    res.json({ success: true, data: result.rows });
-  } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
-  }
-});
+// GET /api/payments/my — lịch sử thanh toán của user (phân trang + lọc + auto-expire)
+// Dùng controller getMyPayments; trước đây handler inline ở đây không phân trang,
+// không tự đóng payment quá hạn, và trả sai shape (thiếu pagination/stats).
+router.get("/my", authenticate, paymentController.getMyPayments);
 
 router.get("/:paymentCode", async (req, res) => {
   try {
