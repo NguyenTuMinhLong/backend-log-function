@@ -16,6 +16,8 @@ const adminChatController = require("../controllers/admin/chat.controller");
 const adminCronController      = require("../controllers/admin/cron.controller");
 const adminAutoFlightController = require("../controllers/admin/auto-flight.controller");
 const adminPriceOverrideController = require("../controllers/admin/price-override.controller");
+const adminContactController    = require("../controllers/admin/contact.controller");
+const adminNewsletterController = require("../controllers/admin/newsletter.controller");
 
 // Tất cả routes admin: phải đăng nhập + role = 'admin'
 router.use(authenticate, authorize("admin"));
@@ -56,6 +58,15 @@ router.post("/coupons", adminCouponController.createCoupon);
 router.put("/coupons/:id", adminCouponController.updateCoupon);
 router.patch("/coupons/:id/status", adminCouponController.updateCouponStatus);
 router.delete("/coupons/:id", adminCouponController.deleteCoupon);
+
+// A-06: Mail phản hồi (tin nhắn từ form Contact)
+router.get("/contact-messages", adminContactController.getMessages);
+router.patch("/contact-messages/:id/status", adminContactController.updateStatus);
+router.post("/contact-messages/:id/reply", adminContactController.replyMessage);
+
+// A-07: Newsletter
+router.get("/newsletter/subscribers", adminNewsletterController.getSubscribers);
+router.post("/newsletter/send", adminNewsletterController.sendBroadcast);
 
 // AD-03: Recurring Flight Schedules + AD-04: Manual Generate
 router.get("/schedules", adminFlightController.getSchedules);

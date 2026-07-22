@@ -73,7 +73,7 @@ const SELECT_COUPON_USAGE_INFO =
 // Public coupon query
 const SELECT_PUBLIC_COUPONS = (dk, gioiHan) =>
   `SELECT
-     v.id, v.airline_id,
+     v.id, v.airline_id, v.user_id,
      a.code AS airline_code, a.name AS airline_name,
      v.code, v.name, v.description,
      v.type, v.value, v.min_order, v.max_discount,

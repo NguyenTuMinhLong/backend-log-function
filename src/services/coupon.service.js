@@ -30,6 +30,8 @@ const sanitizeCoupon = (row) => ({
   used_count:           row.used_count,
   usage_limit_per_user: row.usage_limit_per_user,
   welcome_only:         row.welcome_only,
+  // Voucher riêng của user (đổi từ điểm) — dùng để gắn nhãn ở My Coupons
+  is_personal:          !!row.user_id,
   is_active:            row.is_active,
   created_at:           row.created_at,
   updated_at:           row.updated_at,
@@ -49,6 +51,16 @@ const getPublicCoupons = async (params = {}, availableOnly = false, userId = nul
   const conditions = ["v.is_active = TRUE"];
   const values     = [];
   let   idx        = 1;
+
+  // Voucher cá nhân (đổi từ điểm thành viên) có user_id — chỉ chủ sở hữu mới
+  // được thấy. Voucher công khai có user_id NULL, ai cũng thấy.
+  if (userId) {
+    conditions.push(`(v.user_id IS NULL OR v.user_id = $${idx})`);
+    values.push(userId);
+    idx++;
+  } else {
+    conditions.push(`v.user_id IS NULL`);
+  }
 
   if (search) {
     conditions.push(`(v.code ILIKE $${idx} OR COALESCE(v.name, '') ILIKE $${idx} OR COALESCE(v.description, '') ILIKE $${idx})`);

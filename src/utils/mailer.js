@@ -908,6 +908,46 @@ const sendContactEmail = async ({ name, email, subject, message }) => {
   }
 };
 
+// ─── Contact: Admin trả lời khách ─────────────────────────────────────────────
+// Gửi từ trang admin "Mail phản hồi" — nội dung do admin soạn, kèm lại tin nhắn gốc
+const sendContactReplyEmail = async (to, { name, originalSubject, originalMessage, replyBody }) => {
+  const esc = (s) => String(s || '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  try {
+    const html = `<!DOCTYPE html>
+<html lang="vi">
+<head><meta charset="UTF-8"/>${DARK_MODE_STYLE}</head>
+<body class="em-body" style="margin:0;padding:0;background:#f3f4f6;">
+  <div style="max-width:560px;margin:auto;padding:20px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+    <div class="em-card" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+      <div style="background:linear-gradient(135deg,#1a56db,#1e40af);padding:28px 24px;text-align:center;">
+        <img src="https://iili.io/qvDF3Kl.png" width="100" style="display:block;margin:0 auto 12px;filter:brightness(0) invert(1);" />
+        <h1 style="color:#fff;font-size:20px;margin:0;font-weight:700;">Phản hồi từ Vivudee</h1>
+      </div>
+      <div style="padding:28px 24px;">
+        <p style="color:#374151;font-size:15px;margin:0 0 16px;">Chào <strong>${esc(name)}</strong>,</p>
+        <div style="color:#374151;font-size:15px;line-height:1.7;white-space:pre-wrap;">${esc(replyBody)}</div>
+        <div style="margin-top:24px;border-left:3px solid #e5e7eb;padding-left:14px;">
+          <p style="color:#9ca3af;font-size:12px;margin:0 0 6px;">Tin nhắn bạn đã gửi${originalSubject ? ` — ${esc(originalSubject)}` : ''}:</p>
+          <div style="color:#9ca3af;font-size:13px;line-height:1.6;white-space:pre-wrap;">${esc(originalMessage)}</div>
+        </div>
+      </div>
+      <div class="em-footer" style="background:#f9fafb;padding:16px 24px;text-align:center;border-top:1px solid #e5e7eb;">
+        <p style="color:#9ca3af;font-size:12px;margin:0;">© ${new Date().getFullYear()} Vivudee · Đặt vé máy bay trực tuyến</p>
+      </div>
+    </div>
+  </div>
+</body></html>`;
+    const { error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM,
+      to,
+      subject: `[Vivudee] Phản hồi: ${originalSubject || 'Tin nhắn của bạn'}`,
+      html,
+    });
+    if (error) { console.error('❌ sendContactReplyEmail:', error); return false; }
+    return true;
+  } catch (err) { console.error('❌ sendContactReplyEmail:', err); return false; }
+};
+
 // ─── Newsletter: Welcome email ────────────────────────────────────────────────
 const sendNewsletterWelcomeEmail = async (to, { unsubscribeToken }) => {
   const frontendBase   = process.env.FRONTEND_URL || 'https://vivudee.vercel.app';
@@ -1037,4 +1077,4 @@ const sendLoyaltyTierUpgradeEmail = async (to, { fullName, oldTier, newTier }) =
   }
 };
 
-module.exports = { sendOTPEmail, sendRefundOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail, sendFlightStatusEmail, sendBoardingPassEmail, sendContactEmail, sendNewsletterWelcomeEmail, sendNewsletterBroadcast, sendLoyaltyTierUpgradeEmail };
+module.exports = { sendOTPEmail, sendRefundOTPEmail, sendPaymentInitiatedEmail, sendBookingConfirmedEmail, sendRefundCompletedEmail, sendFlightStatusEmail, sendBoardingPassEmail, sendContactEmail, sendContactReplyEmail, sendNewsletterWelcomeEmail, sendNewsletterBroadcast, sendLoyaltyTierUpgradeEmail };

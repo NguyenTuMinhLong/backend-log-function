@@ -199,6 +199,12 @@ const getVoucherQuote = async (client, booking, userId, voucherCode) => {
   const voucher = voucherResult.rows[0];
   const totalPrice = toNumber(booking.total_price);
 
+  // Voucher cá nhân (đổi từ điểm thành viên): chỉ chủ sở hữu mới dùng được.
+  // Không lộ sự tồn tại của mã cho người khác — trả cùng thông báo như mã sai.
+  if (voucher.user_id && Number(voucher.user_id) !== Number(userId)) {
+    throw new Error("Voucher không tồn tại");
+  }
+
   if (!voucher.is_active) throw new Error("Voucher đã bị vô hiệu hóa");
   if (voucher.start_at && new Date(voucher.start_at) > new Date()) throw new Error("Voucher chưa đến thời gian sử dụng");
   if (voucher.expiry_at && new Date(voucher.expiry_at) < new Date()) throw new Error("Voucher đã hết hạn");

@@ -38,6 +38,8 @@ router.get("/airport-countries", async (req, res) => {
 router.get("/coupons", couponController.getCoupons);
 router.get("/coupons/available", authenticateOptional, couponController.getAvailableCoupons);
 
+// Tin nhắn liên hệ được LƯU VÀO DB để admin đọc & trả lời ở trang "Mail phản hồi".
+// Trước đây chỉ forward qua email cá nhân nên không tra cứu / theo dõi được.
 router.post("/contact", async (req, res) => {
   const { name, email, subject, message } = req.body;
   if (!name?.trim() || !email?.trim() || !message?.trim()) {
@@ -46,8 +48,29 @@ router.post("/contact", async (req, res) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: "Email không hợp lệ." });
   }
-  const ok = await sendContactEmail({ name: name.trim(), email: email.trim(), subject: subject?.trim() || "", message: message.trim() });
-  if (!ok) return res.status(500).json({ error: "Không thể gửi tin nhắn. Vui lòng thử lại sau." });
+
+  const payload = {
+    name:    name.trim(),
+    email:   email.trim(),
+    subject: subject?.trim() || "",
+    message: message.trim(),
+  };
+
+  try {
+    await pool.query(
+      `INSERT INTO contact_messages (name, email, subject, message)
+       VALUES ($1, $2, $3, $4)`,
+      [payload.name, payload.email, payload.subject || null, payload.message]
+    );
+  } catch (err) {
+    console.error("[Contact] insert error:", err.message);
+    return res.status(500).json({ error: "Không thể gửi tin nhắn. Vui lòng thử lại sau." });
+  }
+
+  // Vẫn báo email cho team support, nhưng không chặn phản hồi cho khách:
+  // tin nhắn đã nằm trong DB, admin đọc được kể cả khi email lỗi.
+  sendContactEmail(payload).catch(() => {});
+
   res.json({ success: true });
 });
 

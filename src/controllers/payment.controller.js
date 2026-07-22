@@ -49,8 +49,22 @@ const confirmPayment = async (req, res) => {
 const getMyPayments = async (req, res) => {
   try {
     const userId = req.user.id;
+    const page   = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit  = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const offset = (page - 1) * limit;
+    const dk     = QP.buildPaymentStatusFilter(req.query.filter);
 
-    const result = await pool.query(QP.SELECT_MY_PAYMENTS, [userId]);
+    // Đóng payment PENDING đã quá hạn trước khi đọc — tránh hiện "Chờ thanh toán"
+    // cho giao dịch từ nhiều tháng trước
+    await pool.query(QP.EXPIRE_STALE_PENDING_PAYMENTS_FOR_USER, [userId]);
+
+    const [countResult, statsResult, result] = await Promise.all([
+      pool.query(QP.COUNT_MY_PAYMENTS(dk), [userId]),
+      pool.query(QP.SELECT_MY_PAYMENT_STATS, [userId]),
+      pool.query(QP.SELECT_MY_PAYMENTS(dk), [userId, limit, offset]),
+    ]);
+    const total = parseInt(countResult.rows[0].total, 10) || 0;
+    const s     = statsResult.rows[0] || {};
 
     const payments = result.rows.map((row) => ({
       payment_code:    row.payment_code,
@@ -73,12 +87,31 @@ const getMyPayments = async (req, res) => {
 
     res.json({
       message: "Lấy lịch sử giao dịch thành công",
-      total: payments.length,
+      total,
       payments,
+      pagination: {
+        page,
+        limit,
+        total,
+        total_pages: Math.max(1, Math.ceil(total / limit)),
+      },
+      // Thống kê trên toàn bộ giao dịch — độc lập với tab lọc và trang hiện tại
+      stats: {
+        total_tx:        parseInt(s.total_tx, 10)        || 0,
+        total_paid:      parseFloat(s.total_paid)        || 0,
+        total_pending:   parseInt(s.total_pending, 10)   || 0,
+        total_cancelled: parseInt(s.total_cancelled, 10) || 0,
+      },
     });
   } catch (err) {
     console.error("getMyPayments error:", err.message);
-    res.json({ message: "No transactions found", total: 0, payments: [] });
+    res.json({
+      message: "No transactions found",
+      total: 0,
+      payments: [],
+      pagination: { page: 1, limit: 10, total: 0, total_pages: 1 },
+      stats: { total_tx: 0, total_paid: 0, total_pending: 0, total_cancelled: 0 },
+    });
   }
 };
 

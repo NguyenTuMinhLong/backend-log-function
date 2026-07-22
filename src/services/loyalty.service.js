@@ -390,6 +390,37 @@ exports.redeemReward = async (userId, rewardId) => {
       .toString('hex')
       .toUpperCase()}`;
 
+    // Ghi voucher vào bảng vouchers.
+    // Trước đây chỉ sinh chuỗi rồi trả về mà không lưu → khi thanh toán,
+    // getVoucherQuote tra bảng vouchers không thấy và báo "Voucher không tồn tại",
+    // đồng thời My Coupons cũng không hiển thị được.
+    // user_id = chủ sở hữu → voucher riêng, chỉ user này thấy và dùng được.
+    const discountAmount = Number(reward.discount_amount) || 0;
+
+    // Reward không giảm tiền (nâng hạng ghế, phòng chờ...) thì không sinh voucher
+    // giảm giá — chỉ ghi nhận giao dịch đổi điểm.
+    if (discountAmount > 0) {
+      await client.query(
+        `INSERT INTO vouchers (
+           user_id, code, name, description,
+           type, value, min_order, max_discount,
+           start_at, expiry_at,
+           usage_limit, usage_limit_per_user,
+           welcome_only, is_active
+         )
+         VALUES ($1, $2, $3, $4, 'fixed', $5, 0, NULL,
+                 NOW(), NOW() + INTERVAL '90 days',
+                 1, 1, FALSE, TRUE)`,
+        [
+          userId,
+          voucherCode,
+          reward.name,
+          `Đổi từ ${reward.points_required} điểm thành viên`,
+          discountAmount,
+        ]
+      );
+    }
+
     // Trừ current_points, RETURNING → lấy số chính xác sau UPDATE
     const updateResult = await client.query(`
       UPDATE user_loyalty
@@ -425,9 +456,12 @@ exports.redeemReward = async (userId, rewardId) => {
         discountAmount: reward.discount_amount,
         description: reward.description,
       },
-      voucherCode,
+      // Reward không giảm tiền thì không có mã để nhập lúc thanh toán
+      voucherCode: discountAmount > 0 ? voucherCode : null,
       pointsRemaining,  // từ RETURNING — luôn chính xác
-      message: `Đổi thành công! Mã voucher của bạn là ${voucherCode}`,
+      message: discountAmount > 0
+        ? `Đổi thành công! Mã voucher của bạn là ${voucherCode}`
+        : `Đổi ${reward.name} thành công!`,
     };
 
   } catch (err) {

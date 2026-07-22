@@ -71,7 +71,42 @@ const UPDATE_PAYMENT_STATUS_BY_ID =
    SET status = $1, cancelled_at = NOW(), updated_at = NOW()
    WHERE id = $2`;
 
-const SELECT_MY_PAYMENTS =
+// Đóng các payment PENDING đã quá expires_at của riêng 1 user.
+// Chạy ngay trước khi trả lịch sử giao dịch — nếu không, payment tạo từ nhiều
+// tháng trước vẫn hiện "Chờ thanh toán" mãi mãi vì không có cron nào flip status.
+const EXPIRE_STALE_PENDING_PAYMENTS_FOR_USER =
+  `UPDATE payments p
+   SET status = 'EXPIRED', expired_at = NOW(), updated_at = NOW()
+   FROM bookings b
+   WHERE b.id = p.booking_id
+     AND b.user_id = $1
+     AND p.status = 'PENDING'
+     AND p.expires_at IS NOT NULL
+     AND p.expires_at < NOW()`;
+
+// dk: mệnh đề lọc theo tab (đã thanh toán / chờ / đã huỷ), rỗng = tất cả.
+// Lọc phải nằm ở SQL chứ không phải frontend — nếu lọc sau khi phân trang thì
+// tab "Đã huỷ" chỉ thấy được các dòng đã huỷ nằm trong trang hiện tại.
+const COUNT_MY_PAYMENTS = (dk = "") =>
+  `SELECT COUNT(*) AS total
+   FROM payments p
+   JOIN bookings b ON b.id = p.booking_id
+   WHERE b.user_id = $1 ${dk}`;
+
+// Thống kê trên TOÀN BỘ giao dịch, không phải trang hiện tại — nếu tính ở
+// frontend thì các thẻ tổng quan sẽ chỉ phản ánh 10 dòng đang hiển thị.
+const SELECT_MY_PAYMENT_STATS =
+  `SELECT
+     COUNT(*)                                                        AS total_tx,
+     COALESCE(SUM(COALESCE(p.final_amount, p.amount))
+              FILTER (WHERE UPPER(p.status) IN ('PAID','SUCCESS','COMPLETED','CONFIRMED')), 0) AS total_paid,
+     COUNT(*) FILTER (WHERE UPPER(p.status) = 'PENDING')             AS total_pending,
+     COUNT(*) FILTER (WHERE UPPER(p.status) IN ('CANCELLED','EXPIRED','FAILED')) AS total_cancelled
+   FROM payments p
+   JOIN bookings b ON b.id = p.booking_id
+   WHERE b.user_id = $1`;
+
+const SELECT_MY_PAYMENTS = (dk = "") =>
   `SELECT
      p.id, p.payment_code, p.booking_id, p.payment_method,
      p.amount, p.discount_amount, p.final_amount,
@@ -87,9 +122,23 @@ const SELECT_MY_PAYMENTS =
    JOIN flights  f  ON f.id  = b.outbound_flight_id
    JOIN airports dep ON dep.id = f.departure_airport_id
    JOIN airports arr ON arr.id = f.arrival_airport_id
-   WHERE b.user_id = $1
+   WHERE b.user_id = $1 ${dk}
    ORDER BY p.created_at DESC
-   LIMIT 100`;
+   LIMIT $2 OFFSET $3`;
+
+// Nhóm status theo từng tab ở giao diện Lịch sử giao dịch
+const PAYMENT_STATUS_GROUPS = {
+  paid:    ["PAID", "SUCCESS", "COMPLETED", "CONFIRMED"],
+  pending: ["PENDING"],
+  cancel:  ["CANCELLED", "EXPIRED", "FAILED"],
+};
+
+// Trả về mệnh đề lọc an toàn (whitelist, không nội suy input của user vào SQL)
+const buildPaymentStatusFilter = (filter) => {
+  const group = PAYMENT_STATUS_GROUPS[filter];
+  if (!group) return "";
+  return `AND UPPER(p.status) IN (${group.map((s) => `'${s}'`).join(", ")})`;
+};
 
 module.exports = {
   SELECT_BOOKING_FOR_PAYMENT,
@@ -102,6 +151,10 @@ module.exports = {
   CONFIRM_BOOKING_AFTER_PAYMENT,
   EXPIRE_PENDING_PAYMENT,
   UPDATE_PAYMENT_AFTER_CANCEL,
+  EXPIRE_STALE_PENDING_PAYMENTS_FOR_USER,
+  COUNT_MY_PAYMENTS,
+  SELECT_MY_PAYMENT_STATS,
   SELECT_MY_PAYMENTS,
+  buildPaymentStatusFilter,
   SELECT_PAYMENT_BY_BOOKING: `SELECT * FROM payments WHERE booking_id = $1 ORDER BY created_at DESC LIMIT 1`,
 };
