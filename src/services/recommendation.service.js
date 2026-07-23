@@ -19,6 +19,7 @@
 const pool = require("../config/db");
 const Q = require("../queries/recommendation.queries");
 const { applyDynamicPricingWithSeason } = require("../utils/pricing");
+const { generatePriceAlert } = require("./price-alert.service");
 
 // ── Cache constants ────────────────────────────────────────────────────────────
 const CACHE_TTL_MINUTES = 10;
@@ -145,6 +146,21 @@ const formatFlight = async (r, adults = 1, children = 0, infants = 0) => {
   );
   const multiplier = base > 0 ? adjusted / base : 1;
 
+  // Lý do giá tăng/giảm (mùa cao điểm, lễ...) — giống flight.service.js.
+  // Trước đây recommendations không trả price_alert nên trang chủ không hiển thị
+  // được tag giải thích vì sao giá thay đổi. Locale cố định 'vi' vì response
+  // được cache chung (cacheKey không phân biệt ngôn ngữ).
+  let priceAlert = null;
+  try {
+    priceAlert = await generatePriceAlert({
+      id: r.id,
+      departure_time: r.departure_time,
+      base_price: base,
+      available_seats: r.available_seats,
+      total_seats: r.total_seats,
+    }, null, null, 'vi');
+  } catch { /* thiếu price_alert không được phép làm hỏng recommendations */ }
+
   return {
     // Trường dùng chung
     id: r.id,
@@ -197,6 +213,7 @@ const formatFlight = async (r, adults = 1, children = 0, infants = 0) => {
     holiday: r.holiday_id
       ? { id: r.holiday_id, name: r.holiday_name, multiplier }
       : null,
+    price_alert: priceAlert,
   };
 };
 
