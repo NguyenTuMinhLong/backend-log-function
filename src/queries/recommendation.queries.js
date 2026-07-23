@@ -41,13 +41,15 @@ const SELECT_DAYS_IN_MONTH = `
   SELECT
     TO_CHAR(d::DATE, 'YYYY-MM-DD') AS date_value,
     TO_CHAR(d::DATE, 'TMDay')     AS day_name,
-    EXTRACT(DOW FROM d::DATE)     AS day_of_week
+    EXTRACT(DOW FROM d::DATE)     AS day_of_week,
+    CEIL(EXTRACT(DAY FROM d::DATE) / 7.0)::INT AS week_of_month
   FROM generate_series(
     DATE_TRUNC('month', $1::DATE),
     DATE_TRUNC('month', $1::DATE) + INTERVAL '1 month' - INTERVAL '1 day',
     INTERVAL '1 day'
   ) AS d
-  WHERE EXTRACT(DOW FROM d::DATE) = $2
+  WHERE EXTRACT(DOW FROM d::DATE)::INT = $2::INT
+    AND ($3::INT IS NULL OR CEIL(EXTRACT(DAY FROM d::DATE) / 7.0)::INT = $3::INT)
 `;
 
 // ─────────────────────────────────────────────
@@ -228,10 +230,10 @@ const SELECT_FLIGHTS_BY_USER_PATTERN = (
   limit,
 ) => {
   const dowCondition   = preferredDOWs.length > 0
-    ? `((EXTRACT(DOW FROM f.departure_time) + 6) % 7) = ANY($${4}::int[])` : "TRUE";
+    ? `EXTRACT(DOW FROM f.departure_time)::INT = ANY($${3}::int[])` : "TRUE";
   // preferredHours là giờ local VN (14) → UTC hour = 7 → convert UTC→VN: +7 % 24
   const hourCondition = preferredHours.length > 0
-    ? `((EXTRACT(HOUR FROM f.departure_time) + 7) % 24) = ANY($${5}::int[])` : "TRUE";
+    ? `((EXTRACT(HOUR FROM f.departure_time) + 7) % 24) = ANY($${4}::int[])` : "TRUE";
   const paramCount = 7; // total positional params: $1..$7
 
   return `
@@ -282,7 +284,7 @@ const SELECT_FLIGHTS_BY_USER_PATTERN = (
   WHERE f.status = 'scheduled'
     AND f.is_active = TRUE
     AND fs.available_seats > 0
-    AND f.departure_time BETWEEN $${6}::TIMESTAMP AND $${7}::TIMESTAMP
+    AND f.departure_time BETWEEN $${5}::TIMESTAMP AND $${6}::TIMESTAMP
     AND f.departure_time > (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
   ORDER BY score DESC, f.departure_time ASC
   LIMIT $${paramCount}
@@ -479,6 +481,9 @@ const SELECT_BOOKING_HISTORY_PREFERENCES = `
       ORDER BY EXTRACT(DAY FROM f.departure_time)::INT
     )                                             AS preferred_day,
     MODE() WITHIN GROUP (
+      ORDER BY CEIL(EXTRACT(DAY FROM f.departure_time) / 7.0)::INT
+    )                                             AS preferred_week_of_month,
+    MODE() WITHIN GROUP (
       ORDER BY EXTRACT(DOW FROM f.departure_time)::INT
     )                                             AS preferred_dow,
     AVG(fs.base_price)                            AS avg_price,
@@ -569,8 +574,8 @@ const SELECT_SCORED_FLIGHTS = (
       + CASE WHEN arr.code = ANY($2) AND (dep.code || '→' || arr.code) != ALL(COALESCE($6::text[], ARRAY[]::text[])) THEN 50 ELSE 0 END
       + CASE WHEN dep.code = ANY($3) THEN 20 ELSE 0 END
       + CASE WHEN $5::int[] <> ARRAY[]::int[] AND EXTRACT(DAY FROM f.departure_time)::INT = ANY($5::int[]) THEN 40 ELSE 0 END
-      -- PostgreSQL DOW: 0=Sun,...,6=Sat → chuyển về JS convention: 0=Mon,...,6=Sun
-      + CASE WHEN $7::int[] <> ARRAY[]::int[] AND ((EXTRACT(DOW FROM f.departure_time) + 6) % 7) = ANY($7::int[]) THEN 35 ELSE 0 END
+      -- PostgreSQL/JS DOW: 0=Sun,...,6=Sat
+      + CASE WHEN $7::int[] <> ARRAY[]::int[] AND EXTRACT(DOW FROM f.departure_time)::INT = ANY($7::int[]) THEN 35 ELSE 0 END
       -- Giờ so sánh: preferredHours lưu theo giờ local VN → convert UTC hour về local VN
       + CASE WHEN $8::int[] <> ARRAY[]::int[] AND ((EXTRACT(HOUR FROM f.departure_time) + 7) % 24) = ANY($8::int[]) THEN 30 ELSE 0 END
       + CASE WHEN ABS(fs.base_price - $4) <= 1000000 THEN 20 ELSE 0 END

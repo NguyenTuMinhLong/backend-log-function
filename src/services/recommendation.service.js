@@ -41,8 +41,8 @@ const CACHE_QUERIES = {
   `,
 };
 
-const buildCacheKey = ({ fromAirport, toAirport, filter }) => {
-  return `rec_${fromAirport || "any"}_${toAirport || "any"}_${filter || "default"}`;
+const buildCacheKey = ({ fromAirport, toAirport, filter, limit }) => {
+  return `rec_v2_${fromAirport || "any"}_${toAirport || "any"}_${filter || "default"}_${limit || 10}`;
 };
 
 // ── Cache helpers ──────────────────────────────────────────────────────────────
@@ -98,16 +98,19 @@ const getLocalHour = (utcString) => {
   return (d.getUTCHours() + 7) % 24;
 };
 
+const getVietnamDate = (utcString) => {
+  const d = new Date(utcString);
+  return new Date(d.getTime() + 7 * 60 * 60 * 1000);
+};
+
 // Helper: lấy ngày trong tháng theo giờ VN
 const getLocalDay = (utcString) => {
-  const d = new Date(utcString);
-  return d.getUTCDate(); // departure_time lưu ở 00:00 local → UTC date = local date
+  return getVietnamDate(utcString).getUTCDate();
 };
 
 // Helper: lấy day-of-week theo giờ VN (0=CN, 1=T2, ..., 6=T7)
 const getLocalDOW = (utcString) => {
-  const d = new Date(utcString);
-  return (d.getUTCDay() + 6) % 7; // JS: 0=Sun → chuyển: 0=Mon
+  return getVietnamDate(utcString).getUTCDay();
 };
 
 const formatDOW = (dow) => DOW_NAMES[parseInt(dow, 10)] || `T${dow}`;
@@ -223,6 +226,17 @@ const getMonthRange = (year, month) => {
   return { start: start.toISOString(), end: end.toISOString() };
 };
 
+const getNextMonthRange = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 2;
+  return getMonthRange(year + Math.floor((month - 1) / 12), ((month - 1) % 12) + 1);
+};
+
+const hasUpcomingPatternDate = (dates, now = new Date()) => {
+  const today = now.toISOString().split("T")[0];
+  return dates.some((dateValue) => dateValue >= today);
+};
+
 const getRecommendations = async ({
   userId,
   sessionId,
@@ -236,7 +250,7 @@ const getRecommendations = async ({
   const currentMonth = now.getMonth() + 1;
   const monthRange   = getMonthRange(currentYear, currentMonth);
 
-  const cacheKey = buildCacheKey({ fromAirport, toAirport, filter });
+  const cacheKey = buildCacheKey({ fromAirport, toAirport, filter, limit });
   const cached   = await getCached(userId, sessionId, cacheKey);
   if (cached) return cached;
 
@@ -251,6 +265,7 @@ const getRecommendations = async ({
   let preferredHours     = null;
   let avgSpending        = null;
   let preferredDay       = 0;
+  let preferredWeekOfMonth = null;
   let preferredDOW       = null;
   let preferredDestinations = [];
   let preferredDepartures = [];
@@ -295,7 +310,13 @@ const getRecommendations = async ({
         });
         console.log("[Recommendation] Step 1b — bookingHistory rows:", bookingResult.rows.length,
           bookingResult.rows.length > 0
-            ? bookingResult.rows.map(r => ({ route: r.route_key, hour: r.avg_dep_hour, day: r.preferred_day }))
+            ? bookingResult.rows.map(r => ({
+              route: r.route_key,
+              hour: r.avg_dep_hour,
+              day: r.preferred_day,
+              week: r.preferred_week_of_month,
+              dow: r.preferred_dow,
+            }))
             : "(no data)");
 
         if (bookingResult.rows.length > 0) {
@@ -304,8 +325,9 @@ const getRecommendations = async ({
           preferredHours    = parseFloat(bookingResult.rows[0].avg_dep_hour) || null;
           avgSpending       = parseFloat(bookingResult.rows[0].avg_price) || avgSpending;
           preferredDay      = parseFloat(bookingResult.rows[0].preferred_day) || 0;
-          const rawDOW      = parseFloat(bookingResult.rows[0].preferred_dow) || null;
-          preferredDOW     = (rawDOW !== null && !isNaN(rawDOW)) ? Math.round(rawDOW) : null;
+          preferredWeekOfMonth = parseInt(bookingResult.rows[0].preferred_week_of_month, 10) || null;
+          const rawDOW      = Number(bookingResult.rows[0].preferred_dow);
+          preferredDOW     = Number.isFinite(rawDOW) ? Math.round(rawDOW) : null;
 
           for (const r of bookingResult.rows) {
             if (!preferredDestinations.includes(r.arr_code)) {
@@ -338,6 +360,7 @@ const getRecommendations = async ({
     "preferredRoutes:", preferredRoutes,
     "preferredHours:", preferredHours,
     "preferredDay:", preferredDay,
+    "preferredWeekOfMonth:", preferredWeekOfMonth,
     "preferredDOW:", preferredDOW);
 
   // ── Bước 2: Scored flights (from recommendFlights) ──────────────────────────
@@ -401,7 +424,7 @@ const getRecommendations = async ({
       badges.push({ label: "Đầu tháng", color: "teal" });
 
     if (preferredDOW !== null) {
-      const dowFlight = new Date(f.departure_time).getDay();
+      const dowFlight = getLocalDOW(f.departure_time);
       if (dowFlight === preferredDOW) {
         badges.push({ label: `Thứ ${DOW_NAMES[preferredDOW]} bạn hay đi`, color: "orange" });
       }
@@ -483,11 +506,25 @@ const getRecommendations = async ({
   // ── Bước 3: Recommendation groups (time proximity, day pattern) ──────────────
   // 3a. Day pattern
   let dayPatternFlights = [];
-  if (hasHistory && preferredDay > 0) {
+  if (hasHistory && preferredDOW !== null) {
     try {
-      const { start } = monthRange;
-      const dayResult = await pool.query(Q.SELECT_DAYS_IN_MONTH, [start, preferredDay]);
-      const dates = dayResult.rows.map((r) => r.date_value);
+      let patternMonthRange = monthRange;
+      let dayResult = await pool.query(Q.SELECT_DAYS_IN_MONTH, [
+        patternMonthRange.start,
+        preferredDOW,
+        preferredWeekOfMonth,
+      ]);
+      let dates = dayResult.rows.map((r) => r.date_value);
+
+      if (dates.length === 0 || !hasUpcomingPatternDate(dates)) {
+        patternMonthRange = getNextMonthRange(now);
+        dayResult = await pool.query(Q.SELECT_DAYS_IN_MONTH, [
+          patternMonthRange.start,
+          preferredDOW,
+          preferredWeekOfMonth,
+        ]);
+        dates = dayResult.rows.map((r) => r.date_value);
+      }
 
       if (dates.length > 0) {
         const flightsResult = await pool.query(
@@ -498,7 +535,7 @@ const getRecommendations = async ({
           const f = await formatFlight(r);
           // Tính score động: địa điểm×5 + ngày×3 + giờ×2 (theo spec Luồng 3)
           const destScore   = preferredDestinations.includes(f.arrival.code) ? 5 : 0;
-          const dayScore    = 3; // Luồng 1: ngày trùng preferredDay luôn = 3
+          const dayScore    = 40;
           const hourScore   = (preferredHours !== null)
             ? (Math.abs(getLocalHour(f.departure_time) - preferredHours) <= 2 ? 2 : 0)
             : 0;
@@ -508,14 +545,17 @@ const getRecommendations = async ({
             ...f,
             score,
             badges: [
-              { label: `Ngày ${preferredDay} hàng tháng`, color: "blue" },
+              {
+                label: `${DOW_NAMES[preferredDOW]} tuần ${preferredWeekOfMonth || "ưa thích"} trong tháng`,
+                color: "blue",
+              },
               ...(destScore > 0 ? [{ label: "Điểm đến yêu thích", color: "blue" }] : []),
               ...(hourScore > 0 ? [{ label: `Khung giờ hay đi`, color: "purple" }] : []),
             ],
             recommendation_type: "day_pattern",
             badge: BADGE.DAY_PATTERN,
-            note: `Ngày ${preferredDay} hàng tháng`,
-            _tier: 1,
+            note: `${DOW_NAMES[preferredDOW]} tuần ${preferredWeekOfMonth || "ưa thích"} trong tháng`,
+            _tier: -1,
           };
         }));
       }
@@ -610,6 +650,15 @@ const getRecommendations = async ({
           end,
           limit,
         ),
+        [
+          preferredDestinations.length > 0 ? preferredDestinations : [""],
+          preferredDepartures.length > 0 ? preferredDepartures : [""],
+          preferredDOWs,
+          preferredHoursArr,
+          start,
+          end,
+          limit,
+        ],
       );
 
       if (patternResult.rows.length > 0) {
@@ -686,7 +735,7 @@ const getRecommendations = async ({
     badge:               flights.length > 0 ? BADGE.DAY_PATTERN : null,
     score:               flights.reduce((max, f) => Math.max(max, f.score || 0), 0),
     recommendation_type: "day_pattern",
-    _tier:               1,
+    _tier:               -1,
   }));
 
   // 4d. Gán group_id liên tục và _tier=4 cho time_proximity
@@ -699,9 +748,9 @@ const getRecommendations = async ({
 
   // 4e. Trộn tất cả groups theo thứ tự tier
   const allGroups = [
+    ...dayPatternGroups,
     ...personalizedGroups,
     ...userPatternGroups,
-    ...dayPatternGroups,
     ...tpGroups,
   ];
 
@@ -788,6 +837,7 @@ const getRecommendations = async ({
         preferred_routes:       preferredRoutes,
         preferred_hours:        preferredHours,
         preferred_day:          preferredDay,
+        preferred_week_of_month: preferredWeekOfMonth,
         preferred_dow:          preferredDOW,
         avg_spending:           avgSpending,
         month_range: {
