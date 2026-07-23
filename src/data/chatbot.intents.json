@@ -1,0 +1,314 @@
+{
+  "bot_name": "Vivudee Assistant",
+  "version": "1.1.0",
+  "language": "vi",
+  "routing": {
+    "priority": ["faq", "admin", "ai", "fallback"],
+    "faq_confidence_threshold": 0.82,
+    "ai_confidence_threshold": 0.45,
+    "booking_code_regex": "\\b[A-Z0-9]{6,8}\\b",
+    "admin_keywords": [
+      "mã booking",
+      "mã đặt chỗ",
+      "booking",
+      "pnr",
+      "thanh toán",
+      "chuyển khoản",
+      "bị trừ tiền",
+      "hoàn tiền",
+      "refund",
+      "đổi tên",
+      "đổi ngày",
+      "đổi hành trình",
+      "không nhận vé",
+      "không thấy vé",
+      "khiếu nại",
+      "gấp",
+      "khẩn cấp"
+    ],
+    "provider_order": ["gemini", "groq", "openrouter"]
+  },
+  "quick_replies": {
+    "home": [
+      "Tìm vé máy bay",
+      "Tra cứu booking",
+      "Tiếp tục thanh toán",
+      "Hủy đặt chỗ",
+      "Tôi chưa nhận vé điện tử",
+      "Mã giảm giá của tôi",
+      "Quên mật khẩu",
+      "Liên hệ hỗ trợ"
+    ],
+    "payment": [
+      "Cách thanh toán VietQR",
+      "Coupon không áp dụng được",
+      "Tôi đã chuyển khoản rồi",
+      "Booking bị hết hạn",
+      "Liên hệ hỗ trợ thanh toán"
+    ],
+    "booking": [
+      "Tra cứu bằng mã booking",
+      "Hủy booking",
+      "Tiếp tục thanh toán",
+      "Kiểm tra trạng thái booking",
+      "Tôi không tìm thấy booking"
+    ]
+  },
+  "faq_intents": [
+    {
+      "intent": "search_flight",
+      "examples": [
+        "tìm vé máy bay",
+        "đặt vé máy bay",
+        "mua vé đi đà nẵng",
+        "tìm chuyến bay",
+        "tôi muốn tìm vé"
+      ],
+      "response": "Vivudee hỗ trợ tìm vé máy bay giá rẻ theo hành trình một chiều hoặc khứ hồi. Bạn chỉ cần nhập điểm đi, điểm đến, ngày bay và số hành khách để xem các chuyến phù hợp."
+    },
+    {
+      "intent": "one_way_round_trip",
+      "examples": [
+        "có vé một chiều không",
+        "có vé khứ hồi không",
+        "đặt vé khứ hồi thế nào",
+        "tôi muốn đi một chiều"
+      ],
+      "response": "Vivudee hỗ trợ cả hành trình một chiều và khứ hồi. Bạn có thể chọn loại chuyến ngay tại khu vực tìm kiếm chuyến bay."
+    },
+    {
+      "intent": "tour_available",
+      "examples": [
+        "có tour không",
+        "vivudee có tour không",
+        "xem tour ở đâu",
+        "đặt tour"
+      ],
+      "response": "Có nhé. Ngoài vé máy bay, Vivudee còn có mục Tour để bạn khám phá các gói du lịch đang mở bán."
+    },
+    {
+      "intent": "booking_lookup",
+      "examples": [
+        "tra cứu booking",
+        "kiểm tra booking",
+        "xem đặt chỗ của tôi",
+        "tôi muốn tra cứu mã đặt chỗ"
+      ],
+      "response": "Bạn vào mục Đặt chỗ của tôi hoặc Tra cứu đặt chỗ, sau đó nhập mã đặt chỗ để kiểm tra tình trạng booking."
+    },
+    {
+      "intent": "booking_not_found",
+      "examples": [
+        "booking không tìm thấy",
+        "không thấy booking",
+        "mã đặt chỗ không ra",
+        "tra cứu không thấy"
+      ],
+      "response": "Bạn vui lòng kiểm tra lại mã đặt chỗ. Nếu vẫn chưa thấy, hãy gửi cho tụi mình mã booking và email hoặc số điện thoại đã dùng để đặt vé để được hỗ trợ nhanh hơn."
+    },
+    {
+      "intent": "cancel_booking",
+      "examples": [
+        "hủy booking",
+        "hủy đặt chỗ",
+        "tôi muốn hủy vé",
+        "cách hủy booking"
+      ],
+      "response": "Bạn vào Đặt chỗ của tôi, chọn booking cần hủy rồi bấm Hủy đặt chỗ. Phí hủy sẽ phụ thuộc vào chính sách của hãng bay và thời điểm bạn hủy."
+    },
+    {
+      "intent": "change_passenger_info",
+      "examples": [
+        "đổi tên hành khách",
+        "sửa thông tin hành khách",
+        "đổi ngày bay",
+        "đổi hành trình"
+      ],
+      "response": "Việc đổi tên hoặc chỉnh thông tin hành khách phụ thuộc vào chính sách từng hãng bay. Bạn để lại mã booking để bộ phận hỗ trợ kiểm tra giúp bạn."
+    },
+    {
+      "intent": "continue_payment",
+      "examples": [
+        "tiếp tục thanh toán",
+        "thanh toán booking chờ",
+        "pay booking pending",
+        "booking chờ thanh toán"
+      ],
+      "response": "Bạn vào Đặt chỗ của tôi, chọn booking đang ở trạng thái Chờ thanh toán, sau đó bấm Tiếp tục thanh toán."
+    },
+    {
+      "intent": "booking_expired",
+      "examples": [
+        "booking hết hạn",
+        "đặt chỗ hết hạn",
+        "quá hạn thanh toán",
+        "booking expired"
+      ],
+      "response": "Booking của bạn đã quá thời gian giữ chỗ thanh toán. Bạn vui lòng tìm lại chuyến bay để tạo booking mới."
+    },
+    {
+      "intent": "payment_methods",
+      "examples": [
+        "thanh toán bằng gì",
+        "có những cách thanh toán nào",
+        "hỗ trợ phương thức thanh toán nào",
+        "có vietqr không"
+      ],
+      "response": "Hiện tại Vivudee đang hỗ trợ thanh toán qua VietQR. Một số phương thức khác đang trong quá trình phát triển."
+    },
+    {
+      "intent": "vietqr_guide",
+      "examples": [
+        "thanh toán vietqr thế nào",
+        "cách dùng vietqr",
+        "quét qr thanh toán sao",
+        "vietqr hoạt động thế nào"
+      ],
+      "response": "Sau khi chọn VietQR, hệ thống sẽ tạo mã QR kèm thông tin chuyển khoản. Bạn mở app ngân hàng, quét mã và hoàn tất thanh toán. Hệ thống thường xác nhận tự động sau ít phút."
+    },
+    {
+      "intent": "payment_pending",
+      "examples": [
+        "đã thanh toán nhưng chưa cập nhật",
+        "chuyển khoản rồi chưa thấy",
+        "trả tiền rồi mà chưa có vé",
+        "thanh toán xong chưa xác nhận"
+      ],
+      "response": "Bạn vui lòng chờ thêm ít phút để hệ thống đối soát. Nếu vẫn chưa cập nhật, hãy gửi mã booking hoặc ảnh xác nhận giao dịch để tụi mình kiểm tra."
+    },
+    {
+      "intent": "coupon_issue",
+      "examples": [
+        "coupon không dùng được",
+        "mã giảm giá không áp dụng",
+        "promo code lỗi",
+        "không nhập được coupon"
+      ],
+      "response": "Bạn hãy thử kiểm tra lại chính tả mã, điều kiện áp dụng và giá trị đơn hàng tối thiểu. Nếu vẫn chưa được, gửi mã coupon để tụi mình hỗ trợ kiểm tra."
+    },
+    {
+      "intent": "eticket_delivery",
+      "examples": [
+        "nhận vé điện tử ở đâu",
+        "vé điện tử gửi về đâu",
+        "không thấy e-ticket",
+        "bao giờ nhận vé"
+      ],
+      "response": "Sau khi thanh toán thành công, e-ticket sẽ được gửi tự động về email bạn đã nhập khi đặt vé. Bạn nhớ kiểm tra cả thư mục Spam hoặc Junk nhé."
+    },
+    {
+      "intent": "forgot_password",
+      "examples": [
+        "quên mật khẩu",
+        "reset mật khẩu",
+        "đặt lại mật khẩu",
+        "không đăng nhập được vì quên pass"
+      ],
+      "response": "Bạn chọn Quên mật khẩu tại màn hình đăng nhập, sau đó làm theo hướng dẫn nhận OTP để đặt lại mật khẩu."
+    },
+    {
+      "intent": "otp_not_received",
+      "examples": [
+        "không nhận otp",
+        "otp chưa về",
+        "email otp không tới",
+        "không thấy mã xác nhận"
+      ],
+      "response": "Bạn vui lòng kiểm tra lại email đã nhập, thư mục Spam hoặc Junk, và thử gửi lại OTP sau ít phút. Nếu vẫn chưa nhận được, mình sẽ chuyển bạn sang hỗ trợ thủ công."
+    },
+    {
+      "intent": "social_login",
+      "examples": [
+        "đăng nhập google",
+        "đăng nhập facebook",
+        "login google",
+        "login facebook"
+      ],
+      "response": "Có. Hệ thống có hỗ trợ tiếp tục với Google và Facebook ở màn hình đăng nhập hoặc đăng ký."
+    },
+    {
+      "intent": "transaction_history",
+      "examples": [
+        "xem lịch sử giao dịch",
+        "giao dịch của tôi",
+        "xem thanh toán cũ",
+        "transaction history"
+      ],
+      "response": "Bạn vào mục Giao dịch để xem toàn bộ lịch sử thanh toán, bao gồm các trạng thái đã thanh toán, chờ xử lý hoặc đã hủy."
+    },
+    {
+      "intent": "update_profile",
+      "examples": [
+        "cập nhật hồ sơ",
+        "sửa thông tin cá nhân",
+        "đổi email tài khoản",
+        "đổi số điện thoại"
+      ],
+      "response": "Bạn vào mục Hồ sơ để cập nhật thông tin cá nhân như họ tên, email, số điện thoại, giới tính, ngày sinh và đổi mật khẩu."
+    },
+    {
+      "intent": "contact_support",
+      "examples": [
+        "liên hệ hỗ trợ",
+        "hotline là gì",
+        "số điện thoại hỗ trợ",
+        "email hỗ trợ"
+      ],
+      "response": "Bạn có thể gọi hotline 1900 6789, gửi email hỗ trợ hoặc để lại lời nhắn tại trang Liên hệ."
+    },
+    {
+      "intent": "support_hours",
+      "examples": [
+        "giờ làm việc",
+        "mấy giờ hỗ trợ",
+        "hotline mấy giờ mở",
+        "hỗ trợ lúc nào"
+      ],
+      "response": "Hotline hiện hiển thị khung giờ Thứ 2 đến Chủ nhật, từ 7:00 đến 22:00."
+    }
+  ],
+  "admin_handoff": {
+    "responses": {
+      "generic": "Mình đã ghi nhận trường hợp này. Vì liên quan tới booking hoặc thanh toán cụ thể, mình sẽ chuyển bạn sang bộ phận hỗ trợ để kiểm tra chính xác hơn nhé.",
+      "need_booking_info": "Để hỗ trợ nhanh nhất, bạn giúp mình gửi mã booking, email hoặc số điện thoại đặt vé, và ảnh giao dịch nếu có. Mình sẽ chuyển ngay cho bộ phận hỗ trợ.",
+      "payment_issue": "Mình xin lỗi vì bất tiện này. Trường hợp của bạn cần kiểm tra trực tiếp trên booking hoặc giao dịch, nên mình sẽ ưu tiên chuyển hỗ trợ ngay. Bạn giúp mình gửi mã booking và ảnh giao dịch để xử lý nhanh nhất nhé.",
+      "angry_customer": "Mình rất tiếc vì trải nghiệm này. Mình sẽ ưu tiên chuyển trường hợp của bạn sang bộ phận hỗ trợ ngay. Bạn gửi giúp mình mã booking và thông tin liên quan để bên mình kiểm tra nhanh nhất nhé."
+    }
+  },
+  "fallbacks": {
+    "generic": [
+      "Hiện mình chưa xử lý được câu hỏi này tự động. Bạn có thể chọn một trong các chủ đề sau để mình hỗ trợ nhanh hơn: Tìm chuyến bay, Tra cứu booking, Thanh toán, Mã giảm giá, Tài khoản hoặc Liên hệ hỗ trợ.",
+      "Mình chưa hiểu chính xác ý của bạn. Bạn đang cần hỗ trợ về: Vé máy bay, Booking, Thanh toán, Tài khoản, Tour hay Liên hệ hỗ trợ?",
+      "Bạn có thể thao tác nhanh tại: Tìm chuyến bay nếu muốn đặt vé mới, Đặt chỗ của tôi nếu muốn tra cứu hoặc hủy, Hồ sơ nếu muốn cập nhật thông tin, hoặc Liên hệ nếu cần hỗ trợ trực tiếp."
+    ],
+    "ai_unavailable": [
+      "Hệ thống tư vấn tự động đang tạm bận. Trong lúc đó, bạn có thể nhập hành trình để tìm vé ngay, tra cứu booking bằng mã đặt chỗ, hoặc để lại nội dung cần hỗ trợ để mình chuyển tiếp cho bộ phận chăm sóc khách hàng.",
+      "Hiện AI đang tạm không khả dụng. Bạn giúp mình chọn nhanh một mục: Tìm vé máy bay, Tra cứu booking, Thanh toán, Mã giảm giá, Quên mật khẩu, Liên hệ hỗ trợ."
+    ],
+    "booking": [
+      "Nếu bạn đang cần hỗ trợ booking cụ thể, bạn vui lòng gửi mã booking, email hoặc số điện thoại đặt vé, và nội dung cần hỗ trợ để bộ phận hỗ trợ kiểm tra nhanh hơn."
+    ],
+    "payment": [
+      "Nếu bạn đang gặp vấn đề thanh toán, bạn vui lòng gửi mã booking, thời gian thanh toán, số tiền và ảnh giao dịch nếu có để được hỗ trợ chính xác hơn."
+    ],
+    "coupon": [
+      "Bạn vui lòng gửi giúp mình mã giảm giá bạn đang dùng và booking hoặc trị giá đơn hàng để mình kiểm tra điều kiện áp dụng nhé."
+    ],
+    "login": [
+      "Bạn đang gặp vấn đề ở bước nào: Không đăng nhập được, Quên mật khẩu, Không nhận OTP hay lỗi Google hoặc Facebook login?"
+    ]
+  },
+  "ai_flow": {
+    "enabled": true,
+    "provider": "gemini",
+    "temperature": 0.4,
+    "max_history": 8,
+    "system_prompt": "Bạn là trợ lý CSKH của Vivudee. Trả lời ngắn, rõ, thân thiện, bằng tiếng Việt. Ưu tiên hướng người dùng tới luồng tự phục vụ trên web: Tìm chuyến bay, Đặt chỗ của tôi, Thanh toán, Hồ sơ, Liên hệ. Không bịa chính sách hãng bay. Nếu câu hỏi liên quan đổi tên, hoàn tiền, hủy có phí, lỗi giao dịch, hãy đề nghị kiểm tra mã booking hoặc chuyển hỗ trợ người thật. Nếu người dùng chỉ hỏi thông tin cơ bản, trả lời trực tiếp. Nếu người dùng đưa ra mã booking, số tiền, ảnh chuyển khoản, thái độ bức xúc hoặc thanh toán lỗi, chuyển sang Admin. Nếu AI không chắc, nói rõ chưa chắc và đề nghị chuyển hỗ trợ.",
+    "response_pattern": [
+      "Xác nhận nhu cầu",
+      "Trả lời chính",
+      "Đưa ra một bước tiếp theo cụ thể",
+      "Nếu có rủi ro thì mời chuyển Admin"
+    ]
+  }
+}

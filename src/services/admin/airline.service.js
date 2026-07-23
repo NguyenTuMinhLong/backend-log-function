@@ -1,0 +1,157 @@
+const pool = require("../../config/db");
+const Q    = require("../../queries/airline.queries");
+
+// ─── Reference tier map (dùng để auto-detect khi tạo hãng mới) ───────────────
+
+const AIRLINE_TIER_REF = {
+  VN:1.00, QH:0.82, VJ:0.63, BL:0.58, VU:0.67,
+  SQ:1.40, TR:0.60, TG:1.18, WE:0.78, DD:0.60, SL:0.58, FD:0.55, PG:0.90,
+  MH:1.05, AK:0.55, OD:0.72, GA:1.02, JT:0.58, ID:0.72,
+  PR:0.90, Z2:0.55, BI:0.92, QV:0.85, K6:0.88, '3K':0.60,
+  CX:1.42, KE:1.22, OZ:1.12, '7C':0.68, LJ:0.68, RS:0.65, TW:0.65, BX:0.68,
+  JL:1.28, NH:1.25, MM:0.58, GK:0.58, BC:0.70,
+  CI:1.08, BR:1.18, JX:1.12, IT:0.62,
+  MU:0.90, CA:0.90, CZ:0.88, HU:0.88, HO:0.82, FM:0.82, MF:0.80,
+  QR:1.65, EK:1.60, EY:1.55, TK:1.40, SV:1.10, GF:1.02, WY:0.98, FZ:0.72,
+  BA:1.90, LH:1.85, AF:1.80, KL:1.78, LX:1.70, SK:1.55, IB:1.52, OS:1.52,
+  AY:1.45, SN:1.42, AZ:1.40, TP:1.38, FR:0.62, W6:0.65, U2:0.72, VY:0.75, DY:0.75,
+  AA:2.20, UA:2.20, DL:2.20, AC:1.55, AS:1.20, WN:0.85, WS:0.82, B6:0.80, NK:0.55, F9:0.55,
+  QF:1.52, NZ:1.28, VA:0.90, JQ:0.60, AI:1.05, UK:0.90, ET:0.95, LA:1.40,
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const validateAirlineInput = (data, isUpdate = false) => {
+  const { code, name } = data;
+
+  if (!isUpdate) {
+    if (!code) throw new Error("code là bắt buộc (VD: VN, VJ, SQ)");
+    if (!name) throw new Error("name là bắt buộc");
+  }
+
+  if (code && (code.length < 2 || code.length > 10)) {
+    throw new Error("code phải từ 2-10 ký tự");
+  }
+};
+
+// ─── Exported Functions ───────────────────────────────────────────────────────
+
+/**
+ * Xem danh sách hãng bay (có filter + phân trang)
+ */
+const getAirlines = async (params) => {
+  const {
+    page      = 1,
+    limit     = 20,
+    code,
+    name,
+    is_active,
+  } = params;
+
+  const offset     = (parseInt(page) - 1) * parseInt(limit);
+  const conditions = [];
+  const values     = [];
+  let   idx        = 1;
+
+  if (code) { conditions.push(`code ILIKE $${idx++}`);               values.push(`%${code}%`); }
+  if (name) { conditions.push(`LOWER(name) LIKE LOWER($${idx++})`);  values.push(`%${name}%`); }
+  if (is_active !== undefined && is_active !== "") {
+    conditions.push(`is_active = $${idx++}`);
+    values.push(is_active === "true" || is_active === true);
+  }
+
+  const dk = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const countResult = await pool.query(Q.COUNT_AIRLINES(dk), values);
+  const total       = parseInt(countResult.rows[0].count);
+
+  const dataResult = await pool.query(
+    Q.SELECT_AIRLINES(dk, idx, idx + 1),
+    [...values, parseInt(limit), offset]
+  );
+
+  return {
+    data: dataResult.rows,
+    pagination: {
+      total,
+      page:        parseInt(page),
+      limit:       parseInt(limit),
+      total_pages: Math.ceil(total / parseInt(limit)),
+    },
+  };
+};
+
+/**
+ * Thêm hãng hàng không mới
+ */
+const createAirline = async (data) => {
+  validateAirlineInput(data);
+
+  const { code, name, country, logo_url, logo_dark, logo_light, price_tier } = data;
+
+  const existing = await pool.query(Q.FIND_AIRLINE_BY_CODE, [code]);
+  if (existing.rows.length > 0) {
+    throw new Error(`Hãng bay với code "${code.toUpperCase()}" đã tồn tại`);
+  }
+
+  const tier = price_tier !== undefined && price_tier !== null && price_tier !== ''
+    ? parseFloat(price_tier)
+    : (AIRLINE_TIER_REF[code.toUpperCase()] ?? 1.00);
+
+  const result = await pool.query(Q.INSERT_AIRLINE, [code, name, country || null, logo_url || null, logo_dark || null, logo_light || null, tier]);
+  return result.rows[0];
+};
+
+/**
+ * Cập nhật thông tin hãng bay
+ */
+const updateAirline = async (airlineId, data) => {
+  validateAirlineInput(data, true);
+
+  const existing = await pool.query(Q.FIND_AIRLINE_BY_ID, [airlineId]);
+  if (existing.rows.length === 0) throw new Error("Không tìm thấy hãng hàng không");
+
+  const { name, country, logo_url, logo_dark, logo_light, price_tier } = data;
+
+  const fields = [];
+  const values = [];
+  let   idx    = 1;
+
+  if (name       !== undefined) { fields.push(`name=$${idx++}`);       values.push(name); }
+  if (country    !== undefined) { fields.push(`country=$${idx++}`);    values.push(country); }
+  if (logo_url   !== undefined) { fields.push(`logo_url=$${idx++}`);   values.push(logo_url); }
+  if (logo_dark  !== undefined) { fields.push(`logo_dark=$${idx++}`);  values.push(logo_dark); }
+  if (logo_light !== undefined) { fields.push(`logo_light=$${idx++}`); values.push(logo_light); }
+  if (price_tier !== undefined && price_tier !== '') {
+    fields.push(`price_tier=$${idx++}`)
+    values.push(parseFloat(price_tier))
+  }
+
+  if (fields.length === 0) throw new Error("Không có thông tin nào để cập nhật");
+
+  values.push(airlineId);
+  const result = await pool.query(Q.UPDATE_AIRLINE_FIELDS(fields, idx), values);
+  return result.rows[0];
+};
+
+/**
+ * Chuyển trạng thái hãng bay (active ↔ inactive)
+ */
+const updateAirlineStatus = async (airlineId, is_active) => {
+  if (typeof is_active !== "boolean" && is_active !== "true" && is_active !== "false") {
+    throw new Error("is_active phải là true hoặc false");
+  }
+
+  const status = is_active === true || is_active === "true";
+
+  const result = await pool.query(Q.UPDATE_AIRLINE_STATUS, [status, airlineId]);
+
+  if (result.rows.length === 0) throw new Error("Không tìm thấy hãng hàng không");
+
+  return {
+    message: status ? "Đã kích hoạt hãng bay" : "Đã vô hiệu hóa hãng bay",
+    airline: result.rows[0],
+  };
+};
+
+module.exports = { getAirlines, createAirline, updateAirline, updateAirlineStatus };

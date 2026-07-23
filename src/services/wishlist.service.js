@@ -1,0 +1,158 @@
+"use strict";
+
+const pool = require("../config/db");
+const Q    = require("../queries/wishlist.queries");
+const { applyDynamicPricingWithSeason } = require("../utils/pricing");
+
+// Cùng công thức với flight.service.js/recommendation.service.js — phải build
+// lại ở đây vì wishlist.queries trả riêng fs.extra_baggage_price, không có sẵn
+// mảng option.
+const buildBaggageOptions = (extraBaggagePrice) => {
+  const pricePerKg = parseFloat(extraBaggagePrice) || 0;
+  return [
+    { kg: 0,  label: "No extra", price_per_person: 0 },
+    { kg: 5,  label: "+5 kg",     price_per_person: 5  * pricePerKg },
+    { kg: 10, label: "+10 kg",    price_per_person: 10 * pricePerKg },
+    { kg: 15, label: "+15 kg",    price_per_person: 15 * pricePerKg },
+    { kg: 20, label: "+20 kg",    price_per_person: 20 * pricePerKg },
+  ];
+};
+
+// Giá hiển thị phải qua applyDynamicPricingWithSeason (mùa/ngày/nhu cầu) giống
+// flight.service.js — không dùng fs.base_price thô, nếu không "giá hiện tại" ở
+// wishlist sẽ thấp hơn giá thật và còn bị mang theo sai khi bấm Select để đặt vé.
+const formatItem = async (row) => {
+  const rawBase = row.base_price ? parseFloat(row.base_price) : null;
+  const price = rawBase !== null
+    ? await applyDynamicPricingWithSeason(rawBase, row.available_seats, row.total_seats, row.departure_time)
+    : null;
+  const extraPrice = parseFloat(row.extra_baggage_price) || 0;
+
+  return {
+    id:         row.id,
+    seat_class: row.seat_class,
+    added_at:   row.created_at,
+    flight: {
+      id:               row.flight_id,
+      flight_number:    row.flight_number,
+      departure_time:   row.departure_time,
+      arrival_time:     row.arrival_time,
+      duration_minutes: row.duration_minutes,
+      status:           row.flight_status,
+      airline: {
+        code:     row.airline_code,
+        name:     row.airline_name,
+        logo_url:   row.logo_url,
+        logo_dark:  row.logo_dark,
+        logo_light: row.logo_light,
+      },
+      departure:       { code: row.dep_code, city: row.dep_city },
+      arrival:         { code: row.arr_code, city: row.arr_city },
+      base_price:      price,
+      available_seats: row.available_seats ? parseInt(row.available_seats) : null,
+      seat: {
+        class:                  row.seat_class,
+        total_price:            price,
+        baggage_included_kg:    row.baggage_included_kg,
+        carry_on_kg:            row.carry_on_kg,
+        extra_baggage_price:    extraPrice,
+        extra_baggage_options:  buildBaggageOptions(extraPrice),
+      },
+    },
+  };
+};
+
+// Thêm chuyến bay vào wishlist (chỉ user đã login)
+const addToWishlist = async (userId, flightId, seatClass = "economy") => {
+  const flightIdInt     = parseInt(flightId, 10);
+  const normalizedClass = String(seatClass).toLowerCase();
+
+  if (!flightIdInt || flightIdInt <= 0) throw new Error("flight_id không hợp lệ");
+  if (!["economy", "business", "first"].includes(normalizedClass)) {
+    throw new Error("seat_class phải là: economy, business, first");
+  }
+
+  // Kiểm tra flight tồn tại
+  const flightResult = await pool.query(Q.FIND_ACTIVE_FLIGHT, [flightIdInt, normalizedClass]);
+  if (flightResult.rows.length === 0) {
+    throw new Error("Chuyến bay không tồn tại hoặc đã ngừng hoạt động");
+  }
+
+  // Kiểm tra đã có chưa
+  const exists = await pool.query(Q.FIND_WISHLIST_BY_USER, [userId, flightIdInt, normalizedClass]);
+  if (exists.rows.length > 0) throw new Error("Chuyến bay đã có trong danh sách yêu thích");
+
+  const result = await pool.query(Q.INSERT_WISHLIST_USER, [userId, flightIdInt, normalizedClass]);
+  return { message: "Đã thêm vào danh sách yêu thích", item: result.rows[0] };
+};
+
+// Xóa chuyến bay khỏi wishlist
+const removeFromWishlist = async (userId, flightId, seatClass = "economy") => {
+  const flightIdInt     = parseInt(flightId, 10);
+  const normalizedClass = String(seatClass).toLowerCase();
+
+  const result = await pool.query(Q.DELETE_WISHLIST_BY_USER, [userId, flightIdInt, normalizedClass]);
+  if (result.rows.length === 0) throw new Error("Không tìm thấy chuyến bay trong danh sách yêu thích");
+
+  return { message: "Đã xóa khỏi danh sách yêu thích" };
+};
+
+// Xem wishlist của user
+// Hiển thị giá hiện tại so với giá lúc lưu
+const getWishlist = async (userId) => {
+  const result = await pool.query(Q.SELECT_WISHLIST_BY_USER, [userId]);
+
+  return {
+    total: result.rows.length,
+    items: await Promise.all(result.rows.map(formatItem)),
+  };
+};
+
+// Sync wishlist từ localStorage (guest) → server sau khi đăng nhập
+// Frontend gửi mảng items từ localStorage, backend merge vào DB
+const syncWishlist = async (userId, localItems = []) => {
+  if (!Array.isArray(localItems) || localItems.length === 0) {
+    return { synced: 0, skipped: 0, message: "Không có dữ liệu để sync" };
+  }
+
+  let synced  = 0;
+  let skipped = 0;
+
+  for (const item of localItems) {
+    try {
+      const flightIdInt     = parseInt(item.flight_id, 10);
+      const normalizedClass = String(item.seat_class || "economy").toLowerCase();
+
+      if (!flightIdInt || !["economy", "business", "first"].includes(normalizedClass)) {
+        skipped++;
+        continue;
+      }
+
+      // Kiểm tra flight còn active không
+      const flightCheck = await pool.query(Q.FIND_ACTIVE_FLIGHT, [flightIdInt, normalizedClass]);
+      if (flightCheck.rows.length === 0) {
+        skipped++;
+        continue;
+      }
+
+      // Insert, bỏ qua nếu đã có (ON CONFLICT DO NOTHING)
+      // rowCount = 0 nghĩa là đã tồn tại → skipped, rowCount = 1 → synced mới
+      const insertResult = await pool.query(Q.SYNC_WISHLIST_GUEST_TO_USER, [userId, flightIdInt, normalizedClass]);
+      if (insertResult.rowCount > 0) {
+        synced++;
+      } else {
+        skipped++; // Đã có trong wishlist rồi
+      }
+    } catch {
+      skipped++;
+    }
+  }
+
+  return {
+    synced,
+    skipped,
+    message: `Đồng bộ thành công ${synced} chuyến bay${skipped > 0 ? `, bỏ qua ${skipped} mục không hợp lệ` : ""}`,
+  };
+};
+
+module.exports = { addToWishlist, removeFromWishlist, getWishlist, syncWishlist };
