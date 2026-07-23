@@ -90,6 +90,8 @@ const BADGE = {
 };
 
 const DOW_NAMES = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+// Tên đầy đủ cho label hiển thị — tránh in "Thứ T2"/"Thứ CN" (lặp chữ "Thứ")
+const DOW_FULL  = ["Chủ nhật", "Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7"];
 
 // Helper: chuyển giờ UTC trong timestamp string → giờ Việt Nam (UTC+7)
 // departure_time được pg driver trả về dạng ISO UTC string
@@ -426,7 +428,7 @@ const getRecommendations = async ({
     if (preferredDOW !== null) {
       const dowFlight = getLocalDOW(f.departure_time);
       if (dowFlight === preferredDOW) {
-        badges.push({ label: `Thứ ${DOW_NAMES[preferredDOW]} bạn hay đi`, color: "orange" });
+        badges.push({ label: `${DOW_FULL[preferredDOW]} bạn hay đi`, color: "orange" });
       }
     }
 
@@ -546,7 +548,7 @@ const getRecommendations = async ({
             score,
             badges: [
               {
-                label: `${DOW_NAMES[preferredDOW]} tuần ${preferredWeekOfMonth || "ưa thích"} trong tháng`,
+                label: `${DOW_FULL[preferredDOW]} tuần ${preferredWeekOfMonth || "ưa thích"} trong tháng`,
                 color: "blue",
               },
               ...(destScore > 0 ? [{ label: "Điểm đến yêu thích", color: "blue" }] : []),
@@ -554,7 +556,7 @@ const getRecommendations = async ({
             ],
             recommendation_type: "day_pattern",
             badge: BADGE.DAY_PATTERN,
-            note: `${DOW_NAMES[preferredDOW]} tuần ${preferredWeekOfMonth || "ưa thích"} trong tháng`,
+            note: `${DOW_FULL[preferredDOW]} tuần ${preferredWeekOfMonth || "ưa thích"} trong tháng`,
             _tier: -1,
           };
         }));

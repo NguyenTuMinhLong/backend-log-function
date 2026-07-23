@@ -1,4 +1,4 @@
-﻿const db = require('../config/db');
+const db = require('../config/db');
 const crypto = require('crypto');
 const queries = require('../queries/loyalty.queries');
 
